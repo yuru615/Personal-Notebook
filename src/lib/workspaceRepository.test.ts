@@ -21,7 +21,7 @@ function createSnapshot(): WorkspaceSnapshot {
           { id: 'block_3', type: 'bulleted_list', items: ['one', 'two'] },
           { id: 'block_4', type: 'numbered_list', items: ['first', 'second'] },
           { id: 'block_5', type: 'child_page', pageId: 'page_child' },
-          { id: 'block_6', type: 'code', text: 'const answer = 42' },
+          { id: 'block_6', type: 'code', language: 'ts', text: 'const answer = 42' },
           { id: 'block_7', type: 'table', rows: [['A', 'B']] },
         ],
         createdAt: now,
@@ -50,6 +50,22 @@ describe('createDexieWorkspaceRepository', () => {
 
     expect(snapshot).toEqual(seed)
     expect(await repository.load()).toEqual(seed)
+  })
+
+  it('preserves an explicitly empty persisted workspace', async () => {
+    const repository = createDexieWorkspaceRepository()
+    const emptySnapshot: WorkspaceSnapshot = {
+      pages: [],
+      settings: {
+        lastOpenedPageId: null,
+      },
+    }
+
+    expect(await repository.load()).toBeNull()
+
+    await repository.save(emptySnapshot)
+
+    expect(await repository.load()).toEqual(emptySnapshot)
   })
 
   it('round-trips save and load with lastOpenedPageId', async () => {

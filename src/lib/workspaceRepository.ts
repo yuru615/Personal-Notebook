@@ -39,7 +39,7 @@ export function createDexieWorkspaceRepository(): WorkspaceRepository {
         db.settings.get(SETTINGS_ID),
       ])
 
-      if (!settings || pages.length === 0) {
+      if (!settings) {
         return null
       }
 
