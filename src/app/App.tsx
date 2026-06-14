@@ -1,9 +1,7 @@
-import '../styles/index.css'
-
 export function App() {
   return (
     <div className="app-shell">
-      <aside className="sidebar" aria-label="导航栏">
+      <aside className="sidebar" aria-label="侧边栏">
         <div className="sidebar-group">
           <button type="button" className="sidebar-link">
             搜索
