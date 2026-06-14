@@ -1,29 +1,30 @@
 import { createStore } from 'zustand/vanilla'
 import { createId } from '../utils/id'
 import { createSeedWorkspace } from '../domain/seed'
-import type {
-  PageId,
-  PageRecord,
-  SaveStatus,
-  WorkspaceSnapshot,
-} from '../domain/types'
+import type { PageId, PageRecord, SaveStatus, WorkspaceSettings } from '../domain/types'
 import { ensureSnapshot, type WorkspaceRepository } from '../lib/workspaceRepository'
 
-export interface WorkspaceState extends WorkspaceSnapshot {
+export interface WorkspaceState {
+  pages: PageRecord[]
+  settings: WorkspaceSettings
+  currentPageId: PageId | null
   saveStatus: SaveStatus
   bootstrap: () => Promise<void>
   createPage: (parentId?: PageId) => Promise<PageRecord>
 }
 
-function createEmptyState(): WorkspaceSnapshot {
+function createEmptyState(): WorkspaceState {
   return {
     pages: [],
     settings: {
-      workspaceName: '',
-      createdAt: '',
-      updatedAt: '',
+      lastOpenedPageId: null,
     },
     currentPageId: null,
+    saveStatus: 'idle',
+    bootstrap: async () => undefined,
+    createPage: async () => {
+      throw new Error('not implemented')
+    },
   }
 }
 
@@ -34,6 +35,8 @@ function createPageRecord(parentId?: PageId): PageRecord {
     id: createId('page'),
     parentId: parentId ?? null,
     title: '未命名',
+    icon: null,
+    cover: null,
     blocks: [],
     createdAt: now,
     updatedAt: now,
@@ -43,15 +46,15 @@ function createPageRecord(parentId?: PageId): PageRecord {
 export function createWorkspaceStore(repository: WorkspaceRepository) {
   return createStore<WorkspaceState>()((set, get) => ({
     ...createEmptyState(),
-    saveStatus: 'idle',
 
     bootstrap: async () => {
       const snapshot = await ensureSnapshot(repository, createSeedWorkspace())
+      const currentPageId = snapshot.settings.lastOpenedPageId ?? snapshot.pages[0]?.id ?? null
 
       set({
         pages: snapshot.pages,
         settings: snapshot.settings,
-        currentPageId: snapshot.currentPageId,
+        currentPageId,
         saveStatus: 'saved',
       })
     },
@@ -59,10 +62,12 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
     createPage: async (parentId?: PageId) => {
       const page = createPageRecord(parentId)
       const state = get()
-      const nextSnapshot: WorkspaceSnapshot = {
+      const nextSettings: WorkspaceSettings = {
+        lastOpenedPageId: page.id,
+      }
+      const nextSnapshot = {
         pages: [...state.pages, page],
-        settings: state.settings,
-        currentPageId: page.id,
+        settings: nextSettings,
       }
 
       set({ saveStatus: 'saving' })
@@ -71,8 +76,8 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         await repository.save(nextSnapshot)
         set({
           pages: nextSnapshot.pages,
-          settings: nextSnapshot.settings,
-          currentPageId: nextSnapshot.currentPageId,
+          settings: nextSettings,
+          currentPageId: page.id,
           saveStatus: 'saved',
         })
       } catch {

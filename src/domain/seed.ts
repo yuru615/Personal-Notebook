@@ -8,6 +8,8 @@ export function createSeedPage(): PageRecord {
     id: createId('page'),
     parentId: null,
     title: '快速开始',
+    icon: '📄',
+    cover: null,
     blocks: [
       {
         id: createId('block'),
@@ -27,16 +29,12 @@ export function createSeedPage(): PageRecord {
 }
 
 export function createSeedWorkspace(): WorkspaceSnapshot {
-  const now = new Date().toISOString()
   const page = createSeedPage()
 
   return {
     pages: [page],
     settings: {
-      workspaceName: '我的知识库',
-      createdAt: now,
-      updatedAt: now,
+      lastOpenedPageId: page.id,
     },
-    currentPageId: page.id,
   }
 }

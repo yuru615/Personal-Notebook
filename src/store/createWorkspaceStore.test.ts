@@ -12,6 +12,7 @@ describe('createWorkspaceStore', () => {
     expect(store.getState().pages).toHaveLength(1)
     expect(store.getState().pages[0].title).toBe('快速开始')
     expect(store.getState().currentPageId).toBe(store.getState().pages[0].id)
+    expect(store.getState().settings.lastOpenedPageId).toBe(store.getState().pages[0].id)
   })
 
   it('creates a child page and links it to the parent', async () => {

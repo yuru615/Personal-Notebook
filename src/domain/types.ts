@@ -28,24 +28,22 @@ export interface TodoBlock extends BlockBase {
 
 export interface BulletedListBlock extends BlockBase {
   type: 'bulleted_list'
-  text: string
+  items: string[]
 }
 
 export interface NumberedListBlock extends BlockBase {
   type: 'numbered_list'
-  text: string
+  items: string[]
 }
 
 export interface ChildPageBlock extends BlockBase {
   type: 'child_page'
   pageId: PageId
-  title: string
 }
 
 export interface CodeBlock extends BlockBase {
   type: 'code'
-  language: string
-  code: string
+  text: string
 }
 
 export interface TableBlock extends BlockBase {
@@ -66,21 +64,20 @@ export interface PageRecord {
   id: PageId
   parentId: PageId | null
   title: string
+  icon: string | null
+  cover: string | null
   blocks: BlockRecord[]
   createdAt: string
   updatedAt: string
 }
 
 export interface WorkspaceSettings {
-  workspaceName: string
-  createdAt: string
-  updatedAt: string
+  lastOpenedPageId: PageId | null
 }
 
 export interface WorkspaceSnapshot {
   pages: PageRecord[]
   settings: WorkspaceSettings
-  currentPageId: PageId | null
 }
 
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'

@@ -1,7 +1,6 @@
-import { db } from './db'
+import { db, type WorkspaceSettingsRow } from './db'
 import { createSeedWorkspace } from '../domain/seed'
 import type { WorkspaceSnapshot } from '../domain/types'
-import type { WorkspaceSettingsRow } from './db'
 
 export interface WorkspaceRepository {
   load(): Promise<WorkspaceSnapshot | null>
@@ -25,6 +24,13 @@ export async function ensureSnapshot(
 
 const SETTINGS_ID = 'workspace'
 
+function toSettingsRow(snapshot: WorkspaceSnapshot): WorkspaceSettingsRow {
+  return {
+    id: SETTINGS_ID,
+    lastOpenedPageId: snapshot.settings.lastOpenedPageId,
+  }
+}
+
 export function createDexieWorkspaceRepository(): WorkspaceRepository {
   return {
     async load() {
@@ -37,12 +43,11 @@ export function createDexieWorkspaceRepository(): WorkspaceRepository {
         return null
       }
 
-      const { id: _id, currentPageId, ...rest } = settings
-
       return {
         pages,
-        settings: rest,
-        currentPageId,
+        settings: {
+          lastOpenedPageId: settings.lastOpenedPageId,
+        },
       }
     },
 
@@ -51,17 +56,11 @@ export function createDexieWorkspaceRepository(): WorkspaceRepository {
     },
 
     async replace(snapshot) {
-      const settingsRow: WorkspaceSettingsRow = {
-        id: SETTINGS_ID,
-        currentPageId: snapshot.currentPageId,
-        ...snapshot.settings,
-      }
-
       await db.transaction('rw', db.pages, db.settings, async () => {
         await db.pages.clear()
         await db.settings.clear()
         await db.pages.bulkPut(snapshot.pages)
-        await db.settings.put(settingsRow)
+        await db.settings.put(toSettingsRow(snapshot))
       })
     },
   }

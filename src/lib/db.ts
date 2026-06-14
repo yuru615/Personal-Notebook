@@ -3,7 +3,6 @@ import type { PageRecord, WorkspaceSettings } from '../domain/types'
 
 export type WorkspaceSettingsRow = WorkspaceSettings & {
   id: string
-  currentPageId: string | null
 }
 
 class WorkspaceDatabase extends Dexie {
