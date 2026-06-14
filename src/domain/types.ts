@@ -43,6 +43,7 @@ export interface ChildPageBlock extends BlockBase {
 
 export interface CodeBlock extends BlockBase {
   type: 'code'
+  language: string
   text: string
 }
 
