@@ -29,7 +29,7 @@ export function SidebarTree({ pages, currentPageId, onCreatePage }: SidebarTreeP
         </button>
       </div>
 
-      <nav className="sidebar-tree" aria-label="页面树">
+      <nav className="sidebar-tree" aria-label={uiCopy.sidebar.pageTree}>
         {pages.map((page) => (
           <NavLink
             key={page.id}

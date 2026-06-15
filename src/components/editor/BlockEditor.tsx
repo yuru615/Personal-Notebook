@@ -1,4 +1,5 @@
 import type { BlockRecord } from '../../domain/types'
+import { uiCopy } from '../../ui/copy'
 
 interface BlockEditorProps {
   blocks: BlockRecord[]
@@ -63,7 +64,7 @@ export function BlockEditor({ blocks }: BlockEditorProps) {
           case 'child_page':
             return (
               <div key={block.id} className="block-child-page">
-                {block.pageId}
+                {uiCopy.editor.childPage}
               </div>
             )
           default:

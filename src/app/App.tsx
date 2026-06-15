@@ -1,6 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import {
   BrowserRouter,
+  MemoryRouter,
   Navigate,
   Route,
   Routes,
@@ -12,16 +13,29 @@ import { PageHeader } from '../components/editor/PageHeader'
 import { AppShell } from '../components/layout/AppShell'
 import { SidebarTree } from '../components/sidebar/SidebarTree'
 import type { PageRecord } from '../domain/types'
-import { createDexieWorkspaceRepository } from '../lib/workspaceRepository'
+import {
+  createDexieWorkspaceRepository,
+  type WorkspaceRepository,
+} from '../lib/workspaceRepository'
 import { createWorkspaceStore } from '../store/createWorkspaceStore'
 import { uiCopy } from '../ui/copy'
 
-type AppState = ReturnType<ReturnType<typeof createWorkspaceStore>['getState']>
+type WorkspaceStore = ReturnType<typeof createWorkspaceStore>
+type AppState = ReturnType<WorkspaceStore['getState']>
 
-export function App() {
-  const [store] = useState(() => createWorkspaceStore(createDexieWorkspaceRepository()))
+interface AppProps {
+  repository?: WorkspaceRepository
+  store?: WorkspaceStore
+  initialEntries?: string[]
+}
+
+export function App({ repository, store: injectedStore, initialEntries }: AppProps = {}) {
+  const [store] = useState(
+    () => injectedStore ?? createWorkspaceStore(repository ?? createDexieWorkspaceRepository()),
+  )
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState)
   const [isBootstrapped, setIsBootstrapped] = useState(false)
+  const setCurrentPage = store.getState().setCurrentPage
 
   useEffect(() => {
     let isMounted = true
@@ -41,24 +55,30 @@ export function App() {
     return <div className="page-empty">{uiCopy.app.loading}</div>
   }
 
-  return (
-    <BrowserRouter>
-      <AppRoutes
-        pages={state.pages}
-        currentPageId={state.currentPageId}
-        onCreatePage={() => store.getState().createPage()}
-      />
-    </BrowserRouter>
+  const router = (
+    <AppRoutes
+      pages={state.pages}
+      currentPageId={state.currentPageId}
+      onCreatePage={() => store.getState().createPage()}
+      onRoutePageChange={setCurrentPage}
+    />
   )
+
+  if (initialEntries) {
+    return <MemoryRouter initialEntries={initialEntries}>{router}</MemoryRouter>
+  }
+
+  return <BrowserRouter>{router}</BrowserRouter>
 }
 
 interface AppRoutesProps {
   pages: AppState['pages']
   currentPageId: AppState['currentPageId']
   onCreatePage: () => Promise<PageRecord>
+  onRoutePageChange: (pageId: string) => Promise<void>
 }
 
-function AppRoutes({ pages, currentPageId, onCreatePage }: AppRoutesProps) {
+function AppRoutes({ pages, currentPageId, onCreatePage, onRoutePageChange }: AppRoutesProps) {
   const navigate = useNavigate()
 
   async function handleCreatePage() {
@@ -89,15 +109,38 @@ function AppRoutes({ pages, currentPageId, onCreatePage }: AppRoutesProps) {
             )
           }
         />
-        <Route path="/pages/:pageId" element={<PageRoute pages={pages} />} />
+        <Route
+          path="/pages/:pageId"
+          element={
+            <PageRoute
+              pages={pages}
+              currentPageId={currentPageId}
+              onRoutePageChange={onRoutePageChange}
+            />
+          }
+        />
       </Routes>
     </AppShell>
   )
 }
 
-function PageRoute({ pages }: { pages: PageRecord[] }) {
+interface PageRouteProps {
+  pages: PageRecord[]
+  currentPageId: string | null
+  onRoutePageChange: (pageId: string) => Promise<void>
+}
+
+function PageRoute({ pages, currentPageId, onRoutePageChange }: PageRouteProps) {
   const { pageId } = useParams()
   const page = pages.find((item) => item.id === pageId)
+
+  useEffect(() => {
+    if (!page || currentPageId === page.id) {
+      return
+    }
+
+    void onRoutePageChange(page.id)
+  }, [currentPageId, onRoutePageChange, page])
 
   if (!page) {
     return <div className="page-empty">{uiCopy.app.pageNotFound}</div>

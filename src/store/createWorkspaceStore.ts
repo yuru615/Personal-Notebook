@@ -11,6 +11,7 @@ export interface WorkspaceState {
   saveStatus: SaveStatus
   bootstrap: () => Promise<void>
   createPage: (parentId?: PageId) => Promise<PageRecord>
+  setCurrentPage: (pageId: PageId) => Promise<void>
 }
 
 function createEmptyState(): WorkspaceState {
@@ -23,6 +24,9 @@ function createEmptyState(): WorkspaceState {
     saveStatus: 'idle',
     bootstrap: async () => undefined,
     createPage: async () => {
+      throw new Error('not implemented')
+    },
+    setCurrentPage: async () => {
       throw new Error('not implemented')
     },
   }
@@ -86,6 +90,41 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       }
 
       return page
+    },
+
+    setCurrentPage: async (pageId: PageId) => {
+      const state = get()
+      const pageExists = state.pages.some((page) => page.id === pageId)
+
+      if (!pageExists) {
+        throw new Error('Page not found')
+      }
+
+      if (state.currentPageId === pageId && state.settings.lastOpenedPageId === pageId) {
+        return
+      }
+
+      const nextSettings: WorkspaceSettings = {
+        lastOpenedPageId: pageId,
+      }
+      const nextSnapshot = {
+        pages: state.pages,
+        settings: nextSettings,
+      }
+
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save(nextSnapshot)
+        set({
+          currentPageId: pageId,
+          settings: nextSettings,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to switch page')
+      }
     },
   }))
 }

@@ -27,4 +27,22 @@ describe('createWorkspaceStore', () => {
     expect(childPage.parentId).toBe(parentId)
     expect(childPage.title).toBe('未命名')
   })
+
+  it('updates the current page and persists last opened page', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const createdPage = await store.getState().createPage()
+    const firstPageId = store.getState().pages[0].id
+
+    await store.getState().setCurrentPage(firstPageId)
+
+    expect(store.getState().currentPageId).toBe(firstPageId)
+    expect(store.getState().settings.lastOpenedPageId).toBe(firstPageId)
+
+    const snapshot = await repository.load()
+    expect(snapshot?.settings.lastOpenedPageId).toBe(firstPageId)
+    expect(createdPage.id).not.toBe(firstPageId)
+  })
 })
