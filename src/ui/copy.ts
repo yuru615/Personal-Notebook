@@ -16,6 +16,7 @@ export const uiCopy = {
     untitled: '未命名',
     addIcon: '添加图标',
     addComment: '添加评论',
+    typeSlash: '输入 / 打开命令菜单',
   },
   editor: {
     childPage: '子页面',

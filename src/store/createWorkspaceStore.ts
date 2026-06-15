@@ -1,7 +1,7 @@
 import { createStore } from 'zustand/vanilla'
 import { createId } from '../utils/id'
 import { createSeedWorkspace } from '../domain/seed'
-import type { PageId, PageRecord, SaveStatus, WorkspaceSettings } from '../domain/types'
+import type { BlockRecord, PageId, PageRecord, SaveStatus, WorkspaceSettings } from '../domain/types'
 import { ensureSnapshot, type WorkspaceRepository } from '../lib/workspaceRepository'
 import { deletePageBranch } from '../utils/pageTree'
 
@@ -15,6 +15,7 @@ export interface WorkspaceState {
   setCurrentPage: (pageId: PageId) => Promise<void>
   renamePage: (pageId: PageId, title: string) => Promise<void>
   deletePage: (pageId: PageId) => Promise<void>
+  updateBlock: (pageId: PageId, blockId: string, nextBlock: BlockRecord) => Promise<void>
 }
 
 function createEmptyState(): WorkspaceState {
@@ -36,6 +37,9 @@ function createEmptyState(): WorkspaceState {
       throw new Error('not implemented')
     },
     deletePage: async () => {
+      throw new Error('not implemented')
+    },
+    updateBlock: async () => {
       throw new Error('not implemented')
     },
   }
@@ -196,6 +200,36 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       } catch {
         set({ saveStatus: 'error' })
         throw new Error('Failed to delete page')
+      }
+    },
+
+    updateBlock: async (pageId: PageId, blockId: string, nextBlock: BlockRecord) => {
+      const state = get()
+      const nextPages = state.pages.map((page) =>
+        page.id === pageId
+          ? {
+              ...page,
+              updatedAt: new Date().toISOString(),
+              blocks: page.blocks.map((block) => (block.id === blockId ? nextBlock : block)),
+            }
+          : page,
+      )
+      const nextSnapshot = {
+        pages: nextPages,
+        settings: state.settings,
+      }
+
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save(nextSnapshot)
+        set({
+          pages: nextPages,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to update block')
       }
     },
   }))

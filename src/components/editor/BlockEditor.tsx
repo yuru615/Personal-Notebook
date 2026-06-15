@@ -1,76 +1,84 @@
-import type { BlockRecord } from '../../domain/types'
+import type { BlockRecord, PageRecord } from '../../domain/types'
 import { uiCopy } from '../../ui/copy'
+import { ChildPageBlock } from './blocks/ChildPageBlock'
+import { CodeBlock } from './blocks/CodeBlock'
+import { ListBlock } from './blocks/ListBlock'
+import { ParagraphBlock } from './blocks/ParagraphBlock'
+import { TableBlock } from './blocks/TableBlock'
+import { TodoBlock } from './blocks/TodoBlock'
 
 interface BlockEditorProps {
-  blocks: BlockRecord[]
+  page: PageRecord
+  allPages: PageRecord[]
+  onUpdateBlock: (blockId: string, nextBlock: BlockRecord) => void
 }
 
-export function BlockEditor({ blocks }: BlockEditorProps) {
+export function BlockEditor({ page, allPages, onUpdateBlock }: BlockEditorProps) {
+  const childPageTitleMap = Object.fromEntries(allPages.map((item) => [item.id, item.title]))
+
   return (
-    <div className="block-editor">
-      {blocks.map((block) => {
+    <section className="editor-surface">
+      {page.blocks.map((block) => {
         switch (block.type) {
           case 'paragraph':
             return (
-              <p key={block.id} className="block-paragraph">
-                {block.text}
-              </p>
+              <div key={block.id} className="editor-row">
+                <ParagraphBlock
+                  value={block.text}
+                  onChange={(text) => onUpdateBlock(block.id, { ...block, text })}
+                />
+              </div>
             )
           case 'todo':
             return (
-              <label key={block.id} className="block-todo">
-                <input type="checkbox" checked={block.checked} readOnly />
-                <span>{block.text}</span>
-              </label>
+              <div key={block.id} className="editor-row">
+                <TodoBlock
+                  text={block.text}
+                  checked={block.checked}
+                  onChange={({ text, checked }) => onUpdateBlock(block.id, { ...block, text, checked })}
+                />
+              </div>
             )
           case 'bulleted_list':
-            return (
-              <ul key={block.id} className="block-list">
-                {block.items.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            )
           case 'numbered_list':
             return (
-              <ol key={block.id} className="block-list">
-                {block.items.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ol>
+              <div key={block.id} className="editor-row">
+                <ListBlock
+                  items={block.items}
+                  onChange={(items) => onUpdateBlock(block.id, { ...block, items })}
+                />
+              </div>
             )
           case 'code':
             return (
-              <pre key={block.id} className="block-code">
-                <code>{block.text}</code>
-              </pre>
+              <div key={block.id} className="editor-row">
+                <CodeBlock
+                  language={block.language}
+                  text={block.text}
+                  onChange={({ language, text }) => onUpdateBlock(block.id, { ...block, language, text })}
+                />
+              </div>
             )
           case 'table':
             return (
-              <div key={block.id} className="block-table-wrapper">
-                <table className="block-table">
-                  <tbody>
-                    {block.rows.map((row, rowIndex) => (
-                      <tr key={`${block.id}-${rowIndex}`}>
-                        {row.map((cell, cellIndex) => (
-                          <td key={`${block.id}-${rowIndex}-${cellIndex}`}>{cell}</td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div key={block.id} className="editor-row">
+                <TableBlock
+                  rows={block.rows}
+                  onChange={(rows) => onUpdateBlock(block.id, { ...block, rows })}
+                />
               </div>
             )
           case 'child_page':
             return (
-              <div key={block.id} className="block-child-page">
-                {uiCopy.editor.childPage}
+              <div key={block.id} className="editor-row">
+                <ChildPageBlock title={childPageTitleMap[block.pageId] ?? uiCopy.page.untitled} />
               </div>
             )
           default:
             return null
         }
       })}
-    </div>
+      <div className="empty-block-row">{uiCopy.page.typeSlash}</div>
+    </section>
   )
 }

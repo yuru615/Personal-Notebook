@@ -62,6 +62,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onCreatePage={() => store.getState().createPage()}
       onRoutePageChange={setCurrentPage}
       onRenamePage={(pageId, title) => store.getState().renamePage(pageId, title)}
+      onUpdateBlock={(pageId, blockId, nextBlock) => store.getState().updateBlock(pageId, blockId, nextBlock)}
     />
   )
 
@@ -78,6 +79,7 @@ interface AppRoutesProps {
   onCreatePage: () => Promise<PageRecord>
   onRoutePageChange: (pageId: string) => Promise<void>
   onRenamePage: (pageId: string, title: string) => Promise<void>
+  onUpdateBlock: (pageId: string, blockId: string, nextBlock: PageRecord['blocks'][number]) => Promise<void>
 }
 
 function AppRoutes({
@@ -86,6 +88,7 @@ function AppRoutes({
   onCreatePage,
   onRoutePageChange,
   onRenamePage,
+  onUpdateBlock,
 }: AppRoutesProps) {
   const navigate = useNavigate()
 
@@ -125,6 +128,7 @@ function AppRoutes({
               currentPageId={currentPageId}
               onRoutePageChange={onRoutePageChange}
               onRenamePage={onRenamePage}
+              onUpdateBlock={onUpdateBlock}
             />
           }
         />
@@ -138,9 +142,16 @@ interface PageRouteProps {
   currentPageId: string | null
   onRoutePageChange: (pageId: string) => Promise<void>
   onRenamePage: (pageId: string, title: string) => Promise<void>
+  onUpdateBlock: (pageId: string, blockId: string, nextBlock: PageRecord['blocks'][number]) => Promise<void>
 }
 
-function PageRoute({ pages, currentPageId, onRoutePageChange, onRenamePage }: PageRouteProps) {
+function PageRoute({
+  pages,
+  currentPageId,
+  onRoutePageChange,
+  onRenamePage,
+  onUpdateBlock,
+}: PageRouteProps) {
   const { pageId } = useParams()
   const page = pages.find((item) => item.id === pageId)
 
@@ -164,7 +175,13 @@ function PageRoute({ pages, currentPageId, onRoutePageChange, onRenamePage }: Pa
           void onRenamePage(page.id, title)
         }}
       />
-      <BlockEditor blocks={page.blocks} />
+      <BlockEditor
+        page={page}
+        allPages={pages}
+        onUpdateBlock={(blockId, nextBlock) => {
+          void onUpdateBlock(page.id, blockId, nextBlock)
+        }}
+      />
     </div>
   )
 }

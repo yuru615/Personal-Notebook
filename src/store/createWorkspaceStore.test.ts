@@ -60,4 +60,40 @@ describe('createWorkspaceStore', () => {
     await store.getState().deletePage(childPage.id)
     expect(store.getState().pages.find((page) => page.id === childPage.id)).toBeUndefined()
   })
+
+  it('updates a paragraph block and persists the change', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const page = store.getState().pages[0]
+    const paragraphBlock = page.blocks.find((block) => block.type === 'paragraph')
+
+    if (!paragraphBlock || paragraphBlock.type !== 'paragraph') {
+      throw new Error('Expected seed paragraph block')
+    }
+
+    await store
+      .getState()
+      .updateBlock(page.id, paragraphBlock.id, { ...paragraphBlock, text: '更新后的正文' })
+
+    const nextPage = store.getState().pages.find((item) => item.id === page.id)
+    const nextParagraph = nextPage?.blocks.find((block) => block.id === paragraphBlock.id)
+
+    expect(nextParagraph).toMatchObject({
+      id: paragraphBlock.id,
+      type: 'paragraph',
+      text: '更新后的正文',
+    })
+
+    const snapshot = await repository.load()
+    const persistedPage = snapshot?.pages.find((item) => item.id === page.id)
+    const persistedParagraph = persistedPage?.blocks.find((block) => block.id === paragraphBlock.id)
+
+    expect(persistedParagraph).toMatchObject({
+      id: paragraphBlock.id,
+      type: 'paragraph',
+      text: '更新后的正文',
+    })
+  })
 })
