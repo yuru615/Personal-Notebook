@@ -61,6 +61,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       currentPageId={state.currentPageId}
       onCreatePage={() => store.getState().createPage()}
       onRoutePageChange={setCurrentPage}
+      onRenamePage={(pageId, title) => store.getState().renamePage(pageId, title)}
     />
   )
 
@@ -76,9 +77,16 @@ interface AppRoutesProps {
   currentPageId: AppState['currentPageId']
   onCreatePage: () => Promise<PageRecord>
   onRoutePageChange: (pageId: string) => Promise<void>
+  onRenamePage: (pageId: string, title: string) => Promise<void>
 }
 
-function AppRoutes({ pages, currentPageId, onCreatePage, onRoutePageChange }: AppRoutesProps) {
+function AppRoutes({
+  pages,
+  currentPageId,
+  onCreatePage,
+  onRoutePageChange,
+  onRenamePage,
+}: AppRoutesProps) {
   const navigate = useNavigate()
 
   async function handleCreatePage() {
@@ -116,6 +124,7 @@ function AppRoutes({ pages, currentPageId, onCreatePage, onRoutePageChange }: Ap
               pages={pages}
               currentPageId={currentPageId}
               onRoutePageChange={onRoutePageChange}
+              onRenamePage={onRenamePage}
             />
           }
         />
@@ -128,9 +137,10 @@ interface PageRouteProps {
   pages: PageRecord[]
   currentPageId: string | null
   onRoutePageChange: (pageId: string) => Promise<void>
+  onRenamePage: (pageId: string, title: string) => Promise<void>
 }
 
-function PageRoute({ pages, currentPageId, onRoutePageChange }: PageRouteProps) {
+function PageRoute({ pages, currentPageId, onRoutePageChange, onRenamePage }: PageRouteProps) {
   const { pageId } = useParams()
   const page = pages.find((item) => item.id === pageId)
 
@@ -148,7 +158,12 @@ function PageRoute({ pages, currentPageId, onRoutePageChange }: PageRouteProps) 
 
   return (
     <div className="page-content">
-      <PageHeader page={page} />
+      <PageHeader
+        page={page}
+        onRename={(title) => {
+          void onRenamePage(page.id, title)
+        }}
+      />
       <BlockEditor blocks={page.blocks} />
     </div>
   )

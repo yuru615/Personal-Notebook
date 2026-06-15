@@ -3,6 +3,7 @@ import { createId } from '../utils/id'
 import { createSeedWorkspace } from '../domain/seed'
 import type { PageId, PageRecord, SaveStatus, WorkspaceSettings } from '../domain/types'
 import { ensureSnapshot, type WorkspaceRepository } from '../lib/workspaceRepository'
+import { deletePageBranch } from '../utils/pageTree'
 
 export interface WorkspaceState {
   pages: PageRecord[]
@@ -12,6 +13,8 @@ export interface WorkspaceState {
   bootstrap: () => Promise<void>
   createPage: (parentId?: PageId) => Promise<PageRecord>
   setCurrentPage: (pageId: PageId) => Promise<void>
+  renamePage: (pageId: PageId, title: string) => Promise<void>
+  deletePage: (pageId: PageId) => Promise<void>
 }
 
 function createEmptyState(): WorkspaceState {
@@ -27,6 +30,12 @@ function createEmptyState(): WorkspaceState {
       throw new Error('not implemented')
     },
     setCurrentPage: async () => {
+      throw new Error('not implemented')
+    },
+    renamePage: async () => {
+      throw new Error('not implemented')
+    },
+    deletePage: async () => {
       throw new Error('not implemented')
     },
   }
@@ -124,6 +133,69 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       } catch {
         set({ saveStatus: 'error' })
         throw new Error('Failed to switch page')
+      }
+    },
+
+    renamePage: async (pageId: PageId, title: string) => {
+      const state = get()
+      const nextTitle = title.trim() || '未命名'
+      const nextPages = state.pages.map((page) =>
+        page.id === pageId
+          ? {
+              ...page,
+              title: nextTitle,
+              updatedAt: new Date().toISOString(),
+            }
+          : page,
+      )
+      const nextSnapshot = {
+        pages: nextPages,
+        settings: state.settings,
+      }
+
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save(nextSnapshot)
+        set({
+          pages: nextPages,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to rename page')
+      }
+    },
+
+    deletePage: async (pageId: PageId) => {
+      const state = get()
+      const nextPages = deletePageBranch(state.pages, pageId)
+      const currentPageDeleted =
+        state.currentPageId !== null && !nextPages.some((page) => page.id === state.currentPageId)
+      const nextCurrentPageId = currentPageDeleted
+        ? (nextPages[0]?.id ?? null)
+        : state.currentPageId
+      const nextSettings: WorkspaceSettings = {
+        lastOpenedPageId: nextCurrentPageId,
+      }
+      const nextSnapshot = {
+        pages: nextPages,
+        settings: nextSettings,
+      }
+
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save(nextSnapshot)
+        set({
+          pages: nextPages,
+          currentPageId: nextCurrentPageId,
+          settings: nextSettings,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to delete page')
       }
     },
   }))

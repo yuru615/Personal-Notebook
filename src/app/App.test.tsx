@@ -59,7 +59,7 @@ describe('App shell', () => {
     expect(await screen.findByRole('button', { name: '搜索' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '首页' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '新建页面' })).toBeInTheDocument()
-    expect(await screen.findByRole('heading', { level: 1, name: '会议记录' })).toBeInTheDocument()
+    expect(await screen.findByDisplayValue('会议记录')).toBeInTheDocument()
     expect(screen.getByText('这是第二页内容。')).toBeInTheDocument()
   })
 
@@ -70,10 +70,10 @@ describe('App shell', () => {
 
     render(<App store={store} initialEntries={['/pages/page-home']} />)
 
-    await screen.findByRole('heading', { level: 1, name: '快速开始' })
+    await screen.findByDisplayValue('快速开始')
     await user.click(screen.getByRole('link', { name: '会议记录' }))
 
-    expect(await screen.findByRole('heading', { level: 1, name: '会议记录' })).toBeInTheDocument()
+    expect(await screen.findByDisplayValue('会议记录')).toBeInTheDocument()
 
     await waitFor(() => {
       expect(store.getState().currentPageId).toBe('page-notes')

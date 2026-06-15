@@ -45,4 +45,19 @@ describe('createWorkspaceStore', () => {
     expect(snapshot?.settings.lastOpenedPageId).toBe(firstPageId)
     expect(createdPage.id).not.toBe(firstPageId)
   })
+
+  it('renames and deletes a child page branch', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const rootId = store.getState().pages[0].id
+    const childPage = await store.getState().createPage(rootId)
+
+    await store.getState().renamePage(childPage.id, '需求池')
+    expect(store.getState().pages.find((page) => page.id === childPage.id)?.title).toBe('需求池')
+
+    await store.getState().deletePage(childPage.id)
+    expect(store.getState().pages.find((page) => page.id === childPage.id)).toBeUndefined()
+  })
 })
