@@ -12,6 +12,7 @@ import type {
 import { ensureSnapshot, type WorkspaceRepository } from '../lib/workspaceRepository'
 import { deletePageBranch } from '../utils/pageTree'
 import { createBlock } from '../utils/blockFactory'
+import { reorderItems } from '../utils/reorder'
 
 export interface WorkspaceState {
   pages: PageRecord[]
@@ -25,6 +26,11 @@ export interface WorkspaceState {
   deletePage: (pageId: PageId) => Promise<void>
   updateBlock: (pageId: PageId, blockId: string, nextBlock: BlockRecord) => Promise<void>
   insertBlock: (pageId: PageId, type: BlockType) => Promise<void>
+  reorderPages: (activePageId: PageId, overPageId: PageId) => Promise<void>
+  reorderBlocks: (pageId: PageId, activeBlockId: string, overBlockId: string) => Promise<void>
+  deleteBlock: (pageId: PageId, blockId: string) => Promise<void>
+  duplicateBlock: (pageId: PageId, blockId: string) => Promise<void>
+  turnBlockInto: (pageId: PageId, blockId: string, type: BlockType) => Promise<void>
 }
 
 function createEmptyState(): WorkspaceState {
@@ -52,6 +58,21 @@ function createEmptyState(): WorkspaceState {
       throw new Error('not implemented')
     },
     insertBlock: async () => {
+      throw new Error('not implemented')
+    },
+    reorderPages: async () => {
+      throw new Error('not implemented')
+    },
+    reorderBlocks: async () => {
+      throw new Error('not implemented')
+    },
+    deleteBlock: async () => {
+      throw new Error('not implemented')
+    },
+    duplicateBlock: async () => {
+      throw new Error('not implemented')
+    },
+    turnBlockInto: async () => {
       throw new Error('not implemented')
     },
   }
@@ -305,6 +326,112 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         set({ saveStatus: 'error' })
         throw new Error('Failed to insert block')
       }
+    },
+
+    reorderPages: async (activePageId: PageId, overPageId: PageId) => {
+      const state = get()
+      const activePage = state.pages.find((page) => page.id === activePageId)
+      const overPage = state.pages.find((page) => page.id === overPageId)
+
+      if (!activePage || !overPage || activePage.parentId !== overPage.parentId) {
+        return
+      }
+
+      const siblings = state.pages.filter((page) => page.parentId === activePage.parentId)
+      const reorderedSiblings = reorderItems(siblings, activePageId, overPageId)
+      let siblingIndex = 0
+      const nextPages = state.pages.map((page) =>
+        page.parentId === activePage.parentId ? reorderedSiblings[siblingIndex++] : page,
+      )
+
+      await repository.save({ pages: nextPages, settings: state.settings })
+      set({ pages: nextPages, saveStatus: 'saved' })
+    },
+
+    reorderBlocks: async (pageId: PageId, activeBlockId: string, overBlockId: string) => {
+      const state = get()
+      const nextPages = state.pages.map((page) =>
+        page.id === pageId
+          ? {
+              ...page,
+              updatedAt: new Date().toISOString(),
+              blocks: reorderItems(page.blocks, activeBlockId, overBlockId),
+            }
+          : page,
+      )
+
+      await repository.save({ pages: nextPages, settings: state.settings })
+      set({ pages: nextPages, saveStatus: 'saved' })
+    },
+
+    deleteBlock: async (pageId: PageId, blockId: string) => {
+      const state = get()
+      const nextPages = state.pages.map((page) =>
+        page.id === pageId
+          ? {
+              ...page,
+              updatedAt: new Date().toISOString(),
+              blocks: page.blocks.filter((block) => block.id !== blockId),
+            }
+          : page,
+      )
+
+      await repository.save({ pages: nextPages, settings: state.settings })
+      set({ pages: nextPages, saveStatus: 'saved' })
+    },
+
+    duplicateBlock: async (pageId: PageId, blockId: string) => {
+      const state = get()
+      const nextPages = state.pages.map((page) => {
+        if (page.id !== pageId) {
+          return page
+        }
+
+        const index = page.blocks.findIndex((block) => block.id === blockId)
+        const source = page.blocks[index]
+
+        if (!source) {
+          return page
+        }
+
+        const clone = { ...structuredClone(source), id: createId('block') }
+        const blocks = [...page.blocks]
+        blocks.splice(index + 1, 0, clone)
+
+        return {
+          ...page,
+          updatedAt: new Date().toISOString(),
+          blocks,
+        }
+      })
+
+      await repository.save({ pages: nextPages, settings: state.settings })
+      set({ pages: nextPages, saveStatus: 'saved' })
+    },
+
+    turnBlockInto: async (pageId: PageId, blockId: string, type: BlockType) => {
+      const state = get()
+      const nextPages = state.pages.map((page) => {
+        if (page.id !== pageId) {
+          return page
+        }
+
+        return {
+          ...page,
+          updatedAt: new Date().toISOString(),
+          blocks: page.blocks.map((block) => {
+            if (block.id !== blockId) {
+              return block
+            }
+
+            const fresh = createBlock(type)
+            return { ...fresh, id: block.id }
+          }),
+        }
+      })
+
+      await repository.save({ pages: nextPages, settings: state.settings })
+      set({ pages: nextPages, saveStatus: 'saved' })
     },
   }))
 }

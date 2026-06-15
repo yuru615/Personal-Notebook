@@ -168,6 +168,59 @@ a {
   min-width: 0;
 }
 
+.block-frame {
+  position: relative;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.block-frame-content {
+  min-width: 0;
+}
+
+.block-handle {
+  border: 0;
+  background: transparent;
+  color: #c6c5c1;
+  padding: 6px 0 0;
+  cursor: grab;
+}
+
+.block-menu {
+  position: absolute;
+  top: 28px;
+  left: 0;
+  z-index: 2;
+  display: grid;
+  gap: 4px;
+  min-width: 148px;
+  padding: 8px;
+  border: 1px solid #ecebe8;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+}
+
+.block-menu-action {
+  border: 0;
+  background: transparent;
+  color: #37352f;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.block-menu-action:hover {
+  background: #f3f2ef;
+}
+
+.block-menu-danger {
+  color: #b42318;
+}
+
 .block-input,
 .code-language,
 .table-cell {

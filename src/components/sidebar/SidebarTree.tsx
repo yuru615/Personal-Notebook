@@ -8,14 +8,21 @@ interface SidebarTreeProps {
   pages: PageRecord[]
   currentPageId: PageId | null
   onCreatePage: () => void
+  onReorderPage?: (activePageId: PageId, overPageId: PageId) => void
 }
 
-export function SidebarTree({ pages, currentPageId, onCreatePage }: SidebarTreeProps) {
+export function SidebarTree({
+  pages,
+  currentPageId,
+  onCreatePage,
+  onReorderPage,
+}: SidebarTreeProps) {
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({})
   const visiblePages = useMemo(
     () => buildVisiblePageItems(pages, expandedIds),
     [expandedIds, pages],
   )
+  let draggingPageId: string | null = null
 
   return (
     <>
@@ -39,7 +46,17 @@ export function SidebarTree({ pages, currentPageId, onCreatePage }: SidebarTreeP
 
       <nav className="sidebar-tree" aria-label={uiCopy.sidebar.pageTree}>
         {visiblePages.map(({ page, depth, hasChildren }) => (
-          <div key={page.id} className="sidebar-tree-row">
+          <div
+            key={page.id}
+            className="sidebar-tree-row"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={() => {
+              if (draggingPageId && draggingPageId !== page.id) {
+                onReorderPage?.(draggingPageId, page.id)
+              }
+              draggingPageId = null
+            }}
+          >
             <button
               type="button"
               className={`sidebar-tree-toggle ${hasChildren ? '' : 'sidebar-tree-toggle-hidden'}`}
@@ -64,6 +81,10 @@ export function SidebarTree({ pages, currentPageId, onCreatePage }: SidebarTreeP
               to={`/pages/${page.id}`}
               className={({ isActive }) => getSidebarItemClassName(isActive)}
               style={{ paddingLeft: `${10 + depth * 16}px` }}
+              draggable
+              onDragStart={() => {
+                draggingPageId = page.id
+              }}
             >
               <span className="sidebar-tree-icon" aria-hidden="true">
                 {page.icon ?? '📄'}

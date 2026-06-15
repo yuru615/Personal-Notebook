@@ -127,4 +127,36 @@ describe('createWorkspaceStore', () => {
     expect(childPage?.parentId).toBe(parentPage.id)
     expect(childPage?.title).toBe('未命名')
   })
+
+  it('reorders blocks inside a page', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const pageId = store.getState().pages[0].id
+
+    await store.getState().insertBlock(pageId, 'paragraph')
+    await store.getState().insertBlock(pageId, 'todo')
+
+    const [first, second] = store.getState().pages[0].blocks.slice(-2)
+    await store.getState().reorderBlocks(pageId, second.id, first.id)
+
+    const reordered = store.getState().pages[0].blocks.slice(-2)
+    expect(reordered[0].id).toBe(second.id)
+    expect(reordered[1].id).toBe(first.id)
+  })
+
+  it('turns a paragraph block into a todo block', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const pageId = store.getState().pages[0].id
+    const blockId = store.getState().pages[0].blocks[0].id
+
+    await store.getState().turnBlockInto(pageId, blockId, 'todo')
+
+    const changed = store.getState().pages[0].blocks[0]
+    expect(changed.type).toBe('todo')
+  })
 })

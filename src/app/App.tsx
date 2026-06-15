@@ -64,6 +64,17 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onRenamePage={(pageId, title) => store.getState().renamePage(pageId, title)}
       onUpdateBlock={(pageId, blockId, nextBlock) => store.getState().updateBlock(pageId, blockId, nextBlock)}
       onInsertBlock={(pageId, type) => store.getState().insertBlock(pageId, type)}
+      onReorderPage={(activePageId, overPageId) =>
+        store.getState().reorderPages(activePageId, overPageId)
+      }
+      onReorderBlock={(pageId, activeBlockId, overBlockId) =>
+        store.getState().reorderBlocks(pageId, activeBlockId, overBlockId)
+      }
+      onDeleteBlock={(pageId, blockId) => store.getState().deleteBlock(pageId, blockId)}
+      onDuplicateBlock={(pageId, blockId) => store.getState().duplicateBlock(pageId, blockId)}
+      onTurnBlockInto={(pageId, blockId, type) =>
+        store.getState().turnBlockInto(pageId, blockId, type)
+      }
     />
   )
 
@@ -82,6 +93,15 @@ interface AppRoutesProps {
   onRenamePage: (pageId: string, title: string) => Promise<void>
   onUpdateBlock: (pageId: string, blockId: string, nextBlock: PageRecord['blocks'][number]) => Promise<void>
   onInsertBlock: (pageId: string, type: PageRecord['blocks'][number]['type']) => Promise<void>
+  onReorderPage: (activePageId: string, overPageId: string) => Promise<void>
+  onReorderBlock: (pageId: string, activeBlockId: string, overBlockId: string) => Promise<void>
+  onDeleteBlock: (pageId: string, blockId: string) => Promise<void>
+  onDuplicateBlock: (pageId: string, blockId: string) => Promise<void>
+  onTurnBlockInto: (
+    pageId: string,
+    blockId: string,
+    type: PageRecord['blocks'][number]['type'],
+  ) => Promise<void>
 }
 
 function AppRoutes({
@@ -92,6 +112,11 @@ function AppRoutes({
   onRenamePage,
   onUpdateBlock,
   onInsertBlock,
+  onReorderPage,
+  onReorderBlock,
+  onDeleteBlock,
+  onDuplicateBlock,
+  onTurnBlockInto,
 }: AppRoutesProps) {
   const navigate = useNavigate()
 
@@ -108,6 +133,9 @@ function AppRoutes({
           currentPageId={currentPageId}
           onCreatePage={() => {
             void handleCreatePage()
+          }}
+          onReorderPage={(activePageId, overPageId) => {
+            void onReorderPage(activePageId, overPageId)
           }}
         />
       }
@@ -133,6 +161,10 @@ function AppRoutes({
               onRenamePage={onRenamePage}
               onUpdateBlock={onUpdateBlock}
               onInsertBlock={onInsertBlock}
+              onReorderBlock={onReorderBlock}
+              onDeleteBlock={onDeleteBlock}
+              onDuplicateBlock={onDuplicateBlock}
+              onTurnBlockInto={onTurnBlockInto}
             />
           }
         />
@@ -148,6 +180,14 @@ interface PageRouteProps {
   onRenamePage: (pageId: string, title: string) => Promise<void>
   onUpdateBlock: (pageId: string, blockId: string, nextBlock: PageRecord['blocks'][number]) => Promise<void>
   onInsertBlock: (pageId: string, type: PageRecord['blocks'][number]['type']) => Promise<void>
+  onReorderBlock: (pageId: string, activeBlockId: string, overBlockId: string) => Promise<void>
+  onDeleteBlock: (pageId: string, blockId: string) => Promise<void>
+  onDuplicateBlock: (pageId: string, blockId: string) => Promise<void>
+  onTurnBlockInto: (
+    pageId: string,
+    blockId: string,
+    type: PageRecord['blocks'][number]['type'],
+  ) => Promise<void>
 }
 
 function PageRoute({
@@ -157,6 +197,10 @@ function PageRoute({
   onRenamePage,
   onUpdateBlock,
   onInsertBlock,
+  onReorderBlock,
+  onDeleteBlock,
+  onDuplicateBlock,
+  onTurnBlockInto,
 }: PageRouteProps) {
   const { pageId } = useParams()
   const page = pages.find((item) => item.id === pageId)
@@ -189,6 +233,18 @@ function PageRoute({
         }}
         onInsert={(type) => {
           void onInsertBlock(page.id, type)
+        }}
+        onReorderBlock={(activeBlockId, overBlockId) => {
+          void onReorderBlock(page.id, activeBlockId, overBlockId)
+        }}
+        onDeleteBlock={(blockId) => {
+          void onDeleteBlock(page.id, blockId)
+        }}
+        onDuplicateBlock={(blockId) => {
+          void onDuplicateBlock(page.id, blockId)
+        }}
+        onTurnInto={(blockId, type) => {
+          void onTurnBlockInto(page.id, blockId, type)
         }}
       />
     </div>
