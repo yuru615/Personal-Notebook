@@ -159,4 +159,67 @@ describe('createWorkspaceStore', () => {
     const changed = store.getState().pages[0].blocks[0]
     expect(changed.type).toBe('todo')
   })
+
+  it('exports a JSON backup with workspace data', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const payload = JSON.parse(await store.getState().exportJson())
+
+    expect(payload).toMatchObject({
+      version: 1,
+      settings: {
+        lastOpenedPageId: store.getState().currentPageId,
+      },
+    })
+    expect(payload.pages).toHaveLength(store.getState().pages.length)
+    expect(typeof payload.exportedAt).toBe('string')
+  })
+
+  it('imports a JSON backup and updates the current page', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+    const now = '2026-06-15T00:00:00.000Z'
+
+    await store.getState().bootstrap()
+
+    await store.getState().importJson({
+      version: 1,
+      exportedAt: now,
+      pages: [
+        {
+          id: 'page-imported',
+          parentId: null,
+          title: '导入后的页面',
+          icon: '📥',
+          cover: null,
+          blocks: [
+            {
+              id: 'block-imported',
+              type: 'paragraph',
+              text: '这是导入内容。',
+            },
+          ],
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+      settings: {
+        lastOpenedPageId: 'page-imported',
+      },
+    })
+
+    expect(store.getState().pages).toHaveLength(1)
+    expect(store.getState().pages[0].title).toBe('导入后的页面')
+    expect(store.getState().currentPageId).toBe('page-imported')
+    expect(store.getState().saveStatus).toBe('saved')
+
+    const snapshot = await repository.load()
+    expect(snapshot).toMatchObject({
+      settings: {
+        lastOpenedPageId: 'page-imported',
+      },
+    })
+  })
 })

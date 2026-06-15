@@ -81,4 +81,9 @@ export interface WorkspaceSnapshot {
   settings: WorkspaceSettings
 }
 
+export interface WorkspaceBackup extends WorkspaceSnapshot {
+  version: 1
+  exportedAt: string
+}
+
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'

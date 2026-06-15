@@ -9,10 +9,13 @@ import {
   useParams,
 } from 'react-router-dom'
 import { BlockEditor } from '../components/editor/BlockEditor'
+import { ExportImportPanel } from '../components/export/ExportImportPanel'
 import { PageHeader } from '../components/editor/PageHeader'
 import { AppShell } from '../components/layout/AppShell'
 import { SidebarTree } from '../components/sidebar/SidebarTree'
-import type { PageRecord } from '../domain/types'
+import { AppErrorBoundary } from '../components/shared/AppErrorBoundary'
+import { SaveStatusBadge } from '../components/shared/SaveStatusBadge'
+import type { PageRecord, SaveStatus } from '../domain/types'
 import {
   createDexieWorkspaceRepository,
   type WorkspaceRepository,
@@ -35,6 +38,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
   )
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState)
   const [isBootstrapped, setIsBootstrapped] = useState(false)
+  const [reversibleExport, setReversibleExport] = useState(false)
   const setCurrentPage = store.getState().setCurrentPage
 
   useEffect(() => {
@@ -75,6 +79,36 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onTurnBlockInto={(pageId, blockId, type) =>
         store.getState().turnBlockInto(pageId, blockId, type)
       }
+      saveStatus={state.saveStatus}
+      reversibleExport={reversibleExport}
+      onToggleReversibleExport={setReversibleExport}
+      onExportJson={async () => {
+        const payload = await store.getState().exportJson()
+        downloadBlob(
+          new Blob([payload], { type: 'application/json;charset=utf-8' }),
+          '知识库备份.json',
+        )
+      }}
+      onExportMarkdown={async (page) => {
+        const { buildMarkdownZip } = await import('../domain/markdown')
+        const blob = await buildMarkdownZip({
+          rootPage: page,
+          allPages: store.getState().pages,
+          reversible: reversibleExport,
+        })
+
+        downloadBlob(blob, `${sanitizeFileName(page.title)}.zip`)
+      }}
+      onImportJson={async (file) => {
+        try {
+          const payload = JSON.parse(await file.text()) as unknown
+          await store.getState().importJson(payload)
+          return store.getState().currentPageId
+        } catch {
+          window.alert(uiCopy.export.importError)
+          return store.getState().currentPageId
+        }
+      }}
     />
   )
 
@@ -102,6 +136,12 @@ interface AppRoutesProps {
     blockId: string,
     type: PageRecord['blocks'][number]['type'],
   ) => Promise<void>
+  saveStatus: SaveStatus
+  reversibleExport: boolean
+  onToggleReversibleExport: (value: boolean) => void
+  onExportJson: () => Promise<void>
+  onExportMarkdown: (page: PageRecord) => Promise<void>
+  onImportJson: (file: File) => Promise<string | null>
 }
 
 function AppRoutes({
@@ -117,6 +157,12 @@ function AppRoutes({
   onDeleteBlock,
   onDuplicateBlock,
   onTurnBlockInto,
+  saveStatus,
+  reversibleExport,
+  onToggleReversibleExport,
+  onExportJson,
+  onExportMarkdown,
+  onImportJson,
 }: AppRoutesProps) {
   const navigate = useNavigate()
 
@@ -140,35 +186,43 @@ function AppRoutes({
         />
       }
     >
-      <Routes>
-        <Route
-          path="/"
-          element={
-            currentPageId ? (
-              <Navigate to={`/pages/${currentPageId}`} replace />
-            ) : (
-              <div className="page-empty">{uiCopy.app.pageNotFound}</div>
-            )
-          }
-        />
-        <Route
-          path="/pages/:pageId"
-          element={
-            <PageRoute
-              pages={pages}
-              currentPageId={currentPageId}
-              onRoutePageChange={onRoutePageChange}
-              onRenamePage={onRenamePage}
-              onUpdateBlock={onUpdateBlock}
-              onInsertBlock={onInsertBlock}
-              onReorderBlock={onReorderBlock}
-              onDeleteBlock={onDeleteBlock}
-              onDuplicateBlock={onDuplicateBlock}
-              onTurnBlockInto={onTurnBlockInto}
-            />
-          }
-        />
-      </Routes>
+      <AppErrorBoundary resetKey={currentPageId}>
+        <Routes>
+          <Route
+            path="/"
+            element={
+              currentPageId ? (
+                <Navigate to={`/pages/${currentPageId}`} replace />
+              ) : (
+                <div className="page-empty">{uiCopy.app.pageNotFound}</div>
+              )
+            }
+          />
+          <Route
+            path="/pages/:pageId"
+            element={
+              <PageRoute
+                pages={pages}
+                currentPageId={currentPageId}
+                onRoutePageChange={onRoutePageChange}
+                onRenamePage={onRenamePage}
+                onUpdateBlock={onUpdateBlock}
+                onInsertBlock={onInsertBlock}
+                onReorderBlock={onReorderBlock}
+                onDeleteBlock={onDeleteBlock}
+                onDuplicateBlock={onDuplicateBlock}
+                onTurnBlockInto={onTurnBlockInto}
+                saveStatus={saveStatus}
+                reversibleExport={reversibleExport}
+                onToggleReversibleExport={onToggleReversibleExport}
+                onExportJson={onExportJson}
+                onExportMarkdown={onExportMarkdown}
+                onImportJson={onImportJson}
+              />
+            }
+          />
+        </Routes>
+      </AppErrorBoundary>
     </AppShell>
   )
 }
@@ -188,6 +242,12 @@ interface PageRouteProps {
     blockId: string,
     type: PageRecord['blocks'][number]['type'],
   ) => Promise<void>
+  saveStatus: SaveStatus
+  reversibleExport: boolean
+  onToggleReversibleExport: (value: boolean) => void
+  onExportJson: () => Promise<void>
+  onExportMarkdown: (page: PageRecord) => Promise<void>
+  onImportJson: (file: File) => Promise<string | null>
 }
 
 function PageRoute({
@@ -201,8 +261,15 @@ function PageRoute({
   onDeleteBlock,
   onDuplicateBlock,
   onTurnBlockInto,
+  saveStatus,
+  reversibleExport,
+  onToggleReversibleExport,
+  onExportJson,
+  onExportMarkdown,
+  onImportJson,
 }: PageRouteProps) {
   const { pageId } = useParams()
+  const navigate = useNavigate()
   const page = pages.find((item) => item.id === pageId)
 
   useEffect(() => {
@@ -219,6 +286,19 @@ function PageRoute({
 
   return (
     <div className="page-content">
+      <div className="page-toolbar">
+        <SaveStatusBadge status={saveStatus} />
+        <ExportImportPanel
+          reversible={reversibleExport}
+          onToggleReversible={onToggleReversibleExport}
+          onExportJson={() => void onExportJson()}
+          onExportMarkdown={() => void onExportMarkdown(page)}
+          onImportJson={async (file) => {
+            const nextPageId = await onImportJson(file)
+            navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
+          }}
+        />
+      </div>
       <PageHeader
         page={page}
         onRename={(title) => {
@@ -252,3 +332,24 @@ function PageRoute({
 }
 
 export default App
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = fileName
+  anchor.click()
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url)
+  }, 0)
+}
+
+function sanitizeFileName(value: string) {
+  return (
+    value
+      .trim()
+      .replace(/[<>:"/\\|?*\u0000-\u001f]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim() || uiCopy.page.untitled
+  )
+}

@@ -115,6 +115,15 @@ a {
   width: min(100%, 760px);
 }
 
+.page-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
 .page-empty {
   color: #9b9a97;
   font-size: 14px;
@@ -157,6 +166,83 @@ a {
   color: #5f5e59;
   padding: 6px 10px;
   border-radius: 8px;
+}
+
+.save-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #f7f6f3;
+  color: #6b6a67;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.save-status-saving {
+  background: #f6f1df;
+  color: #8d6e1f;
+}
+
+.save-status-saved {
+  background: #edf6ee;
+  color: #23653b;
+}
+
+.save-status-error {
+  background: #fbe9e7;
+  color: #b42318;
+}
+
+.export-panel {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.export-action,
+.import-action {
+  border: 1px solid #ecebe8;
+  background: #ffffff;
+  color: #5f5e59;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.export-action:hover,
+.import-action:hover,
+.reversible-toggle:hover {
+  background: #f7f6f3;
+}
+
+.reversible-toggle {
+  border: 1px solid #ecebe8;
+  background: #ffffff;
+  color: #5f5e59;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.reversible-toggle input {
+  margin: 0;
+}
+
+.import-input {
+  display: none;
 }
 
 .editor-surface {
@@ -370,6 +456,15 @@ a {
 
   .page-panel {
     padding: 32px 20px 48px;
+  }
+
+  .page-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .export-panel {
+    justify-content: flex-start;
   }
 
   .page-title-input {

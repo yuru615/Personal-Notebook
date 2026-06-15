@@ -7,12 +7,17 @@ import type {
   PageId,
   PageRecord,
   SaveStatus,
+  WorkspaceBackup,
+  WorkspaceSnapshot,
   WorkspaceSettings,
 } from '../domain/types'
 import { ensureSnapshot, type WorkspaceRepository } from '../lib/workspaceRepository'
 import { deletePageBranch } from '../utils/pageTree'
 import { createBlock } from '../utils/blockFactory'
 import { reorderItems } from '../utils/reorder'
+
+const UNTITLED_PAGE_TITLE = '未命名'
+const BACKUP_VERSION = 1
 
 export interface WorkspaceState {
   pages: PageRecord[]
@@ -31,6 +36,8 @@ export interface WorkspaceState {
   deleteBlock: (pageId: PageId, blockId: string) => Promise<void>
   duplicateBlock: (pageId: PageId, blockId: string) => Promise<void>
   turnBlockInto: (pageId: PageId, blockId: string, type: BlockType) => Promise<void>
+  exportJson: () => Promise<string>
+  importJson: (payload: unknown) => Promise<void>
 }
 
 function createEmptyState(): WorkspaceState {
@@ -75,6 +82,12 @@ function createEmptyState(): WorkspaceState {
     turnBlockInto: async () => {
       throw new Error('not implemented')
     },
+    exportJson: async () => {
+      throw new Error('not implemented')
+    },
+    importJson: async () => {
+      throw new Error('not implemented')
+    },
   }
 }
 
@@ -84,12 +97,69 @@ function createPageRecord(parentId?: PageId): PageRecord {
   return {
     id: createId('page'),
     parentId: parentId ?? null,
-    title: '未命名',
+    title: UNTITLED_PAGE_TITLE,
     icon: null,
     cover: null,
     blocks: [],
     createdAt: now,
     updatedAt: now,
+  }
+}
+
+function createSettings(lastOpenedPageId: PageId | null): WorkspaceSettings {
+  return {
+    lastOpenedPageId,
+  }
+}
+
+function resolveCurrentPageId(snapshot: Pick<WorkspaceSnapshot, 'pages' | 'settings'>): PageId | null {
+  const preferredPageId = snapshot.settings.lastOpenedPageId
+
+  if (preferredPageId && snapshot.pages.some((page) => page.id === preferredPageId)) {
+    return preferredPageId
+  }
+
+  return snapshot.pages[0]?.id ?? null
+}
+
+function createBackupPayload(snapshot: WorkspaceSnapshot): WorkspaceBackup {
+  return {
+    version: BACKUP_VERSION,
+    exportedAt: new Date().toISOString(),
+    pages: snapshot.pages,
+    settings: snapshot.settings,
+  }
+}
+
+function normalizeImportedSnapshot(payload: unknown): WorkspaceSnapshot {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Invalid workspace payload')
+  }
+
+  const candidate = payload as {
+    pages?: unknown
+    settings?: {
+      lastOpenedPageId?: unknown
+    }
+  }
+
+  if (!Array.isArray(candidate.pages)) {
+    throw new Error('Invalid workspace pages')
+  }
+
+  if (!candidate.settings) {
+    throw new Error('Invalid workspace settings')
+  }
+
+  const { lastOpenedPageId } = candidate.settings
+
+  if (lastOpenedPageId !== null && typeof lastOpenedPageId !== 'string') {
+    throw new Error('Invalid workspace settings')
+  }
+
+  return {
+    pages: structuredClone(candidate.pages as PageRecord[]),
+    settings: createSettings(lastOpenedPageId ?? null),
   }
 }
 
@@ -99,11 +169,11 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
     bootstrap: async () => {
       const snapshot = await ensureSnapshot(repository, createSeedWorkspace())
-      const currentPageId = snapshot.settings.lastOpenedPageId ?? snapshot.pages[0]?.id ?? null
+      const currentPageId = resolveCurrentPageId(snapshot)
 
       set({
         pages: snapshot.pages,
-        settings: snapshot.settings,
+        settings: createSettings(currentPageId),
         currentPageId,
         saveStatus: 'saved',
       })
@@ -112,9 +182,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
     createPage: async (parentId?: PageId) => {
       const page = createPageRecord(parentId)
       const state = get()
-      const nextSettings: WorkspaceSettings = {
-        lastOpenedPageId: page.id,
-      }
+      const nextSettings = createSettings(page.id)
       const nextSnapshot = {
         pages: [...state.pages, page],
         settings: nextSettings,
@@ -150,9 +218,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         return
       }
 
-      const nextSettings: WorkspaceSettings = {
-        lastOpenedPageId: pageId,
-      }
+      const nextSettings = createSettings(pageId)
       const nextSnapshot = {
         pages: state.pages,
         settings: nextSettings,
@@ -175,7 +241,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
     renamePage: async (pageId: PageId, title: string) => {
       const state = get()
-      const nextTitle = title.trim() || '未命名'
+      const nextTitle = title.trim() || UNTITLED_PAGE_TITLE
       const nextPages = state.pages.map((page) =>
         page.id === pageId
           ? {
@@ -212,9 +278,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       const nextCurrentPageId = currentPageDeleted
         ? (nextPages[0]?.id ?? null)
         : state.currentPageId
-      const nextSettings: WorkspaceSettings = {
-        lastOpenedPageId: nextCurrentPageId,
-      }
+      const nextSettings = createSettings(nextCurrentPageId)
       const nextSnapshot = {
         pages: nextPages,
         settings: nextSettings,
@@ -285,7 +349,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           }
           childPage = {
             id: childId,
-            title: '未命名',
+            title: UNTITLED_PAGE_TITLE,
             parentId: pageId,
             icon: null,
             cover: null,
@@ -344,8 +408,15 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         page.parentId === activePage.parentId ? reorderedSiblings[siblingIndex++] : page,
       )
 
-      await repository.save({ pages: nextPages, settings: state.settings })
-      set({ pages: nextPages, saveStatus: 'saved' })
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save({ pages: nextPages, settings: state.settings })
+        set({ pages: nextPages, saveStatus: 'saved' })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to reorder pages')
+      }
     },
 
     reorderBlocks: async (pageId: PageId, activeBlockId: string, overBlockId: string) => {
@@ -360,8 +431,15 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           : page,
       )
 
-      await repository.save({ pages: nextPages, settings: state.settings })
-      set({ pages: nextPages, saveStatus: 'saved' })
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save({ pages: nextPages, settings: state.settings })
+        set({ pages: nextPages, saveStatus: 'saved' })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to reorder blocks')
+      }
     },
 
     deleteBlock: async (pageId: PageId, blockId: string) => {
@@ -376,8 +454,15 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           : page,
       )
 
-      await repository.save({ pages: nextPages, settings: state.settings })
-      set({ pages: nextPages, saveStatus: 'saved' })
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save({ pages: nextPages, settings: state.settings })
+        set({ pages: nextPages, saveStatus: 'saved' })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to delete block')
+      }
     },
 
     duplicateBlock: async (pageId: PageId, blockId: string) => {
@@ -405,8 +490,15 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         }
       })
 
-      await repository.save({ pages: nextPages, settings: state.settings })
-      set({ pages: nextPages, saveStatus: 'saved' })
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save({ pages: nextPages, settings: state.settings })
+        set({ pages: nextPages, saveStatus: 'saved' })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to duplicate block')
+      }
     },
 
     turnBlockInto: async (pageId: PageId, blockId: string, type: BlockType) => {
@@ -430,8 +522,52 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         }
       })
 
-      await repository.save({ pages: nextPages, settings: state.settings })
-      set({ pages: nextPages, saveStatus: 'saved' })
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save({ pages: nextPages, settings: state.settings })
+        set({ pages: nextPages, saveStatus: 'saved' })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to turn block into another type')
+      }
+    },
+
+    exportJson: async () => {
+      const state = get()
+
+      return JSON.stringify(
+        createBackupPayload({
+          pages: state.pages,
+          settings: state.settings,
+        }),
+        null,
+        2,
+      )
+    },
+
+    importJson: async (payload: unknown) => {
+      const snapshot = normalizeImportedSnapshot(payload)
+      const currentPageId = resolveCurrentPageId(snapshot)
+      const nextSnapshot = {
+        pages: snapshot.pages,
+        settings: createSettings(currentPageId),
+      }
+
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.replace(nextSnapshot)
+        set({
+          pages: nextSnapshot.pages,
+          settings: nextSnapshot.settings,
+          currentPageId,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to import workspace')
+      }
     },
   }))
 }
