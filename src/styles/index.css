@@ -246,8 +246,53 @@ a {
 }
 
 .empty-block-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
   color: #9b9a97;
   font-size: 14px;
+}
+
+.empty-block-plus {
+  line-height: 32px;
+  text-align: center;
+}
+
+.empty-block-input {
+  border: 0;
+  background: transparent;
+  color: #37352f;
+  font: inherit;
+  min-height: 32px;
+  outline: 0;
+  padding: 0;
+}
+
+.slash-menu {
+  grid-column: 2;
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid #ecebe8;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+}
+
+.slash-option {
+  border: 0;
+  background: transparent;
+  color: #37352f;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.slash-option:hover {
+  background: #f3f2ef;
 }
 
 @media (max-width: 900px) {

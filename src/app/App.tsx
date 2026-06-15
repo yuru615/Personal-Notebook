@@ -63,6 +63,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onRoutePageChange={setCurrentPage}
       onRenamePage={(pageId, title) => store.getState().renamePage(pageId, title)}
       onUpdateBlock={(pageId, blockId, nextBlock) => store.getState().updateBlock(pageId, blockId, nextBlock)}
+      onInsertBlock={(pageId, type) => store.getState().insertBlock(pageId, type)}
     />
   )
 
@@ -80,6 +81,7 @@ interface AppRoutesProps {
   onRoutePageChange: (pageId: string) => Promise<void>
   onRenamePage: (pageId: string, title: string) => Promise<void>
   onUpdateBlock: (pageId: string, blockId: string, nextBlock: PageRecord['blocks'][number]) => Promise<void>
+  onInsertBlock: (pageId: string, type: PageRecord['blocks'][number]['type']) => Promise<void>
 }
 
 function AppRoutes({
@@ -89,6 +91,7 @@ function AppRoutes({
   onRoutePageChange,
   onRenamePage,
   onUpdateBlock,
+  onInsertBlock,
 }: AppRoutesProps) {
   const navigate = useNavigate()
 
@@ -129,6 +132,7 @@ function AppRoutes({
               onRoutePageChange={onRoutePageChange}
               onRenamePage={onRenamePage}
               onUpdateBlock={onUpdateBlock}
+              onInsertBlock={onInsertBlock}
             />
           }
         />
@@ -143,6 +147,7 @@ interface PageRouteProps {
   onRoutePageChange: (pageId: string) => Promise<void>
   onRenamePage: (pageId: string, title: string) => Promise<void>
   onUpdateBlock: (pageId: string, blockId: string, nextBlock: PageRecord['blocks'][number]) => Promise<void>
+  onInsertBlock: (pageId: string, type: PageRecord['blocks'][number]['type']) => Promise<void>
 }
 
 function PageRoute({
@@ -151,6 +156,7 @@ function PageRoute({
   onRoutePageChange,
   onRenamePage,
   onUpdateBlock,
+  onInsertBlock,
 }: PageRouteProps) {
   const { pageId } = useParams()
   const page = pages.find((item) => item.id === pageId)
@@ -180,6 +186,9 @@ function PageRoute({
         allPages={pages}
         onUpdateBlock={(blockId, nextBlock) => {
           void onUpdateBlock(page.id, blockId, nextBlock)
+        }}
+        onInsert={(type) => {
+          void onInsertBlock(page.id, type)
         }}
       />
     </div>

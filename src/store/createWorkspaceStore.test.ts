@@ -96,4 +96,35 @@ describe('createWorkspaceStore', () => {
       text: '更新后的正文',
     })
   })
+
+  it('inserts todo and child-page blocks', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const parentPage = store.getState().pages[0]
+
+    await store.getState().insertBlock(parentPage.id, 'todo')
+    await store.getState().insertBlock(parentPage.id, 'child_page')
+
+    const nextParentPage = store.getState().pages.find((page) => page.id === parentPage.id)
+    const todoBlocks = nextParentPage?.blocks.filter((block) => block.type === 'todo') ?? []
+    const insertedTodoBlock = todoBlocks.find(
+      (block) => block.type === 'todo' && block.text === '' && block.checked === false,
+    )
+    const childPageBlock = nextParentPage?.blocks.find((block) => block.type === 'child_page')
+    const childPage =
+      childPageBlock?.type === 'child_page'
+        ? store.getState().pages.find((page) => page.id === childPageBlock.pageId)
+        : undefined
+
+    expect(insertedTodoBlock).toMatchObject({
+      type: 'todo',
+      text: '',
+      checked: false,
+    })
+    expect(childPageBlock?.type).toBe('child_page')
+    expect(childPage?.parentId).toBe(parentPage.id)
+    expect(childPage?.title).toBe('未命名')
+  })
 })

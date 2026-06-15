@@ -1,5 +1,6 @@
-import type { BlockRecord, PageRecord } from '../../domain/types'
+import type { BlockRecord, BlockType, PageRecord } from '../../domain/types'
 import { uiCopy } from '../../ui/copy'
+import { EmptyBlockRow } from './EmptyBlockRow'
 import { ChildPageBlock } from './blocks/ChildPageBlock'
 import { CodeBlock } from './blocks/CodeBlock'
 import { ListBlock } from './blocks/ListBlock'
@@ -11,9 +12,10 @@ interface BlockEditorProps {
   page: PageRecord
   allPages: PageRecord[]
   onUpdateBlock: (blockId: string, nextBlock: BlockRecord) => void
+  onInsert?: (type: BlockType) => void
 }
 
-export function BlockEditor({ page, allPages, onUpdateBlock }: BlockEditorProps) {
+export function BlockEditor({ page, allPages, onUpdateBlock, onInsert }: BlockEditorProps) {
   const childPageTitleMap = Object.fromEntries(allPages.map((item) => [item.id, item.title]))
 
   return (
@@ -78,7 +80,11 @@ export function BlockEditor({ page, allPages, onUpdateBlock }: BlockEditorProps)
             return null
         }
       })}
-      <div className="empty-block-row">{uiCopy.page.typeSlash}</div>
+      <EmptyBlockRow
+        onInsert={(type) => {
+          onInsert?.(type)
+        }}
+      />
     </section>
   )
 }

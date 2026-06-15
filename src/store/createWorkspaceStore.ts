@@ -1,9 +1,17 @@
 import { createStore } from 'zustand/vanilla'
 import { createId } from '../utils/id'
 import { createSeedWorkspace } from '../domain/seed'
-import type { BlockRecord, PageId, PageRecord, SaveStatus, WorkspaceSettings } from '../domain/types'
+import type {
+  BlockRecord,
+  BlockType,
+  PageId,
+  PageRecord,
+  SaveStatus,
+  WorkspaceSettings,
+} from '../domain/types'
 import { ensureSnapshot, type WorkspaceRepository } from '../lib/workspaceRepository'
 import { deletePageBranch } from '../utils/pageTree'
+import { createBlock } from '../utils/blockFactory'
 
 export interface WorkspaceState {
   pages: PageRecord[]
@@ -16,6 +24,7 @@ export interface WorkspaceState {
   renamePage: (pageId: PageId, title: string) => Promise<void>
   deletePage: (pageId: PageId) => Promise<void>
   updateBlock: (pageId: PageId, blockId: string, nextBlock: BlockRecord) => Promise<void>
+  insertBlock: (pageId: PageId, type: BlockType) => Promise<void>
 }
 
 function createEmptyState(): WorkspaceState {
@@ -40,6 +49,9 @@ function createEmptyState(): WorkspaceState {
       throw new Error('not implemented')
     },
     updateBlock: async () => {
+      throw new Error('not implemented')
+    },
+    insertBlock: async () => {
       throw new Error('not implemented')
     },
   }
@@ -230,6 +242,68 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       } catch {
         set({ saveStatus: 'error' })
         throw new Error('Failed to update block')
+      }
+    },
+
+    insertBlock: async (pageId: PageId, type: BlockType) => {
+      const state = get()
+      const now = new Date().toISOString()
+      let childPage: PageRecord | null = null
+
+      const nextPages = state.pages.map((page) => {
+        if (page.id !== pageId) {
+          return page
+        }
+
+        if (type === 'child_page') {
+          const childId = createId('page')
+          const childPageBlock: BlockRecord = {
+            id: createId('block'),
+            type: 'child_page',
+            pageId: childId,
+          }
+          childPage = {
+            id: childId,
+            title: '未命名',
+            parentId: pageId,
+            icon: null,
+            cover: null,
+            blocks: [],
+            createdAt: now,
+            updatedAt: now,
+          }
+
+          return {
+            ...page,
+            updatedAt: now,
+            blocks: [...page.blocks, childPageBlock],
+          }
+        }
+
+        return {
+          ...page,
+          updatedAt: now,
+          blocks: [...page.blocks, createBlock(type)],
+        }
+      })
+
+      const snapshotPages = childPage ? [...nextPages, childPage] : nextPages
+      const nextSnapshot = {
+        pages: snapshotPages,
+        settings: state.settings,
+      }
+
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save(nextSnapshot)
+        set({
+          pages: snapshotPages,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to insert block')
       }
     },
   }))
