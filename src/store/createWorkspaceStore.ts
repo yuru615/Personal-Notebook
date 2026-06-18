@@ -1,5 +1,11 @@
 import { createStore } from 'zustand/vanilla'
-import { addMindmapChildNode as appendMindmapChildNode } from '../components/mindmap/mindmapModel'
+import {
+  addMindmapChildNode as appendMindmapChildNode,
+  addMindmapSiblingNode as appendMindmapSiblingNode,
+  deleteMindmapNode as removeMindmapNode,
+  renameMindmap as updateMindmapTitle,
+  renameMindmapNode as updateMindmapNodeText,
+} from '../components/mindmap/mindmapModel'
 import { getTextBlockStyle, isTextStyleableBlock } from '../domain/blockTextStyle'
 import { normalizeRichText, richTextFromPlainText } from '../domain/richText'
 import { createSeedWorkspace } from '../domain/seed'
@@ -50,7 +56,11 @@ export interface WorkspaceState {
   setPageOutlineVisible: (pageId: PageId, showOutline: boolean) => Promise<void>
   renameBoard: (boardId: string, title: string) => Promise<void>
   updateBoardSnapshot: (boardId: string, snapshot: unknown) => Promise<void>
+  renameMindmap: (mindmapId: string, title: string) => Promise<void>
   addMindmapChildNode: (mindmapId: string, parentNodeId: string) => Promise<void>
+  renameMindmapNode: (mindmapId: string, nodeId: string, text: string) => Promise<void>
+  addMindmapSiblingNode: (mindmapId: string, nodeId: string) => Promise<void>
+  deleteMindmapNode: (mindmapId: string, nodeId: string) => Promise<void>
   renamePage: (pageId: PageId, title: string) => Promise<void>
   deletePage: (pageId: PageId) => Promise<void>
   updateBlock: (pageId: PageId, blockId: string, nextBlock: BlockRecord) => Promise<void>
@@ -122,7 +132,19 @@ function createEmptyState(): WorkspaceState {
     updateBoardSnapshot: async () => {
       throw new Error('not implemented')
     },
+    renameMindmap: async () => {
+      throw new Error('not implemented')
+    },
     addMindmapChildNode: async () => {
+      throw new Error('not implemented')
+    },
+    renameMindmapNode: async () => {
+      throw new Error('not implemented')
+    },
+    addMindmapSiblingNode: async () => {
+      throw new Error('not implemented')
+    },
+    deleteMindmapNode: async () => {
       throw new Error('not implemented')
     },
     renamePage: async () => {
@@ -782,6 +804,34 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       }
     },
 
+    renameMindmap: async (mindmapId: string, title: string) => {
+      const state = get()
+      const nextMindmaps = state.mindmaps.map((mindmap) =>
+        mindmap.id === mindmapId ? updateMindmapTitle(mindmap, title) : mindmap,
+      )
+
+      pushUndoSnapshot(state)
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save({
+          boards: state.boards,
+          mindmaps: nextMindmaps,
+          pages: state.pages,
+          settings: state.settings,
+        })
+        set({
+          boards: state.boards,
+          mindmaps: nextMindmaps,
+          pages: state.pages,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to rename mindmap')
+      }
+    },
+
     addMindmapChildNode: async (mindmapId: string, parentNodeId: string) => {
       const state = get()
       const nextMindmaps = state.mindmaps.map((mindmap) =>
@@ -807,6 +857,90 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       } catch {
         set({ saveStatus: 'error' })
         throw new Error('Failed to add child node to mindmap')
+      }
+    },
+
+    renameMindmapNode: async (mindmapId: string, nodeId: string, text: string) => {
+      const state = get()
+      const nextMindmaps = state.mindmaps.map((mindmap) =>
+        mindmap.id === mindmapId ? updateMindmapNodeText(mindmap, nodeId, text) : mindmap,
+      )
+
+      pushUndoSnapshot(state)
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save({
+          boards: state.boards,
+          mindmaps: nextMindmaps,
+          pages: state.pages,
+          settings: state.settings,
+        })
+        set({
+          boards: state.boards,
+          mindmaps: nextMindmaps,
+          pages: state.pages,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to rename mindmap node')
+      }
+    },
+
+    addMindmapSiblingNode: async (mindmapId: string, nodeId: string) => {
+      const state = get()
+      const nextMindmaps = state.mindmaps.map((mindmap) =>
+        mindmap.id === mindmapId ? appendMindmapSiblingNode(mindmap, nodeId) : mindmap,
+      )
+
+      pushUndoSnapshot(state)
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save({
+          boards: state.boards,
+          mindmaps: nextMindmaps,
+          pages: state.pages,
+          settings: state.settings,
+        })
+        set({
+          boards: state.boards,
+          mindmaps: nextMindmaps,
+          pages: state.pages,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to add sibling node to mindmap')
+      }
+    },
+
+    deleteMindmapNode: async (mindmapId: string, nodeId: string) => {
+      const state = get()
+      const nextMindmaps = state.mindmaps.map((mindmap) =>
+        mindmap.id === mindmapId ? removeMindmapNode(mindmap, nodeId) : mindmap,
+      )
+
+      pushUndoSnapshot(state)
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save({
+          boards: state.boards,
+          mindmaps: nextMindmaps,
+          pages: state.pages,
+          settings: state.settings,
+        })
+        set({
+          boards: state.boards,
+          mindmaps: nextMindmaps,
+          pages: state.pages,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to delete mindmap node')
       }
     },
 

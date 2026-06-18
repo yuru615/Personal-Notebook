@@ -511,6 +511,117 @@ describe('createWorkspaceStore', () => {
     })
   })
 
+  it('renames a mindmap and persists the new title', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const pageId = store.getState().pages[0].id
+    await store.getState().insertBlock(pageId, 'mindmap')
+
+    const mindmapId = store.getState().mindmaps[0].id
+    await store.getState().renameMindmap(mindmapId, '产品调研导图')
+
+    expect(store.getState().mindmaps[0]).toMatchObject({
+      id: mindmapId,
+      title: '产品调研导图',
+    })
+
+    const snapshot = await repository.load()
+    expect(snapshot?.mindmaps[0]).toMatchObject({
+      id: mindmapId,
+      title: '产品调研导图',
+    })
+  })
+
+  it('renames a mindmap node and persists the new text', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const pageId = store.getState().pages[0].id
+    await store.getState().insertBlock(pageId, 'mindmap')
+
+    const mindmap = store.getState().mindmaps[0]
+    await store.getState().renameMindmapNode(mindmap.id, mindmap.rootNodeId, '用户洞察')
+
+    expect(store.getState().mindmaps[0].nodes[mindmap.rootNodeId]).toMatchObject({
+      id: mindmap.rootNodeId,
+      text: '用户洞察',
+    })
+
+    const snapshot = await repository.load()
+    expect(snapshot?.mindmaps[0].nodes[mindmap.rootNodeId]).toMatchObject({
+      id: mindmap.rootNodeId,
+      text: '用户洞察',
+    })
+  })
+
+  it('adds a sibling node to a non-root node and persists it', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const pageId = store.getState().pages[0].id
+    await store.getState().insertBlock(pageId, 'mindmap')
+
+    const initialMindmap = store.getState().mindmaps[0]
+    await store.getState().addMindmapChildNode(initialMindmap.id, initialMindmap.rootNodeId)
+
+    const childNode = Object.values(store.getState().mindmaps[0].nodes).find(
+      (node) => node.parentId === initialMindmap.rootNodeId,
+    )
+
+    if (!childNode) {
+      throw new Error('Expected child node')
+    }
+
+    await store.getState().addMindmapSiblingNode(initialMindmap.id, childNode.id)
+
+    const siblingNodes = Object.values(store.getState().mindmaps[0].nodes)
+      .filter((node) => node.parentId === initialMindmap.rootNodeId)
+      .sort((left, right) => left.order - right.order)
+
+    expect(siblingNodes).toHaveLength(2)
+    expect(siblingNodes[1]).toMatchObject({
+      text: '新节点',
+      order: 1,
+    })
+
+    const snapshot = await repository.load()
+    expect(
+      Object.values(snapshot?.mindmaps[0].nodes ?? {}).filter(
+        (node) => node.parentId === initialMindmap.rootNodeId,
+      ),
+    ).toHaveLength(2)
+  })
+
+  it('deletes a non-root node from a mindmap and persists the result', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const pageId = store.getState().pages[0].id
+    await store.getState().insertBlock(pageId, 'mindmap')
+
+    const initialMindmap = store.getState().mindmaps[0]
+    await store.getState().addMindmapChildNode(initialMindmap.id, initialMindmap.rootNodeId)
+    const childNode = Object.values(store.getState().mindmaps[0].nodes).find(
+      (node) => node.parentId === initialMindmap.rootNodeId,
+    )
+
+    if (!childNode) {
+      throw new Error('Expected child node')
+    }
+
+    await store.getState().deleteMindmapNode(initialMindmap.id, childNode.id)
+
+    expect(Object.keys(store.getState().mindmaps[0].nodes)).toEqual([initialMindmap.rootNodeId])
+
+    const snapshot = await repository.load()
+    expect(Object.keys(snapshot?.mindmaps[0].nodes ?? {})).toEqual([initialMindmap.rootNodeId])
+  })
+
   it('renames a board and persists the new title', async () => {
     const repository = createMemoryRepository()
     const store = createWorkspaceStore(repository)

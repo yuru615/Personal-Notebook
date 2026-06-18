@@ -1,5 +1,4 @@
-import { render, screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { MindmapPage } from './MindmapPage'
 
@@ -7,7 +6,7 @@ const page = {
   id: 'page-home',
   parentId: null,
   title: '首页',
-  icon: '📚',
+  icon: '📎',
   cover: null,
   blocks: [],
   createdAt: '2026-06-18T00:00:00.000Z',
@@ -44,8 +43,7 @@ describe('MindmapPage', () => {
     expect(screen.getByRole('button', { name: '返回页面' })).toBeInTheDocument()
   })
 
-  it('forwards title edits', async () => {
-    const user = userEvent.setup()
+  it('forwards title edits', () => {
     const onRename = vi.fn()
 
     render(
@@ -54,10 +52,10 @@ describe('MindmapPage', () => {
       </MindmapPage>,
     )
 
-    const input = screen.getByLabelText('思维导图标题')
-    await user.clear(input)
-    await user.type(input, '导图新标题')
+    fireEvent.input(screen.getByLabelText('思维导图标题'), {
+      target: { value: '竞品拆解导图' },
+    })
 
-    expect(onRename).toHaveBeenLastCalledWith('导图新标题')
+    expect(onRename).toHaveBeenLastCalledWith('竞品拆解导图')
   })
 })

@@ -101,8 +101,18 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onUpdateBoardSnapshot={(boardId, snapshot) =>
         store.getState().updateBoardSnapshot(boardId, snapshot)
       }
+      onRenameMindmap={(mindmapId, title) => store.getState().renameMindmap(mindmapId, title)}
       onAddMindmapChildNode={(mindmapId, parentNodeId) =>
         store.getState().addMindmapChildNode(mindmapId, parentNodeId)
+      }
+      onRenameMindmapNode={(mindmapId, nodeId, text) =>
+        store.getState().renameMindmapNode(mindmapId, nodeId, text)
+      }
+      onAddMindmapSiblingNode={(mindmapId, nodeId) =>
+        store.getState().addMindmapSiblingNode(mindmapId, nodeId)
+      }
+      onDeleteMindmapNode={(mindmapId, nodeId) =>
+        store.getState().deleteMindmapNode(mindmapId, nodeId)
       }
       onTogglePageFullWidth={(pageId, isFullWidth) =>
         store.getState().setPageFullWidth(pageId, isFullWidth)
@@ -191,7 +201,11 @@ interface AppRoutesProps {
   onRenamePage: (pageId: string, title: string) => Promise<void>
   onRenameBoard: (boardId: string, title: string) => Promise<void>
   onUpdateBoardSnapshot: (boardId: string, snapshot: unknown) => Promise<void>
+  onRenameMindmap: (mindmapId: string, title: string) => Promise<void>
   onAddMindmapChildNode: (mindmapId: string, parentNodeId: string) => Promise<void>
+  onRenameMindmapNode: (mindmapId: string, nodeId: string, text: string) => Promise<void>
+  onAddMindmapSiblingNode: (mindmapId: string, nodeId: string) => Promise<void>
+  onDeleteMindmapNode: (mindmapId: string, nodeId: string) => Promise<void>
   onTogglePageFullWidth: (pageId: string, isFullWidth: boolean) => Promise<void>
   onTogglePageSmallText: (pageId: string, isSmallText: boolean) => Promise<void>
   onTogglePageFontFamily: (pageId: string, fontFamily: PageFontFamily) => Promise<void>
@@ -243,7 +257,11 @@ function AppRoutes({
   onRenamePage,
   onRenameBoard,
   onUpdateBoardSnapshot,
+  onRenameMindmap,
   onAddMindmapChildNode,
+  onRenameMindmapNode,
+  onAddMindmapSiblingNode,
+  onDeleteMindmapNode,
   onTogglePageFullWidth,
   onTogglePageSmallText,
   onTogglePageFontFamily,
@@ -390,7 +408,11 @@ function AppRoutes({
                 mindmaps={mindmaps}
                 currentPageId={currentPageId}
                 onRoutePageChange={onRoutePageChange}
+                onRenameMindmap={onRenameMindmap}
                 onAddMindmapChildNode={onAddMindmapChildNode}
+                onRenameMindmapNode={onRenameMindmapNode}
+                onAddMindmapSiblingNode={onAddMindmapSiblingNode}
+                onDeleteMindmapNode={onDeleteMindmapNode}
               />
             }
           />
@@ -652,7 +674,11 @@ interface MindmapRouteProps {
   mindmaps: MindmapRecord[]
   currentPageId: string | null
   onRoutePageChange: (pageId: string) => Promise<void>
+  onRenameMindmap: (mindmapId: string, title: string) => Promise<void>
   onAddMindmapChildNode: (mindmapId: string, parentNodeId: string) => Promise<void>
+  onRenameMindmapNode: (mindmapId: string, nodeId: string, text: string) => Promise<void>
+  onAddMindmapSiblingNode: (mindmapId: string, nodeId: string) => Promise<void>
+  onDeleteMindmapNode: (mindmapId: string, nodeId: string) => Promise<void>
 }
 
 function MindmapRoute({
@@ -660,7 +686,11 @@ function MindmapRoute({
   mindmaps,
   currentPageId,
   onRoutePageChange,
+  onRenameMindmap,
   onAddMindmapChildNode,
+  onRenameMindmapNode,
+  onAddMindmapSiblingNode,
+  onDeleteMindmapNode,
 }: MindmapRouteProps) {
   const { pageId, mindmapId } = useParams()
   const navigate = useNavigate()
@@ -684,17 +714,27 @@ function MindmapRoute({
       page={page}
       mindmap={mindmap}
       onBack={() => navigate(`/pages/${page.id}`)}
-      onRename={() => undefined}
+      onRename={(title) => {
+        if (mindmap) {
+          void onRenameMindmap(mindmap.id, title)
+        }
+      }}
     >
       {mindmap ? (
         <MindmapCanvas
           mindmap={mindmap}
-          onRenameNode={() => undefined}
+          onRenameNode={(nodeId, text) => {
+            void onRenameMindmapNode(mindmap.id, nodeId, text)
+          }}
           onAddChildNode={(nodeId) => {
             void onAddMindmapChildNode(mindmap.id, nodeId)
           }}
-          onAddSiblingNode={() => undefined}
-          onDeleteNode={() => undefined}
+          onAddSiblingNode={(nodeId) => {
+            void onAddMindmapSiblingNode(mindmap.id, nodeId)
+          }}
+          onDeleteNode={(nodeId) => {
+            void onDeleteMindmapNode(mindmap.id, nodeId)
+          }}
         />
       ) : (
         <div className="mindmap-page-empty">思维导图编辑器即将接入</div>

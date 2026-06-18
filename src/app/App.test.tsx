@@ -397,6 +397,77 @@ describe('App shell', () => {
     })
   })
 
+  it('persists mindmap node edits from the mindmap route', async () => {
+    const repository = createMemoryRepository({
+      boards: [],
+      mindmaps: [
+        {
+          id: 'mindmap-product',
+          title: '产品调研导图',
+          rootNodeId: 'mindmap-node-root',
+          nodes: {
+            'mindmap-node-root': {
+              id: 'mindmap-node-root',
+              parentId: null,
+              text: '中心主题',
+              order: 0,
+            },
+            'mindmap-node-child': {
+              id: 'mindmap-node-child',
+              parentId: 'mindmap-node-root',
+              text: '已有分支',
+              order: 0,
+            },
+          },
+          viewport: { x: 0, y: 0, zoom: 1 },
+          createdAt: '2026-06-18T00:00:00.000Z',
+          updatedAt: '2026-06-18T00:00:00.000Z',
+        },
+      ],
+      pages: [
+        {
+          id: 'page-home',
+          parentId: null,
+          title: '首页',
+          icon: null,
+          cover: null,
+          blocks: [
+            {
+              id: 'block-mindmap',
+              type: 'mindmap',
+              mindmapId: 'mindmap-product',
+            },
+          ],
+          createdAt: '2026-06-18T00:00:00.000Z',
+          updatedAt: '2026-06-18T00:00:00.000Z',
+        },
+      ],
+      settings: {
+        lastOpenedPageId: 'page-home',
+      },
+    })
+    const user = userEvent.setup()
+
+    render(<App repository={repository} initialEntries={['/pages/page-home/mindmaps/mindmap-product']} />)
+
+    await screen.findByDisplayValue('产品调研导图')
+    const rootInput = screen.getByLabelText('节点 mindmap-node-root')
+    fireEvent.input(rootInput, { target: { value: '研究主题' } })
+
+    await user.click(screen.getAllByRole('button', { name: '同级' })[1])
+    await user.click(screen.getAllByRole('button', { name: '删除' })[0])
+
+    await waitFor(async () => {
+      const snapshot = await repository.load()
+      expect(snapshot?.mindmaps[0].nodes['mindmap-node-root']?.text).toBe('研究主题')
+      expect(
+        Object.values(snapshot?.mindmaps[0].nodes ?? {}).filter(
+          (node) => node.parentId === 'mindmap-node-root',
+        ),
+      ).toHaveLength(1)
+    })
+  })
+
   it('persists whiteboard canvas changes from the board route', async () => {
     const repository = createMemoryRepository({
       boards: [
