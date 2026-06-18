@@ -622,6 +622,42 @@ describe('createWorkspaceStore', () => {
     expect(Object.keys(snapshot?.mindmaps[0].nodes ?? {})).toEqual([initialMindmap.rootNodeId])
   })
 
+  it('preserves earlier mindmap edits when multiple mindmap updates run back to back', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const pageId = store.getState().pages[0].id
+    await store.getState().insertBlock(pageId, 'mindmap')
+
+    const mindmap = store.getState().mindmaps[0]
+    const renameTitlePromise = store.getState().renameMindmap(mindmap.id, '竞品拆解导图')
+    const renameNodePromise = store.getState().renameMindmapNode(
+      mindmap.id,
+      mindmap.rootNodeId,
+      '研究主题',
+    )
+
+    await Promise.all([renameTitlePromise, renameNodePromise])
+
+    expect(store.getState().mindmaps[0]).toMatchObject({
+      id: mindmap.id,
+      title: '竞品拆解导图',
+    })
+    expect(store.getState().mindmaps[0].nodes[mindmap.rootNodeId]).toMatchObject({
+      text: '研究主题',
+    })
+
+    const snapshot = await repository.load()
+    expect(snapshot?.mindmaps[0]).toMatchObject({
+      id: mindmap.id,
+      title: '竞品拆解导图',
+    })
+    expect(snapshot?.mindmaps[0].nodes[mindmap.rootNodeId]).toMatchObject({
+      text: '研究主题',
+    })
+  })
+
   it('renames a board and persists the new title', async () => {
     const repository = createMemoryRepository()
     const store = createWorkspaceStore(repository)

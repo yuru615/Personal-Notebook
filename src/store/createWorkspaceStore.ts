@@ -479,7 +479,38 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
     }
   }
 
-  return createStore<WorkspaceState>()((set, get) => ({
+  return createStore<WorkspaceState>()((set, get) => {
+    async function persistMindmaps(
+      state: Pick<WorkspaceState, 'boards' | 'mindmaps' | 'pages' | 'settings'>,
+      nextMindmaps: MindmapRecord[],
+    ) {
+      set({
+        boards: state.boards,
+        mindmaps: nextMindmaps,
+        pages: state.pages,
+        saveStatus: 'saving',
+      })
+
+      try {
+        await repository.save({
+          boards: state.boards,
+          mindmaps: nextMindmaps,
+          pages: state.pages,
+          settings: state.settings,
+        })
+        set({
+          boards: state.boards,
+          mindmaps: nextMindmaps,
+          pages: state.pages,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to persist mindmap changes')
+      }
+    }
+
+    return ({
     ...createEmptyState(),
 
     bootstrap: async () => {
@@ -811,23 +842,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       )
 
       pushUndoSnapshot(state)
-      set({ saveStatus: 'saving' })
-
       try {
-        await repository.save({
-          boards: state.boards,
-          mindmaps: nextMindmaps,
-          pages: state.pages,
-          settings: state.settings,
-        })
-        set({
-          boards: state.boards,
-          mindmaps: nextMindmaps,
-          pages: state.pages,
-          saveStatus: 'saved',
-        })
+        await persistMindmaps(state, nextMindmaps)
       } catch {
-        set({ saveStatus: 'error' })
         throw new Error('Failed to rename mindmap')
       }
     },
@@ -839,23 +856,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       )
 
       pushUndoSnapshot(state)
-      set({ saveStatus: 'saving' })
-
       try {
-        await repository.save({
-          boards: state.boards,
-          mindmaps: nextMindmaps,
-          pages: state.pages,
-          settings: state.settings,
-        })
-        set({
-          boards: state.boards,
-          mindmaps: nextMindmaps,
-          pages: state.pages,
-          saveStatus: 'saved',
-        })
+        await persistMindmaps(state, nextMindmaps)
       } catch {
-        set({ saveStatus: 'error' })
         throw new Error('Failed to add child node to mindmap')
       }
     },
@@ -867,23 +870,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       )
 
       pushUndoSnapshot(state)
-      set({ saveStatus: 'saving' })
-
       try {
-        await repository.save({
-          boards: state.boards,
-          mindmaps: nextMindmaps,
-          pages: state.pages,
-          settings: state.settings,
-        })
-        set({
-          boards: state.boards,
-          mindmaps: nextMindmaps,
-          pages: state.pages,
-          saveStatus: 'saved',
-        })
+        await persistMindmaps(state, nextMindmaps)
       } catch {
-        set({ saveStatus: 'error' })
         throw new Error('Failed to rename mindmap node')
       }
     },
@@ -895,23 +884,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       )
 
       pushUndoSnapshot(state)
-      set({ saveStatus: 'saving' })
-
       try {
-        await repository.save({
-          boards: state.boards,
-          mindmaps: nextMindmaps,
-          pages: state.pages,
-          settings: state.settings,
-        })
-        set({
-          boards: state.boards,
-          mindmaps: nextMindmaps,
-          pages: state.pages,
-          saveStatus: 'saved',
-        })
+        await persistMindmaps(state, nextMindmaps)
       } catch {
-        set({ saveStatus: 'error' })
         throw new Error('Failed to add sibling node to mindmap')
       }
     },
@@ -923,23 +898,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       )
 
       pushUndoSnapshot(state)
-      set({ saveStatus: 'saving' })
-
       try {
-        await repository.save({
-          boards: state.boards,
-          mindmaps: nextMindmaps,
-          pages: state.pages,
-          settings: state.settings,
-        })
-        set({
-          boards: state.boards,
-          mindmaps: nextMindmaps,
-          pages: state.pages,
-          saveStatus: 'saved',
-        })
+        await persistMindmaps(state, nextMindmaps)
       } catch {
-        set({ saveStatus: 'error' })
         throw new Error('Failed to delete mindmap node')
       }
     },
@@ -1562,5 +1523,5 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         throw new Error('Failed to import workspace')
       }
     },
-  }))
+  })})
 }

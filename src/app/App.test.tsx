@@ -397,7 +397,7 @@ describe('App shell', () => {
     })
   })
 
-  it('persists mindmap node edits from the mindmap route', async () => {
+  it('persists mindmap title and node edits from the mindmap route', async () => {
     const repository = createMemoryRepository({
       boards: [],
       mindmaps: [
@@ -450,7 +450,8 @@ describe('App shell', () => {
 
     render(<App repository={repository} initialEntries={['/pages/page-home/mindmaps/mindmap-product']} />)
 
-    await screen.findByDisplayValue('产品调研导图')
+    const titleInput = await screen.findByDisplayValue('产品调研导图')
+    fireEvent.input(titleInput, { target: { value: '竞品拆解导图' } })
     const rootInput = screen.getByLabelText('节点 mindmap-node-root')
     fireEvent.input(rootInput, { target: { value: '研究主题' } })
 
@@ -459,6 +460,7 @@ describe('App shell', () => {
 
     await waitFor(async () => {
       const snapshot = await repository.load()
+      expect(snapshot?.mindmaps[0].title).toBe('竞品拆解导图')
       expect(snapshot?.mindmaps[0].nodes['mindmap-node-root']?.text).toBe('研究主题')
       expect(
         Object.values(snapshot?.mindmaps[0].nodes ?? {}).filter(
