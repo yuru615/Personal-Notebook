@@ -16,10 +16,36 @@ describe('CanvasEntryCard', () => {
       />,
     )
 
-    expect(screen.getByRole('button', { name: '打开思维导图 产品调研导图' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '打开思维导图 产品调研导图' })).toHaveClass(
+      'canvas-entry-card',
+    )
     expect(screen.getByText('产品调研导图')).toBeInTheDocument()
     expect(screen.getByText('刚刚更新')).toBeInTheDocument()
     expect(screen.getByText('空白导图')).toBeInTheDocument()
+  })
+
+  it('merges shared and mode-specific class names', () => {
+    render(
+      <CanvasEntryCard
+        kindLabel="思维导图"
+        title="产品调研导图"
+        meta="刚刚更新"
+        emptyPreviewLabel="空白导图"
+        openLabel="打开"
+        onOpen={() => undefined}
+        className="mindmap-card"
+        previewClassName="mindmap-card-preview"
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: '打开思维导图 产品调研导图' })).toHaveClass(
+      'canvas-entry-card',
+      'mindmap-card',
+    )
+    expect(screen.getByText('空白导图').parentElement).toHaveClass(
+      'canvas-entry-card-preview',
+      'mindmap-card-preview',
+    )
   })
 
   it('forwards open clicks', async () => {

@@ -78,7 +78,28 @@ Shared style hook:
 
 This prevents each mode from carrying its own identical preview image sizing rule.
 
-### 2.4 Shared non-page asset persistence path
+### 2.4 Shared shell style tokens
+
+Shared style hooks:
+
+- `.canvas-entry-card*`
+- `.structured-canvas-page*`
+
+What moved into the shared layer:
+
+- entry card container layout
+- entry card title/meta alignment
+- entry card missing-state shell
+- standalone page header and title shell
+- standalone page empty-state shell
+
+What stays mode-specific:
+
+- preview background treatment
+- canvas/editor interior styling
+- mode-specific visual accents
+
+### 2.5 Shared non-page asset persistence path
 
 Shared store-side helper:
 

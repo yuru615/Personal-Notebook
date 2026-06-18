@@ -19,6 +19,10 @@ interface CanvasEntryCardProps {
   previewContent?: ReactNode
 }
 
+function joinClassNames(...parts: Array<string | undefined | false>) {
+  return parts.filter(Boolean).join(' ')
+}
+
 export function CanvasEntryCard({
   kindLabel,
   title,
@@ -40,24 +44,28 @@ export function CanvasEntryCard({
   return (
     <button
       type="button"
-      className={className}
+      className={joinClassNames('canvas-entry-card', className, isMissing && 'canvas-entry-card-missing')}
       data-missing={isMissing ? 'true' : undefined}
       aria-label={`${openLabel}${kindLabel} ${title}`}
       onClick={onOpen}
     >
-      <span className={previewClassName} aria-hidden="true">
+      <span className={joinClassNames('canvas-entry-card-preview', previewClassName)} aria-hidden="true">
         {previewContent ??
           (previewUrl ? (
             <img className="canvas-entry-preview-image" src={previewUrl} alt="" />
           ) : (
-            <span className={emptyPreviewClassName}>{emptyPreviewLabel}</span>
+            <span
+              className={joinClassNames('canvas-entry-card-preview-empty', emptyPreviewClassName)}
+            >
+              {emptyPreviewLabel}
+            </span>
           ))}
       </span>
-      <span className={bodyClassName}>
-        <span className={titleClassName}>{title}</span>
-        <span className={metaClassName}>{meta}</span>
+      <span className={joinClassNames('canvas-entry-card-body', bodyClassName)}>
+        <span className={joinClassNames('canvas-entry-card-title', titleClassName)}>{title}</span>
+        <span className={joinClassNames('canvas-entry-card-meta', metaClassName)}>{meta}</span>
       </span>
-      <span className={arrowClassName} aria-hidden="true">
+      <span className={joinClassNames('canvas-entry-card-arrow', arrowClassName)} aria-hidden="true">
         {openLabel}
       </span>
     </button>

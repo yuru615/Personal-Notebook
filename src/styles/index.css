@@ -1864,7 +1864,7 @@ a {
   line-height: 1;
 }
 
-.mindmap-card {
+.canvas-entry-card {
   border: 1px solid #e8e6e3;
   background: #ffffff;
   color: #37352f;
@@ -1884,18 +1884,18 @@ a {
     box-shadow 120ms ease;
 }
 
-.mindmap-card:hover {
+.canvas-entry-card:hover {
   background: #fbfbfa;
   border-color: #dedbd6;
   box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
 }
 
-.mindmap-card-missing {
+.canvas-entry-card-missing {
   border-style: dashed;
   color: #9b4d4d;
 }
 
-.mindmap-card-preview {
+.canvas-entry-card-preview {
   display: grid;
   place-items: center;
   width: 148px;
@@ -1903,6 +1903,9 @@ a {
   overflow: hidden;
   border: 1px solid #efeeeb;
   border-radius: 6px;
+}
+
+.mindmap-card-preview {
   background:
     radial-gradient(circle at 24px 36px, rgba(35, 131, 226, 0.18), transparent 18px),
     linear-gradient(#f7f6f3 1px, transparent 1px),
@@ -1911,10 +1914,15 @@ a {
   background-size: auto, 16px 16px, 16px 16px, auto;
 }
 
-.mindmap-card-preview-label {
+.canvas-entry-card-preview-empty {
   color: #9b9a97;
   font-size: 12px;
   line-height: 1.4;
+}
+
+.mindmap-card-preview-empty,
+.mindmap-card-preview-label {
+  color: #9b9a97;
 }
 
 .canvas-entry-preview-image {
@@ -1923,13 +1931,13 @@ a {
   object-fit: cover;
 }
 
-.mindmap-card-body {
+.canvas-entry-card-body {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
-.mindmap-card-title {
+.canvas-entry-card-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1939,39 +1947,39 @@ a {
   line-height: 1.4;
 }
 
-.mindmap-card-meta,
-.mindmap-card-arrow {
+.canvas-entry-card-meta,
+.canvas-entry-card-arrow {
   color: #9b9a97;
   font-size: 12px;
   line-height: 1.35;
 }
 
-.mindmap-card-arrow {
+.canvas-entry-card-arrow {
   white-space: nowrap;
 }
 
-.mindmap-page {
+.structured-canvas-page {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 16px;
   min-height: calc(100vh - 112px);
 }
 
-.mindmap-page-header {
+.structured-canvas-page-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
 }
 
-.mindmap-page-header-main {
+.structured-canvas-page-header-main {
   display: flex;
   align-items: center;
   gap: 14px;
   min-width: 0;
 }
 
-.mindmap-page-back {
+.structured-canvas-page-back {
   border: 0;
   background: transparent;
   color: #787774;
@@ -1981,18 +1989,18 @@ a {
   cursor: pointer;
 }
 
-.mindmap-page-back:hover {
+.structured-canvas-page-back:hover {
   background: #f3f2ef;
   color: #37352f;
 }
 
-.mindmap-page-heading {
+.structured-canvas-page-heading {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
 
-.mindmap-page-title-input {
+.structured-canvas-page-title-input {
   border: 0;
   outline: 0;
   width: min(520px, 54vw);
@@ -2005,25 +2013,25 @@ a {
   line-height: 1.25;
 }
 
-.mindmap-page-title-text {
+.structured-canvas-page-title-text {
   margin: 0;
   color: #37352f;
   font-size: 22px;
   line-height: 1.25;
 }
 
-.mindmap-page-meta {
+.structured-canvas-page-meta {
   margin: 0;
   color: #9b9a97;
   font-size: 12px;
   line-height: 1.4;
 }
 
-.mindmap-page-surface {
+.structured-canvas-page-surface {
   min-height: 0;
 }
 
-.mindmap-page-empty {
+.structured-canvas-page-empty {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2123,46 +2131,7 @@ a {
   color: #37352f;
 }
 
-.whiteboard-card {
-  border: 1px solid #e8e6e3;
-  background: #ffffff;
-  color: #37352f;
-  display: grid;
-  grid-template-columns: 148px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 14px;
-  width: 100%;
-  min-height: 92px;
-  padding: 10px 12px 10px 10px;
-  border-radius: 8px;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    box-shadow 120ms ease;
-}
-
-.whiteboard-card:hover {
-  background: #fbfbfa;
-  border-color: #dedbd6;
-  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
-}
-
-.whiteboard-card-missing {
-  border-style: dashed;
-  color: #9b4d4d;
-}
-
 .whiteboard-card-preview {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 148px;
-  height: 72px;
-  overflow: hidden;
-  border: 1px solid #efeeeb;
-  border-radius: 6px;
   background:
     linear-gradient(#f7f6f3 1px, transparent 1px),
     linear-gradient(90deg, #f7f6f3 1px, transparent 1px),
@@ -2172,120 +2141,6 @@ a {
 
 .whiteboard-card-preview-empty {
   color: #b8b7b3;
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.whiteboard-card-body {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.whiteboard-card-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #37352f;
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 1.4;
-}
-
-.whiteboard-card-meta,
-.whiteboard-card-arrow {
-  color: #9b9a97;
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.whiteboard-card-arrow {
-  white-space: nowrap;
-}
-
-.whiteboard-page {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 16px;
-  min-height: calc(100vh - 112px);
-}
-
-.whiteboard-page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.whiteboard-page-header-main {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  min-width: 0;
-}
-
-.whiteboard-page-back {
-  border: 0;
-  background: transparent;
-  color: #787774;
-  min-height: 32px;
-  padding: 0 8px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.whiteboard-page-back:hover {
-  background: #f3f2ef;
-  color: #37352f;
-}
-
-.whiteboard-page-heading {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.whiteboard-page-title-input {
-  border: 0;
-  outline: 0;
-  width: min(520px, 54vw);
-  min-width: 0;
-  padding: 2px 0;
-  color: #37352f;
-  background: transparent;
-  font-size: 22px;
-  font-weight: 700;
-  line-height: 1.25;
-}
-
-.whiteboard-page-title-text {
-  margin: 0;
-  color: #37352f;
-  font-size: 22px;
-  line-height: 1.25;
-}
-
-.whiteboard-page-meta {
-  margin: 0;
-  color: #9b9a97;
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.whiteboard-page-surface {
-  min-height: 0;
-}
-
-.whiteboard-page-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 360px;
-  color: #9b9a97;
-  border: 1px dashed #e7e5e4;
-  border-radius: 8px;
-  background: #fbfbfa;
-  font-size: 14px;
 }
 
 .whiteboard-canvas {
@@ -2503,6 +2358,26 @@ a {
   outline: 2px solid #2eaadc;
   outline-offset: 2px;
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+}
+
+.whiteboard-resize-handle {
+  position: absolute;
+  z-index: 6;
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border: 1px solid #2eaadc;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.16);
+}
+
+.whiteboard-resize-handle-bottom-right {
+  cursor: nwse-resize;
+}
+
+.whiteboard-resize-handle-arrow {
+  cursor: crosshair;
 }
 
 .whiteboard-element-text {
