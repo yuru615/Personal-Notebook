@@ -338,6 +338,63 @@ describe('App shell', () => {
     expect(await screen.findByDisplayValue('产品调研导图')).toBeInTheDocument()
     expect(screen.getByText(/来源：/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '返回页面' })).toBeInTheDocument()
+    expect(screen.getByLabelText('思维导图画布')).toBeInTheDocument()
+  })
+
+  it('persists adding a child node from the mindmap route', async () => {
+    const repository = createMemoryRepository({
+      boards: [],
+      mindmaps: [
+        {
+          id: 'mindmap-product',
+          title: '产品调研导图',
+          rootNodeId: 'mindmap-node-root',
+          nodes: {
+            'mindmap-node-root': {
+              id: 'mindmap-node-root',
+              parentId: null,
+              text: '中心主题',
+              order: 0,
+            },
+          },
+          viewport: { x: 0, y: 0, zoom: 1 },
+          createdAt: '2026-06-18T00:00:00.000Z',
+          updatedAt: '2026-06-18T00:00:00.000Z',
+        },
+      ],
+      pages: [
+        {
+          id: 'page-home',
+          parentId: null,
+          title: '首页',
+          icon: null,
+          cover: null,
+          blocks: [
+            {
+              id: 'block-mindmap',
+              type: 'mindmap',
+              mindmapId: 'mindmap-product',
+            },
+          ],
+          createdAt: '2026-06-18T00:00:00.000Z',
+          updatedAt: '2026-06-18T00:00:00.000Z',
+        },
+      ],
+      settings: {
+        lastOpenedPageId: 'page-home',
+      },
+    })
+    const user = userEvent.setup()
+
+    render(<App repository={repository} initialEntries={['/pages/page-home/mindmaps/mindmap-product']} />)
+
+    await screen.findByDisplayValue('产品调研导图')
+    await user.click(screen.getByRole('button', { name: '子级' }))
+
+    await waitFor(async () => {
+      const snapshot = await repository.load()
+      expect(Object.keys(snapshot?.mindmaps[0].nodes ?? {})).toHaveLength(2)
+    })
   })
 
   it('persists whiteboard canvas changes from the board route', async () => {

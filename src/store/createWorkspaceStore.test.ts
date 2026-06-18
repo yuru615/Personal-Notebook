@@ -491,6 +491,26 @@ describe('createWorkspaceStore', () => {
     })
   })
 
+  it('adds a child node to a mindmap', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const pageId = store.getState().pages[0].id
+    await store.getState().insertBlock(pageId, 'mindmap')
+
+    const mindmap = store.getState().mindmaps[0]
+    await store.getState().addMindmapChildNode(mindmap.id, mindmap.rootNodeId)
+
+    const nextMindmap = store.getState().mindmaps[0]
+    expect(Object.keys(nextMindmap.nodes)).toHaveLength(2)
+    expect(
+      Object.values(nextMindmap.nodes).find((node) => node.parentId === mindmap.rootNodeId),
+    ).toMatchObject({
+      text: '新节点',
+    })
+  })
+
   it('renames a board and persists the new title', async () => {
     const repository = createMemoryRepository()
     const store = createWorkspaceStore(repository)

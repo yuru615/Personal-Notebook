@@ -12,6 +12,7 @@ import { BlockEditor } from '../components/editor/BlockEditor'
 import { PageHeader } from '../components/editor/PageHeader'
 import { PageOutline } from '../components/editor/PageOutline'
 import { ExportImportPanel } from '../components/export/ExportImportPanel'
+import { MindmapCanvas } from '../components/mindmap/MindmapCanvas'
 import { AppShell } from '../components/layout/AppShell'
 import { MindmapPage } from '../components/mindmap/MindmapPage'
 import { SearchDialog } from '../components/search/SearchDialog'
@@ -100,6 +101,9 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onUpdateBoardSnapshot={(boardId, snapshot) =>
         store.getState().updateBoardSnapshot(boardId, snapshot)
       }
+      onAddMindmapChildNode={(mindmapId, parentNodeId) =>
+        store.getState().addMindmapChildNode(mindmapId, parentNodeId)
+      }
       onTogglePageFullWidth={(pageId, isFullWidth) =>
         store.getState().setPageFullWidth(pageId, isFullWidth)
       }
@@ -187,6 +191,7 @@ interface AppRoutesProps {
   onRenamePage: (pageId: string, title: string) => Promise<void>
   onRenameBoard: (boardId: string, title: string) => Promise<void>
   onUpdateBoardSnapshot: (boardId: string, snapshot: unknown) => Promise<void>
+  onAddMindmapChildNode: (mindmapId: string, parentNodeId: string) => Promise<void>
   onTogglePageFullWidth: (pageId: string, isFullWidth: boolean) => Promise<void>
   onTogglePageSmallText: (pageId: string, isSmallText: boolean) => Promise<void>
   onTogglePageFontFamily: (pageId: string, fontFamily: PageFontFamily) => Promise<void>
@@ -238,6 +243,7 @@ function AppRoutes({
   onRenamePage,
   onRenameBoard,
   onUpdateBoardSnapshot,
+  onAddMindmapChildNode,
   onTogglePageFullWidth,
   onTogglePageSmallText,
   onTogglePageFontFamily,
@@ -384,6 +390,7 @@ function AppRoutes({
                 mindmaps={mindmaps}
                 currentPageId={currentPageId}
                 onRoutePageChange={onRoutePageChange}
+                onAddMindmapChildNode={onAddMindmapChildNode}
               />
             }
           />
@@ -645,6 +652,7 @@ interface MindmapRouteProps {
   mindmaps: MindmapRecord[]
   currentPageId: string | null
   onRoutePageChange: (pageId: string) => Promise<void>
+  onAddMindmapChildNode: (mindmapId: string, parentNodeId: string) => Promise<void>
 }
 
 function MindmapRoute({
@@ -652,6 +660,7 @@ function MindmapRoute({
   mindmaps,
   currentPageId,
   onRoutePageChange,
+  onAddMindmapChildNode,
 }: MindmapRouteProps) {
   const { pageId, mindmapId } = useParams()
   const navigate = useNavigate()
@@ -677,7 +686,19 @@ function MindmapRoute({
       onBack={() => navigate(`/pages/${page.id}`)}
       onRename={() => undefined}
     >
-      <div className="mindmap-page-empty">思维导图编辑器即将接入</div>
+      {mindmap ? (
+        <MindmapCanvas
+          mindmap={mindmap}
+          onRenameNode={() => undefined}
+          onAddChildNode={(nodeId) => {
+            void onAddMindmapChildNode(mindmap.id, nodeId)
+          }}
+          onAddSiblingNode={() => undefined}
+          onDeleteNode={() => undefined}
+        />
+      ) : (
+        <div className="mindmap-page-empty">思维导图编辑器即将接入</div>
+      )}
     </MindmapPage>
   )
 }

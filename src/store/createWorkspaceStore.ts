@@ -1,4 +1,5 @@
 import { createStore } from 'zustand/vanilla'
+import { addMindmapChildNode as appendMindmapChildNode } from '../components/mindmap/mindmapModel'
 import { getTextBlockStyle, isTextStyleableBlock } from '../domain/blockTextStyle'
 import { normalizeRichText, richTextFromPlainText } from '../domain/richText'
 import { createSeedWorkspace } from '../domain/seed'
@@ -49,6 +50,7 @@ export interface WorkspaceState {
   setPageOutlineVisible: (pageId: PageId, showOutline: boolean) => Promise<void>
   renameBoard: (boardId: string, title: string) => Promise<void>
   updateBoardSnapshot: (boardId: string, snapshot: unknown) => Promise<void>
+  addMindmapChildNode: (mindmapId: string, parentNodeId: string) => Promise<void>
   renamePage: (pageId: PageId, title: string) => Promise<void>
   deletePage: (pageId: PageId) => Promise<void>
   updateBlock: (pageId: PageId, blockId: string, nextBlock: BlockRecord) => Promise<void>
@@ -118,6 +120,9 @@ function createEmptyState(): WorkspaceState {
       throw new Error('not implemented')
     },
     updateBoardSnapshot: async () => {
+      throw new Error('not implemented')
+    },
+    addMindmapChildNode: async () => {
       throw new Error('not implemented')
     },
     renamePage: async () => {
@@ -774,6 +779,34 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       } catch {
         set({ saveStatus: 'error' })
         throw new Error('Failed to update board snapshot')
+      }
+    },
+
+    addMindmapChildNode: async (mindmapId: string, parentNodeId: string) => {
+      const state = get()
+      const nextMindmaps = state.mindmaps.map((mindmap) =>
+        mindmap.id === mindmapId ? appendMindmapChildNode(mindmap, parentNodeId) : mindmap,
+      )
+
+      pushUndoSnapshot(state)
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save({
+          boards: state.boards,
+          mindmaps: nextMindmaps,
+          pages: state.pages,
+          settings: state.settings,
+        })
+        set({
+          boards: state.boards,
+          mindmaps: nextMindmaps,
+          pages: state.pages,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to add child node to mindmap')
       }
     },
 
