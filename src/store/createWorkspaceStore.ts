@@ -480,12 +480,15 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
   }
 
   return createStore<WorkspaceState>()((set, get) => {
-    async function persistMindmaps(
+    async function persistNonPageAssets(
       state: Pick<WorkspaceState, 'boards' | 'mindmaps' | 'pages' | 'settings'>,
-      nextMindmaps: MindmapRecord[],
+      nextAssets: Partial<Pick<WorkspaceState, 'boards' | 'mindmaps'>>,
     ) {
+      const nextBoards = nextAssets.boards ?? state.boards
+      const nextMindmaps = nextAssets.mindmaps ?? state.mindmaps
+
       set({
-        boards: state.boards,
+        boards: nextBoards,
         mindmaps: nextMindmaps,
         pages: state.pages,
         saveStatus: 'saving',
@@ -493,20 +496,20 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
       try {
         await repository.save({
-          boards: state.boards,
+          boards: nextBoards,
           mindmaps: nextMindmaps,
           pages: state.pages,
           settings: state.settings,
         })
         set({
-          boards: state.boards,
+          boards: nextBoards,
           mindmaps: nextMindmaps,
           pages: state.pages,
           saveStatus: 'saved',
         })
       } catch {
         set({ saveStatus: 'error' })
-        throw new Error('Failed to persist mindmap changes')
+        throw new Error('Failed to persist non-page asset changes')
       }
     }
 
@@ -790,18 +793,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       )
 
       pushUndoSnapshot(state)
-      set({ saveStatus: 'saving' })
-
       try {
-        await repository.save({ boards: nextBoards, mindmaps: state.mindmaps, pages: state.pages, settings: state.settings })
-        set({
-          boards: nextBoards,
-          mindmaps: state.mindmaps,
-          pages: state.pages,
-          saveStatus: 'saved',
-        })
+        await persistNonPageAssets(state, { boards: nextBoards })
       } catch {
-        set({ saveStatus: 'error' })
         throw new Error('Failed to rename board')
       }
     },
@@ -819,18 +813,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       )
 
       pushUndoSnapshot(state)
-      set({ saveStatus: 'saving' })
-
       try {
-        await repository.save({ boards: nextBoards, mindmaps: state.mindmaps, pages: state.pages, settings: state.settings })
-        set({
-          boards: nextBoards,
-          mindmaps: state.mindmaps,
-          pages: state.pages,
-          saveStatus: 'saved',
-        })
+        await persistNonPageAssets(state, { boards: nextBoards })
       } catch {
-        set({ saveStatus: 'error' })
         throw new Error('Failed to update board snapshot')
       }
     },
@@ -843,7 +828,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
       pushUndoSnapshot(state)
       try {
-        await persistMindmaps(state, nextMindmaps)
+        await persistNonPageAssets(state, { mindmaps: nextMindmaps })
       } catch {
         throw new Error('Failed to rename mindmap')
       }
@@ -857,7 +842,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
       pushUndoSnapshot(state)
       try {
-        await persistMindmaps(state, nextMindmaps)
+        await persistNonPageAssets(state, { mindmaps: nextMindmaps })
       } catch {
         throw new Error('Failed to add child node to mindmap')
       }
@@ -871,7 +856,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
       pushUndoSnapshot(state)
       try {
-        await persistMindmaps(state, nextMindmaps)
+        await persistNonPageAssets(state, { mindmaps: nextMindmaps })
       } catch {
         throw new Error('Failed to rename mindmap node')
       }
@@ -885,7 +870,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
       pushUndoSnapshot(state)
       try {
-        await persistMindmaps(state, nextMindmaps)
+        await persistNonPageAssets(state, { mindmaps: nextMindmaps })
       } catch {
         throw new Error('Failed to add sibling node to mindmap')
       }
@@ -899,7 +884,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
       pushUndoSnapshot(state)
       try {
-        await persistMindmaps(state, nextMindmaps)
+        await persistNonPageAssets(state, { mindmaps: nextMindmaps })
       } catch {
         throw new Error('Failed to delete mindmap node')
       }

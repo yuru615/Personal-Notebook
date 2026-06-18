@@ -681,6 +681,66 @@ describe('createWorkspaceStore', () => {
     })
   })
 
+  it('preserves earlier board edits when multiple board updates run back to back', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const pageId = store.getState().pages[0].id
+    await store.getState().insertBlock(pageId, 'whiteboard')
+
+    const board = store.getState().boards[0]
+    const renameBoardPromise = store.getState().renameBoard(board.id, '流程草图')
+    const updateSnapshotPromise = store.getState().updateBoardSnapshot(board.id, {
+      version: 1,
+      elements: [
+        {
+          id: 'element-1',
+          type: 'rect',
+          x: 96,
+          y: 96,
+          width: 220,
+          height: 132,
+          rotation: 0,
+          strokeColor: 'default',
+          fillColor: 'default',
+        },
+      ],
+      viewport: { x: 0, y: 0, zoom: 1 },
+    })
+
+    await Promise.all([renameBoardPromise, updateSnapshotPromise])
+
+    expect(store.getState().boards[0]).toMatchObject({
+      id: board.id,
+      title: '流程草图',
+      snapshot: {
+        version: 1,
+        elements: [
+          {
+            id: 'element-1',
+            type: 'rect',
+          },
+        ],
+      },
+    })
+
+    const snapshot = await repository.load()
+    expect(snapshot?.boards[0]).toMatchObject({
+      id: board.id,
+      title: '流程草图',
+      snapshot: {
+        version: 1,
+        elements: [
+          {
+            id: 'element-1',
+            type: 'rect',
+          },
+        ],
+      },
+    })
+  })
+
   it('imports a JSON backup and updates the current page', async () => {
     const repository = createMemoryRepository()
     const store = createWorkspaceStore(repository)

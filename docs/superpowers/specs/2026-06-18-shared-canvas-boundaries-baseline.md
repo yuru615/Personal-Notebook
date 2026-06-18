@@ -78,6 +78,34 @@ Shared style hook:
 
 This prevents each mode from carrying its own identical preview image sizing rule.
 
+### 2.4 Shared non-page asset persistence path
+
+Shared store-side helper:
+
+- `persistNonPageAssets(...)` in `src/store/createWorkspaceStore.ts`
+
+Current consumers:
+
+- `renameBoard`
+- `updateBoardSnapshot`
+- `renameMindmap`
+- `addMindmapChildNode`
+- `renameMindmapNode`
+- `addMindmapSiblingNode`
+- `deleteMindmapNode`
+
+What moved into the shared layer:
+
+- immediate optimistic store update for non-page content objects
+- repository save shape for `{ boards, mindmaps, pages, settings }`
+- saved/error status transition for this class of object
+
+What stays mode-specific:
+
+- how the next board snapshot is produced
+- how the next mindmap tree is produced
+- mode-specific validation and mutation helpers
+
 ## 3. Still mode-specific by design
 
 These are intentionally not shared yet:
