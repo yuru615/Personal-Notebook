@@ -51,6 +51,27 @@ describe('MindmapCanvas', () => {
     expect(onAddSiblingNode).toHaveBeenCalledWith(mindmap.rootNodeId)
   })
 
+  it('adds a child node from the focused node when pressing Enter', () => {
+    const mindmap = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')
+    const onAddChildNode = vi.fn()
+
+    render(
+      <MindmapCanvas
+        mindmap={mindmap}
+        onRenameNode={() => undefined}
+        onAddChildNode={onAddChildNode}
+        onAddSiblingNode={() => undefined}
+        onDeleteNode={() => undefined}
+      />,
+    )
+
+    fireEvent.keyDown(screen.getByRole('textbox'), {
+      key: 'Enter',
+    })
+
+    expect(onAddChildNode).toHaveBeenCalledWith(mindmap.rootNodeId)
+  })
+
   it('shows delete action for child nodes and forwards the delete callback', async () => {
     const user = userEvent.setup()
     const base = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')

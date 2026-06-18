@@ -52,6 +52,12 @@ export function MindmapCanvas({
               aria-label={`节点 ${node.id}`}
               value={node.text}
               onChange={(event) => onRenameNode(node.id, event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                  event.preventDefault()
+                  onAddChildNode(node.id)
+                }
+              }}
             />
             <div className="mindmap-node-actions">
               <button type="button" onClick={() => onAddChildNode(node.id)}>
