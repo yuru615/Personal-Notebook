@@ -1917,6 +1917,12 @@ a {
   line-height: 1.4;
 }
 
+.canvas-entry-preview-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .mindmap-card-body {
   display: grid;
   gap: 4px;
@@ -2164,12 +2170,6 @@ a {
   background-size: 16px 16px;
 }
 
-.whiteboard-card-preview-image {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
 .whiteboard-card-preview-empty {
   color: #b8b7b3;
   font-size: 12px;
@@ -2290,7 +2290,7 @@ a {
 
 .whiteboard-canvas {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 10px;
   min-height: calc(100vh - 188px);
 }
@@ -2336,6 +2336,91 @@ a {
   height: 18px;
   margin: 0 4px;
   background: #ebe9e6;
+}
+
+.whiteboard-style-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 38px;
+  padding: 5px 10px;
+  border: 1px solid #e7e5e4;
+  border-radius: 8px;
+  background: #ffffff;
+  overflow-x: auto;
+  box-shadow:
+    0 8px 24px rgba(15, 23, 42, 0.06),
+    0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.whiteboard-style-toolbar-title {
+  flex: 0 0 auto;
+  color: #9b9a97;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.whiteboard-color-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+
+.whiteboard-color-group-label {
+  color: #787774;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.whiteboard-color-grid {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.whiteboard-color-button {
+  border: 0;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.whiteboard-color-button:hover,
+.whiteboard-color-button[aria-pressed='true'] {
+  background: #f3f2ef;
+}
+
+.whiteboard-color-button[aria-pressed='true'] {
+  box-shadow: inset 0 0 0 1px #e6e4df;
+}
+
+.whiteboard-text-swatch,
+.whiteboard-background-swatch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid #dedbd6;
+  border-radius: 5px;
+  background: #ffffff;
+}
+
+.whiteboard-text-swatch {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .whiteboard-zoom-label {

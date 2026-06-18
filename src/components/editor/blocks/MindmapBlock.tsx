@@ -1,3 +1,5 @@
+import { CanvasEntryCard } from '../../shared/CanvasEntryCard'
+
 interface MindmapBlockProps {
   title: string
   updatedLabel: string
@@ -14,26 +16,22 @@ export function MindmapBlock({
   onOpen,
 }: MindmapBlockProps) {
   return (
-    <button
-      type="button"
+    <CanvasEntryCard
+      kindLabel="思维导图"
+      title={title}
+      meta={updatedLabel}
+      emptyPreviewLabel="空白导图"
+      openLabel="打开"
+      previewUrl={previewUrl}
+      isMissing={isMissing}
+      onOpen={onOpen}
       className={isMissing ? 'mindmap-card mindmap-card-missing' : 'mindmap-card'}
-      aria-label={`打开思维导图 ${title}`}
-      onClick={onOpen}
-    >
-      <span className="mindmap-card-preview" aria-hidden="true">
-        {previewUrl ? (
-          <img className="mindmap-card-preview-image" src={previewUrl} alt="" />
-        ) : (
-          <span className="mindmap-card-preview-empty">空白导图</span>
-        )}
-      </span>
-      <span className="mindmap-card-body">
-        <span className="mindmap-card-title">{title}</span>
-        <span className="mindmap-card-meta">{updatedLabel}</span>
-      </span>
-      <span className="mindmap-card-arrow" aria-hidden="true">
-        打开
-      </span>
-    </button>
+      previewClassName="mindmap-card-preview"
+      bodyClassName="mindmap-card-body"
+      titleClassName="mindmap-card-title"
+      metaClassName="mindmap-card-meta"
+      arrowClassName="mindmap-card-arrow"
+      emptyPreviewClassName="mindmap-card-preview-empty"
+    />
   )
 }
