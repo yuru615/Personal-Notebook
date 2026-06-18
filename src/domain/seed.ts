@@ -10,6 +10,10 @@ export function createSeedPage(): PageRecord {
     title: '快速开始',
     icon: '📄',
     cover: null,
+    isFullWidth: false,
+    isSmallText: false,
+    fontFamily: 'default',
+    showOutline: true,
     blocks: [
       {
         id: createId('block'),
@@ -32,6 +36,8 @@ export function createSeedWorkspace(): WorkspaceSnapshot {
   const page = createSeedPage()
 
   return {
+    boards: [],
+    mindmaps: [],
     pages: [page],
     settings: {
       lastOpenedPageId: page.id,
