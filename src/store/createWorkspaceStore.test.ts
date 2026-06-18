@@ -9,6 +9,8 @@ describe('createWorkspaceStore', () => {
 
     await store.getState().bootstrap()
 
+    expect(store.getState().boards).toEqual([])
+    expect(store.getState().mindmaps).toEqual([])
     expect(store.getState().pages).toHaveLength(1)
     expect(store.getState().pages[0].title).toBe('快速开始')
     expect(store.getState().currentPageId).toBe(store.getState().pages[0].id)
@@ -44,6 +46,42 @@ describe('createWorkspaceStore', () => {
     const snapshot = await repository.load()
     expect(snapshot?.settings.lastOpenedPageId).toBe(firstPageId)
     expect(createdPage.id).not.toBe(firstPageId)
+  })
+
+  it('updates page display settings and persists them', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const pageId = store.getState().pages[0].id
+
+    await store.getState().setPageFullWidth(pageId, true)
+    await store.getState().setPageSmallText(pageId, true)
+    await store.getState().setPageFontFamily(pageId, 'serif')
+    await store.getState().setPageIcon(pageId, '📚')
+    await store.getState().setPageCover(pageId, 'ocean')
+    await store.getState().setPageOutlineVisible(pageId, false)
+
+    expect(store.getState().pages[0]).toMatchObject({
+      id: pageId,
+      icon: '📚',
+      cover: 'ocean',
+      isFullWidth: true,
+      isSmallText: true,
+      fontFamily: 'serif',
+      showOutline: false,
+    })
+
+    const snapshot = await repository.load()
+    expect(snapshot?.pages[0]).toMatchObject({
+      id: pageId,
+      icon: '📚',
+      cover: 'ocean',
+      isFullWidth: true,
+      isSmallText: true,
+      fontFamily: 'serif',
+      showOutline: false,
+    })
   })
 
   it('renames and deletes a child page branch', async () => {
@@ -128,6 +166,72 @@ describe('createWorkspaceStore', () => {
     expect(childPage?.title).toBe('未命名')
   })
 
+  it('inserts a paragraph block with initial text', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const pageId = store.getState().pages[0].id
+
+    await store.getState().insertParagraphBlock(pageId, 'First line')
+
+    const insertedBlock = store.getState().pages[0].blocks.at(-1)
+    expect(insertedBlock).toMatchObject({
+      type: 'paragraph',
+      text: 'First line',
+    })
+
+    const snapshot = await repository.load()
+    expect(snapshot?.pages[0].blocks.at(-1)).toMatchObject({
+      type: 'paragraph',
+      text: 'First line',
+    })
+  })
+
+  it('inserts a block after an existing block', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const pageId = store.getState().pages[0].id
+    const firstBlockId = store.getState().pages[0].blocks[0].id
+
+    const insertedBlock = await store.getState().insertBlockAfter(pageId, firstBlockId, 'paragraph')
+
+    expect(insertedBlock).toMatchObject({
+      type: 'paragraph',
+      text: '',
+    })
+    expect(store.getState().pages[0].blocks[1].id).toBe(insertedBlock?.id)
+
+    const snapshot = await repository.load()
+    expect(snapshot?.pages[0].blocks[1].id).toBe(insertedBlock?.id)
+  })
+
+  it('merges a text block into the previous text block', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const pageId = store.getState().pages[0].id
+
+    await store.getState().insertParagraphBlock(pageId, 'Second line')
+
+    const blocks = store.getState().pages[0].blocks
+    const previousBlock = blocks[blocks.length - 2]
+    const currentBlock = blocks[blocks.length - 1]
+    const previousText = 'text' in previousBlock ? previousBlock.text : ''
+
+    const targetBlockId = await store.getState().mergeBlockWithPrevious(pageId, currentBlock.id)
+
+    expect(targetBlockId).toBe(previousBlock.id)
+    expect(store.getState().pages[0].blocks).toHaveLength(blocks.length - 1)
+    expect(store.getState().pages[0].blocks.at(-1)).toMatchObject({
+      id: previousBlock.id,
+      text: `${previousText}Second line`,
+    })
+  })
+
   it('reorders blocks inside a page', async () => {
     const repository = createMemoryRepository()
     const store = createWorkspaceStore(repository)
@@ -146,6 +250,24 @@ describe('createWorkspaceStore', () => {
     expect(reordered[1].id).toBe(first.id)
   })
 
+  it('reorders blocks before a lower target when requested', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const pageId = store.getState().pages[0].id
+
+    await store.getState().insertBlock(pageId, 'paragraph')
+    await store.getState().insertBlock(pageId, 'todo')
+    await store.getState().insertBlock(pageId, 'code')
+
+    const [first, second, third] = store.getState().pages[0].blocks.slice(-3)
+    await store.getState().reorderBlocks(pageId, first.id, third.id, 'before')
+
+    const reordered = store.getState().pages[0].blocks.slice(-3)
+    expect(reordered.map((block) => block.id)).toEqual([second.id, first.id, third.id])
+  })
+
   it('turns a paragraph block into a todo block', async () => {
     const repository = createMemoryRepository()
     const store = createWorkspaceStore(repository)
@@ -160,21 +282,236 @@ describe('createWorkspaceStore', () => {
     expect(changed.type).toBe('todo')
   })
 
+  it('expands legacy multi-item list blocks into separate list blocks on bootstrap', async () => {
+    const repository = createMemoryRepository({
+      boards: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: 'page-legacy',
+          parentId: null,
+          title: 'Legacy',
+          icon: null,
+          cover: null,
+          blocks: [
+            {
+              id: 'block-list',
+              type: 'bulleted_list',
+              items: ['第一项', '第二项', '第三项'],
+            },
+          ],
+          createdAt: '2026-06-17T00:00:00.000Z',
+          updatedAt: '2026-06-17T00:00:00.000Z',
+        },
+      ],
+      settings: {
+        lastOpenedPageId: 'page-legacy',
+      },
+    })
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+
+    expect(store.getState().pages[0].blocks).toMatchObject([
+      { id: 'block-list', type: 'bulleted_list', items: ['第一项'] },
+      { type: 'bulleted_list', items: ['第二项'] },
+      { type: 'bulleted_list', items: ['第三项'] },
+    ])
+  })
+
+  it('preserves text style when turning a text block into another text block', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const pageId = store.getState().pages[0].id
+    const block = store.getState().pages[0].blocks[0]
+
+    if (block.type !== 'paragraph') {
+      throw new Error('Expected seed paragraph block')
+    }
+
+    await store.getState().updateBlock(pageId, block.id, {
+      ...block,
+      textColor: 'blue',
+      backgroundColor: 'yellow',
+      textAlign: 'center',
+    })
+
+    await store.getState().turnBlockInto(pageId, block.id, 'heading_2')
+
+    expect(store.getState().pages[0].blocks[0]).toMatchObject({
+      id: block.id,
+      type: 'heading_2',
+      textColor: 'blue',
+      backgroundColor: 'yellow',
+      textAlign: 'center',
+    })
+  })
+
+  it('preserves rich text when turning a text block into another text block', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const pageId = store.getState().pages[0].id
+    const block = store.getState().pages[0].blocks[0]
+
+    if (block.type !== 'paragraph') {
+      throw new Error('Expected seed paragraph block')
+    }
+
+    await store.getState().updateBlock(pageId, block.id, {
+      ...block,
+      text: '重点内容',
+      richText: [
+        { text: '重点', bold: true },
+        { text: '内容' },
+      ],
+    })
+
+    await store.getState().turnBlockInto(pageId, block.id, 'heading_2')
+
+    expect(store.getState().pages[0].blocks[0]).toMatchObject({
+      id: block.id,
+      type: 'heading_2',
+      text: '重点内容',
+      richText: [
+        { text: '重点', bold: true },
+        { text: '内容' },
+      ],
+    })
+  })
+
+  it('keeps rich text when merging text blocks', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const pageId = store.getState().pages[0].id
+    const firstBlock = store.getState().pages[0].blocks[0]
+    const secondBlock = await store.getState().insertBlockAfter(pageId, firstBlock.id, 'paragraph')
+
+    if (!secondBlock || firstBlock.type !== 'paragraph' || secondBlock.type !== 'paragraph') {
+      throw new Error('Expected paragraph blocks')
+    }
+
+    await store.getState().updateBlock(pageId, firstBlock.id, {
+      ...firstBlock,
+      text: '第一段',
+      richText: [{ text: '第一段', bold: true }],
+    })
+    await store.getState().updateBlock(pageId, secondBlock.id, {
+      ...secondBlock,
+      text: '第二段',
+      richText: [{ text: '第二段', italic: true }],
+    })
+
+    await store.getState().mergeBlockWithPrevious(pageId, secondBlock.id)
+
+    expect(store.getState().pages[0].blocks[0]).toMatchObject({
+      id: firstBlock.id,
+      type: 'paragraph',
+      text: '第一段第二段',
+      richText: [
+        { text: '第一段', bold: true },
+        { text: '第二段', italic: true },
+      ],
+    })
+  })
+
   it('exports a JSON backup with workspace data', async () => {
     const repository = createMemoryRepository()
     const store = createWorkspaceStore(repository)
 
     await store.getState().bootstrap()
+    await store.getState().insertBlock(store.getState().pages[0].id, 'whiteboard')
     const payload = JSON.parse(await store.getState().exportJson())
 
     expect(payload).toMatchObject({
       version: 1,
+      boards: store.getState().boards,
+      mindmaps: store.getState().mindmaps,
       settings: {
         lastOpenedPageId: store.getState().currentPageId,
       },
     })
     expect(payload.pages).toHaveLength(store.getState().pages.length)
     expect(typeof payload.exportedAt).toBe('string')
+  })
+
+  it('creates a board record when inserting a whiteboard block', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const pageId = store.getState().pages[0].id
+
+    await store.getState().insertBlock(pageId, 'whiteboard')
+
+    const whiteboardBlock = store.getState().pages[0].blocks.at(-1)
+
+    expect(whiteboardBlock).toMatchObject({
+      type: 'whiteboard',
+      boardId: store.getState().boards[0].id,
+    })
+    expect(store.getState().boards).toHaveLength(1)
+
+    const snapshot = await repository.load()
+    expect(snapshot?.boards).toHaveLength(1)
+    expect(snapshot?.pages[0].blocks.at(-1)).toMatchObject({
+      type: 'whiteboard',
+      boardId: snapshot?.boards[0].id,
+    })
+  })
+
+  it('creates a mindmap record when inserting a mindmap block', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const pageId = store.getState().pages[0].id
+
+    await store.getState().insertBlock(pageId, 'mindmap')
+
+    const mindmapBlock = store.getState().pages[0].blocks.at(-1)
+
+    expect(mindmapBlock).toMatchObject({
+      type: 'mindmap',
+      mindmapId: store.getState().mindmaps[0].id,
+    })
+    expect(store.getState().mindmaps).toHaveLength(1)
+    expect(store.getState().mindmaps[0].rootNodeId).toBeTruthy()
+
+    const snapshot = await repository.load()
+    expect(snapshot?.mindmaps).toHaveLength(1)
+    expect(snapshot?.pages[0].blocks.at(-1)).toMatchObject({
+      type: 'mindmap',
+      mindmapId: snapshot?.mindmaps[0].id,
+    })
+  })
+
+  it('renames a board and persists the new title', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const pageId = store.getState().pages[0].id
+    await store.getState().insertBlock(pageId, 'whiteboard')
+
+    const boardId = store.getState().boards[0].id
+    await store.getState().renameBoard(boardId, '流程图')
+
+    expect(store.getState().boards[0]).toMatchObject({
+      id: boardId,
+      title: '流程图',
+    })
+
+    const snapshot = await repository.load()
+    expect(snapshot?.boards[0]).toMatchObject({
+      id: boardId,
+      title: '流程图',
+    })
   })
 
   it('imports a JSON backup and updates the current page', async () => {
@@ -187,6 +524,8 @@ describe('createWorkspaceStore', () => {
     await store.getState().importJson({
       version: 1,
       exportedAt: now,
+      boards: [],
+      mindmaps: [],
       pages: [
         {
           id: 'page-imported',
@@ -221,5 +560,24 @@ describe('createWorkspaceStore', () => {
         lastOpenedPageId: 'page-imported',
       },
     })
+  })
+
+  it('undoes the last workspace mutation', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const pageId = store.getState().pages[0].id
+    const initialBlockCount = store.getState().pages[0].blocks.length
+
+    await store.getState().insertBlock(pageId, 'todo')
+    expect(store.getState().pages[0].blocks).toHaveLength(initialBlockCount + 1)
+
+    await store.getState().undo()
+
+    expect(store.getState().pages[0].blocks).toHaveLength(initialBlockCount)
+
+    const snapshot = await repository.load()
+    expect(snapshot?.pages[0].blocks).toHaveLength(initialBlockCount)
   })
 })
