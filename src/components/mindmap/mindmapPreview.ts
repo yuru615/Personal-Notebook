@@ -1,12 +1,13 @@
 import type { MindmapRecord } from '../../domain/types'
 
 export function buildMindmapPreviewSvgDataUrl(mindmap: MindmapRecord): string {
+  const layoutMode = mindmap.layoutMode ?? 'balanced'
   const rootText = escapeText(mindmap.nodes[mindmap.rootNodeId]?.text ?? '中心主题')
   const childCount = Object.values(mindmap.nodes).filter((node) => node.parentId === mindmap.rootNodeId).length
   const branchRightY = childCount > 0 ? 64 : 72
 
   const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180" fill="none">
+    <svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180" fill="none" data-layout="${layoutMode}">
       <rect width="320" height="180" rx="14" fill="#ffffff"/>
       <rect x="0.5" y="0.5" width="319" height="179" rx="13.5" stroke="#e9e9e7"/>
       <line x1="88" y1="90" x2="120" y2="90" stroke="#c9c9c3" stroke-width="2"/>

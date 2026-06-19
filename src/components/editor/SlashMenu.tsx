@@ -88,8 +88,8 @@ const options: Array<{
   },
   {
     type: 'mindmap',
-    label: '鎬濈淮瀵煎浘',
-    description: '鎻掑叆涓€涓彲鐐瑰嚮杩涘叆鐨勬€濈淮瀵煎浘鍏ュ彛',
+    label: '思维导图',
+    description: '插入一个可点击进入的思维导图入口',
     icon: '◎',
     group: 'page_data',
   },
