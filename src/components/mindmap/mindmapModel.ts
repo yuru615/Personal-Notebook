@@ -3,6 +3,7 @@ import { createId } from '../../utils/id'
 
 const DEFAULT_LAYOUT_MODE: MindmapLayoutMode = 'balanced'
 const MINDMAP_LAYOUT_MODES = new Set<MindmapLayoutMode>(['balanced', 'right', 'outline'])
+type LegacyMindmapRecord = Omit<MindmapRecord, 'layoutMode'> & { layoutMode?: unknown }
 
 const UNTITLED_MINDMAP_TITLE = '未命名思维导图'
 const DEFAULT_ROOT_NODE_TEXT = '中心主题'
@@ -34,9 +35,13 @@ export function createEmptyMindmapRecord(now = new Date().toISOString()): Mindma
   }
 }
 
-export function normalizeMindmapRecord(mindmap: MindmapRecord): MindmapRecord {
-  if (MINDMAP_LAYOUT_MODES.has(mindmap.layoutMode)) {
-    return mindmap
+function isMindmapLayoutMode(value: unknown): value is MindmapLayoutMode {
+  return typeof value === 'string' && MINDMAP_LAYOUT_MODES.has(value as MindmapLayoutMode)
+}
+
+export function normalizeMindmapRecord(mindmap: LegacyMindmapRecord): MindmapRecord {
+  if (isMindmapLayoutMode(mindmap.layoutMode)) {
+    return mindmap as MindmapRecord
   }
 
   return {
@@ -50,6 +55,10 @@ export function setMindmapLayoutMode(
   layoutMode: MindmapLayoutMode,
   now = new Date().toISOString(),
 ): MindmapRecord {
+  if (mindmap.layoutMode === layoutMode) {
+    return mindmap
+  }
+
   return {
     ...mindmap,
     layoutMode,

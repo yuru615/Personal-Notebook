@@ -857,9 +857,21 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
     setMindmapLayoutMode: async (mindmapId: string, layoutMode: MindmapLayoutMode) => {
       const state = get()
-      const nextMindmaps = state.mindmaps.map((mindmap) =>
-        mindmap.id === mindmapId ? updateMindmapLayoutMode(mindmap, layoutMode) : mindmap,
-      )
+      let didChange = false
+      const nextMindmaps = state.mindmaps.map((mindmap) => {
+        if (mindmap.id !== mindmapId) {
+          return mindmap
+        }
+
+        const nextMindmap = updateMindmapLayoutMode(mindmap, layoutMode)
+        didChange ||= nextMindmap !== mindmap
+
+        return nextMindmap
+      })
+
+      if (!didChange) {
+        return
+      }
 
       pushUndoSnapshot(state)
       try {
@@ -899,9 +911,21 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
     toggleMindmapNodeCollapsed: async (mindmapId: string, nodeId: string) => {
       const state = get()
-      const nextMindmaps = state.mindmaps.map((mindmap) =>
-        mindmap.id === mindmapId ? updateMindmapNodeCollapsed(mindmap, nodeId) : mindmap,
-      )
+      let didChange = false
+      const nextMindmaps = state.mindmaps.map((mindmap) => {
+        if (mindmap.id !== mindmapId) {
+          return mindmap
+        }
+
+        const nextMindmap = updateMindmapNodeCollapsed(mindmap, nodeId)
+        didChange ||= nextMindmap !== mindmap
+
+        return nextMindmap
+      })
+
+      if (!didChange) {
+        return
+      }
 
       pushUndoSnapshot(state)
       try {

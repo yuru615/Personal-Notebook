@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { WorkspaceSnapshot } from '../domain/types'
+import type { WorkspaceRepository } from '../lib/workspaceRepository'
 import { createMemoryRepository } from '../test/memoryRepository'
 import { createWorkspaceStore } from './createWorkspaceStore'
 
@@ -613,6 +614,159 @@ describe('createWorkspaceStore', () => {
       id: mindmap.rootNodeId,
       text: '用户洞察',
     })
+  })
+
+  it('does not persist no-op mindmap layout changes', async () => {
+    const initialSnapshot: WorkspaceSnapshot = {
+      boards: [],
+      mindmaps: [
+        {
+          id: 'mindmap-existing',
+          title: 'Existing Mindmap',
+          rootNodeId: 'node-root',
+          layoutMode: 'balanced',
+          nodes: {
+            'node-root': {
+              id: 'node-root',
+              parentId: null,
+              text: 'Root',
+              order: 0,
+            },
+          },
+          viewport: {
+            x: 0,
+            y: 0,
+            zoom: 1,
+          },
+          createdAt: '2026-06-18T00:00:00.000Z',
+          updatedAt: '2026-06-18T00:00:00.000Z',
+        },
+      ],
+      pages: [
+        {
+          id: 'page-home',
+          parentId: null,
+          title: 'Home',
+          icon: null,
+          cover: null,
+          blocks: [
+            {
+              id: 'block-mindmap',
+              type: 'mindmap',
+              mindmapId: 'mindmap-existing',
+            },
+          ],
+          createdAt: '2026-06-18T00:00:00.000Z',
+          updatedAt: '2026-06-18T00:00:00.000Z',
+        },
+      ],
+      settings: {
+        lastOpenedPageId: 'page-home',
+      },
+    }
+    let snapshot = structuredClone(initialSnapshot)
+    let persistCount = 0
+    const repository: WorkspaceRepository = {
+      async load() {
+        return structuredClone(snapshot)
+      },
+      async save(nextSnapshot) {
+        persistCount += 1
+        snapshot = structuredClone(nextSnapshot)
+      },
+      async replace(nextSnapshot) {
+        persistCount += 1
+        snapshot = structuredClone(nextSnapshot)
+      },
+    }
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    await store.getState().setMindmapLayoutMode('missing-mindmap', 'right')
+    await store.getState().setMindmapLayoutMode('mindmap-existing', 'balanced')
+
+    expect(persistCount).toBe(0)
+    expect(store.getState().mindmaps[0]).toEqual(initialSnapshot.mindmaps[0])
+  })
+
+  it('does not persist no-op mindmap collapsed toggles', async () => {
+    const initialSnapshot: WorkspaceSnapshot = {
+      boards: [],
+      mindmaps: [
+        {
+          id: 'mindmap-existing',
+          title: 'Existing Mindmap',
+          rootNodeId: 'node-root',
+          layoutMode: 'balanced',
+          nodes: {
+            'node-root': {
+              id: 'node-root',
+              parentId: null,
+              text: 'Root',
+              order: 0,
+            },
+            'node-child': {
+              id: 'node-child',
+              parentId: 'node-root',
+              text: 'Child',
+              order: 0,
+            },
+          },
+          viewport: {
+            x: 0,
+            y: 0,
+            zoom: 1,
+          },
+          createdAt: '2026-06-18T00:00:00.000Z',
+          updatedAt: '2026-06-18T00:00:00.000Z',
+        },
+      ],
+      pages: [
+        {
+          id: 'page-home',
+          parentId: null,
+          title: 'Home',
+          icon: null,
+          cover: null,
+          blocks: [
+            {
+              id: 'block-mindmap',
+              type: 'mindmap',
+              mindmapId: 'mindmap-existing',
+            },
+          ],
+          createdAt: '2026-06-18T00:00:00.000Z',
+          updatedAt: '2026-06-18T00:00:00.000Z',
+        },
+      ],
+      settings: {
+        lastOpenedPageId: 'page-home',
+      },
+    }
+    let snapshot = structuredClone(initialSnapshot)
+    let persistCount = 0
+    const repository: WorkspaceRepository = {
+      async load() {
+        return structuredClone(snapshot)
+      },
+      async save(nextSnapshot) {
+        persistCount += 1
+        snapshot = structuredClone(nextSnapshot)
+      },
+      async replace(nextSnapshot) {
+        persistCount += 1
+        snapshot = structuredClone(nextSnapshot)
+      },
+    }
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    await store.getState().toggleMindmapNodeCollapsed('missing-mindmap', 'node-child')
+    await store.getState().toggleMindmapNodeCollapsed('mindmap-existing', 'node-root')
+    await store.getState().toggleMindmapNodeCollapsed('mindmap-existing', 'missing-node')
+
+    expect(persistCount).toBe(0)
+    expect(store.getState().mindmaps[0]).toEqual(initialSnapshot.mindmaps[0])
   })
 
   it('adds a sibling node to a non-root node and persists it', async () => {
