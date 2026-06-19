@@ -64,4 +64,13 @@ describe('buildMindmapPreviewSvgDataUrl', () => {
 
     expect(svg).toContain('data-layout="balanced"')
   })
+
+  it('defaults invalid layout mode payloads to balanced before embedding attributes', () => {
+    const payload = 'right" data-payload="quote-break'
+    const mindmap = createMindmap({ layoutMode: payload as never })
+    const svg = decodePreviewSvg(mindmap)
+
+    expect(svg).toContain('data-layout="balanced"')
+    expect(svg).not.toContain(payload)
+  })
 })

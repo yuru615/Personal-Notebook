@@ -1,7 +1,7 @@
 import type { MindmapRecord } from '../../domain/types'
 
 export function buildMindmapPreviewSvgDataUrl(mindmap: MindmapRecord): string {
-  const layoutMode = mindmap.layoutMode ?? 'balanced'
+  const layoutMode = normalizePreviewLayoutMode(mindmap.layoutMode)
   const rootText = escapeText(mindmap.nodes[mindmap.rootNodeId]?.text ?? '中心主题')
   const childCount = Object.values(mindmap.nodes).filter((node) => node.parentId === mindmap.rootNodeId).length
   const branchRightY = childCount > 0 ? 64 : 72
@@ -25,4 +25,8 @@ export function buildMindmapPreviewSvgDataUrl(mindmap: MindmapRecord): string {
 
 function escapeText(value: string) {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function normalizePreviewLayoutMode(value: unknown) {
+  return value === 'balanced' || value === 'right' || value === 'outline' ? value : 'balanced'
 }

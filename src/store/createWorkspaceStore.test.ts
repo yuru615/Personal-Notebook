@@ -428,6 +428,7 @@ describe('createWorkspaceStore', () => {
 
     await store.getState().bootstrap()
     await store.getState().insertBlock(store.getState().pages[0].id, 'whiteboard')
+    await store.getState().insertBlock(store.getState().pages[0].id, 'mindmap')
     const payload = JSON.parse(await store.getState().exportJson())
 
     expect(payload).toMatchObject({
@@ -439,7 +440,22 @@ describe('createWorkspaceStore', () => {
       },
     })
     expect(payload.pages).toHaveLength(store.getState().pages.length)
+    expect(payload.mindmaps[0].layoutMode).toBe('balanced')
     expect(typeof payload.exportedAt).toBe('string')
+  })
+
+  it('exports the latest mindmap layout mode after layout changes', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    await store.getState().insertBlock(store.getState().pages[0].id, 'mindmap')
+
+    const mindmapId = store.getState().mindmaps[0].id
+    await store.getState().setMindmapLayoutMode(mindmapId, 'outline')
+
+    const payload = JSON.parse(await store.getState().exportJson())
+    expect(payload.mindmaps[0].layoutMode).toBe('outline')
   })
 
   it('creates a board record when inserting a whiteboard block', async () => {
@@ -543,6 +559,68 @@ describe('createWorkspaceStore', () => {
     const store = createWorkspaceStore(repository)
 
     await store.getState().bootstrap()
+
+    expect(store.getState().mindmaps[0].layoutMode).toBe('balanced')
+
+    const snapshot = await repository.load()
+    expect(snapshot?.mindmaps[0].layoutMode).toBe('balanced')
+  })
+
+  it('normalizes imported legacy mindmaps without a layout mode and persists the normalized snapshot', async () => {
+    const repository = createMemoryRepository()
+    const store = createWorkspaceStore(repository)
+    const now = '2026-06-20T00:00:00.000Z'
+
+    await store.getState().bootstrap()
+
+    await store.getState().importJson({
+      version: 1,
+      exportedAt: now,
+      boards: [],
+      mindmaps: [
+        {
+          id: 'mindmap-imported-legacy',
+          title: 'Imported Legacy Mindmap',
+          rootNodeId: 'node-root',
+          nodes: {
+            'node-root': {
+              id: 'node-root',
+              parentId: null,
+              text: 'Root',
+              order: 0,
+            },
+          },
+          viewport: {
+            x: 0,
+            y: 0,
+            zoom: 1,
+          },
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+      pages: [
+        {
+          id: 'page-imported-mindmap',
+          parentId: null,
+          title: 'Imported Mindmap',
+          icon: null,
+          cover: null,
+          blocks: [
+            {
+              id: 'block-imported-mindmap',
+              type: 'mindmap',
+              mindmapId: 'mindmap-imported-legacy',
+            },
+          ],
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+      settings: {
+        lastOpenedPageId: 'page-imported-mindmap',
+      },
+    })
 
     expect(store.getState().mindmaps[0].layoutMode).toBe('balanced')
 
