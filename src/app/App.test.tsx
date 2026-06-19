@@ -397,6 +397,75 @@ describe('App shell', () => {
     })
   })
 
+  it('persists mindmap layout mode and collapsed node changes from the mindmap route', async () => {
+    const repository = createMemoryRepository({
+      boards: [],
+      mindmaps: [
+        {
+          id: 'mindmap-product',
+          title: '产品调研导图',
+          rootNodeId: 'mindmap-node-root',
+          layoutMode: 'balanced',
+          nodes: {
+            'mindmap-node-root': {
+              id: 'mindmap-node-root',
+              parentId: null,
+              text: '中心主题',
+              order: 0,
+            },
+            'mindmap-node-child': {
+              id: 'mindmap-node-child',
+              parentId: 'mindmap-node-root',
+              text: '已有分支',
+              order: 0,
+            },
+          },
+          viewport: { x: 0, y: 0, zoom: 1 },
+          createdAt: '2026-06-18T00:00:00.000Z',
+          updatedAt: '2026-06-18T00:00:00.000Z',
+        },
+      ],
+      pages: [
+        {
+          id: 'page-home',
+          parentId: null,
+          title: '首页',
+          icon: null,
+          cover: null,
+          blocks: [
+            {
+              id: 'block-mindmap',
+              type: 'mindmap',
+              mindmapId: 'mindmap-product',
+            },
+          ],
+          createdAt: '2026-06-18T00:00:00.000Z',
+          updatedAt: '2026-06-18T00:00:00.000Z',
+        },
+      ],
+      settings: {
+        lastOpenedPageId: 'page-home',
+      },
+    })
+    const user = userEvent.setup()
+
+    render(<App repository={repository} initialEntries={['/pages/page-home/mindmaps/mindmap-product']} />)
+
+    await screen.findByDisplayValue('产品调研导图')
+    await user.click(screen.getByRole('button', { name: '大纲导图' }))
+
+    await waitFor(async () => {
+      const snapshot = await repository.load()
+      expect(snapshot?.mindmaps[0].layoutMode).toBe('outline')
+    })
+
+    await user.click(screen.getByRole('button', { name: '折叠' }))
+
+    await waitFor(async () => {
+      const snapshot = await repository.load()
+      expect(snapshot?.mindmaps[0].nodes['mindmap-node-child']?.collapsed).toBe(true)
+    })
+  })
   it('persists mindmap title and node edits from the mindmap route', async () => {
     const repository = createMemoryRepository({
       boards: [],
