@@ -671,6 +671,78 @@ describe('createWorkspaceStore', () => {
     })
   })
 
+  it('does not persist missing or unchanged mindmap title renames', async () => {
+    const initialSnapshot: WorkspaceSnapshot = {
+      boards: [],
+      mindmaps: [
+        {
+          id: 'mindmap-existing',
+          title: 'Existing Mindmap',
+          rootNodeId: 'node-root',
+          layoutMode: 'balanced',
+          nodes: {
+            'node-root': {
+              id: 'node-root',
+              parentId: null,
+              text: 'Root',
+              order: 0,
+            },
+          },
+          viewport: {
+            x: 0,
+            y: 0,
+            zoom: 1,
+          },
+          createdAt: '2026-06-18T00:00:00.000Z',
+          updatedAt: '2026-06-18T00:00:00.000Z',
+        },
+      ],
+      pages: [
+        {
+          id: 'page-home',
+          parentId: null,
+          title: 'Home',
+          icon: null,
+          cover: null,
+          blocks: [
+            {
+              id: 'block-mindmap',
+              type: 'mindmap',
+              mindmapId: 'mindmap-existing',
+            },
+          ],
+          createdAt: '2026-06-18T00:00:00.000Z',
+          updatedAt: '2026-06-18T00:00:00.000Z',
+        },
+      ],
+      settings: {
+        lastOpenedPageId: 'page-home',
+      },
+    }
+    let snapshot = structuredClone(initialSnapshot)
+    let persistCount = 0
+    const repository: WorkspaceRepository = {
+      async load() {
+        return structuredClone(snapshot)
+      },
+      async save(nextSnapshot) {
+        persistCount += 1
+        snapshot = structuredClone(nextSnapshot)
+      },
+      async replace(nextSnapshot) {
+        persistCount += 1
+        snapshot = structuredClone(nextSnapshot)
+      },
+    }
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    await store.getState().renameMindmap('missing-mindmap', 'New Title')
+    await store.getState().renameMindmap('mindmap-existing', ' Existing Mindmap ')
+
+    expect(persistCount).toBe(0)
+    expect(store.getState().mindmaps[0]).toEqual(initialSnapshot.mindmaps[0])
+  })
   it('renames a mindmap node and persists the new text', async () => {
     const repository = createMemoryRepository()
     const store = createWorkspaceStore(repository)

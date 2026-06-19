@@ -843,9 +843,21 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
     renameMindmap: async (mindmapId: string, title: string) => {
       const state = get()
-      const nextMindmaps = state.mindmaps.map((mindmap) =>
-        mindmap.id === mindmapId ? updateMindmapTitle(mindmap, title) : mindmap,
-      )
+      let didChange = false
+      const nextMindmaps = state.mindmaps.map((mindmap) => {
+        if (mindmap.id !== mindmapId) {
+          return mindmap
+        }
+
+        const nextMindmap = updateMindmapTitle(mindmap, title)
+        didChange ||= nextMindmap !== mindmap
+
+        return nextMindmap
+      })
+
+      if (!didChange) {
+        return
+      }
 
       pushUndoSnapshot(state)
       try {

@@ -45,6 +45,15 @@ describe('mindmapModel', () => {
     expect(next.title).toBe('未命名思维导图')
   })
 
+  it('returns the same mindmap when the normalized title is unchanged', () => {
+    const mindmap = {
+      ...createEmptyMindmapRecord('2026-06-18T00:00:00.000Z'),
+      title: 'Existing Mindmap',
+    }
+
+    expect(renameMindmap(mindmap, ' Existing Mindmap ', '2026-06-18T00:10:00.000Z')).toBe(mindmap)
+  })
+
   it('normalizes missing or invalid layout mode to balanced', () => {
     const mindmap = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')
     const missingLayoutMode = { ...mindmap, layoutMode: undefined }

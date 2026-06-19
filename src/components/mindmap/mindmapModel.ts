@@ -98,9 +98,15 @@ export function renameMindmap(
   title: string,
   now = new Date().toISOString(),
 ): MindmapRecord {
+  const nextTitle = title.trim() || UNTITLED_MINDMAP_TITLE
+
+  if (mindmap.title === nextTitle) {
+    return mindmap
+  }
+
   return {
     ...mindmap,
-    title: title.trim() || UNTITLED_MINDMAP_TITLE,
+    title: nextTitle,
     updatedAt: now,
   }
 }
