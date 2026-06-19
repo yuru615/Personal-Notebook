@@ -20,7 +20,7 @@ import { SidebarTree } from '../components/sidebar/SidebarTree'
 import { AppErrorBoundary } from '../components/shared/AppErrorBoundary'
 import { WhiteboardCanvas } from '../components/whiteboard/WhiteboardCanvas'
 import { WhiteboardPage } from '../components/whiteboard/WhiteboardPage'
-import type { BoardRecord, MindmapRecord, PageFontFamily, PageRecord, SaveStatus } from '../domain/types'
+import type { BoardRecord, MindmapLayoutMode, MindmapRecord, PageFontFamily, PageRecord, SaveStatus } from '../domain/types'
 import {
   createDexieWorkspaceRepository,
   type WorkspaceRepository,
@@ -102,11 +102,17 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
         store.getState().updateBoardSnapshot(boardId, snapshot)
       }
       onRenameMindmap={(mindmapId, title) => store.getState().renameMindmap(mindmapId, title)}
+      onSetMindmapLayoutMode={(mindmapId, layoutMode) =>
+        store.getState().setMindmapLayoutMode(mindmapId, layoutMode)
+      }
       onAddMindmapChildNode={(mindmapId, parentNodeId) =>
         store.getState().addMindmapChildNode(mindmapId, parentNodeId)
       }
       onRenameMindmapNode={(mindmapId, nodeId, text) =>
         store.getState().renameMindmapNode(mindmapId, nodeId, text)
+      }
+      onToggleMindmapNodeCollapsed={(mindmapId, nodeId) =>
+        store.getState().toggleMindmapNodeCollapsed(mindmapId, nodeId)
       }
       onAddMindmapSiblingNode={(mindmapId, nodeId) =>
         store.getState().addMindmapSiblingNode(mindmapId, nodeId)
@@ -202,8 +208,10 @@ interface AppRoutesProps {
   onRenameBoard: (boardId: string, title: string) => Promise<void>
   onUpdateBoardSnapshot: (boardId: string, snapshot: unknown) => Promise<void>
   onRenameMindmap: (mindmapId: string, title: string) => Promise<void>
+  onSetMindmapLayoutMode: (mindmapId: string, layoutMode: MindmapLayoutMode) => Promise<void>
   onAddMindmapChildNode: (mindmapId: string, parentNodeId: string) => Promise<void>
   onRenameMindmapNode: (mindmapId: string, nodeId: string, text: string) => Promise<void>
+  onToggleMindmapNodeCollapsed: (mindmapId: string, nodeId: string) => Promise<void>
   onAddMindmapSiblingNode: (mindmapId: string, nodeId: string) => Promise<void>
   onDeleteMindmapNode: (mindmapId: string, nodeId: string) => Promise<void>
   onTogglePageFullWidth: (pageId: string, isFullWidth: boolean) => Promise<void>
@@ -258,8 +266,10 @@ function AppRoutes({
   onRenameBoard,
   onUpdateBoardSnapshot,
   onRenameMindmap,
+  onSetMindmapLayoutMode,
   onAddMindmapChildNode,
   onRenameMindmapNode,
+  onToggleMindmapNodeCollapsed,
   onAddMindmapSiblingNode,
   onDeleteMindmapNode,
   onTogglePageFullWidth,
@@ -409,8 +419,10 @@ function AppRoutes({
                 currentPageId={currentPageId}
                 onRoutePageChange={onRoutePageChange}
                 onRenameMindmap={onRenameMindmap}
+                onSetMindmapLayoutMode={onSetMindmapLayoutMode}
                 onAddMindmapChildNode={onAddMindmapChildNode}
                 onRenameMindmapNode={onRenameMindmapNode}
+                onToggleMindmapNodeCollapsed={onToggleMindmapNodeCollapsed}
                 onAddMindmapSiblingNode={onAddMindmapSiblingNode}
                 onDeleteMindmapNode={onDeleteMindmapNode}
               />
@@ -675,8 +687,10 @@ interface MindmapRouteProps {
   currentPageId: string | null
   onRoutePageChange: (pageId: string) => Promise<void>
   onRenameMindmap: (mindmapId: string, title: string) => Promise<void>
+  onSetMindmapLayoutMode: (mindmapId: string, layoutMode: MindmapLayoutMode) => Promise<void>
   onAddMindmapChildNode: (mindmapId: string, parentNodeId: string) => Promise<void>
   onRenameMindmapNode: (mindmapId: string, nodeId: string, text: string) => Promise<void>
+  onToggleMindmapNodeCollapsed: (mindmapId: string, nodeId: string) => Promise<void>
   onAddMindmapSiblingNode: (mindmapId: string, nodeId: string) => Promise<void>
   onDeleteMindmapNode: (mindmapId: string, nodeId: string) => Promise<void>
 }
@@ -687,8 +701,10 @@ function MindmapRoute({
   currentPageId,
   onRoutePageChange,
   onRenameMindmap,
+  onSetMindmapLayoutMode,
   onAddMindmapChildNode,
   onRenameMindmapNode,
+  onToggleMindmapNodeCollapsed,
   onAddMindmapSiblingNode,
   onDeleteMindmapNode,
 }: MindmapRouteProps) {
@@ -734,6 +750,12 @@ function MindmapRoute({
           }}
           onDeleteNode={(nodeId) => {
             void onDeleteMindmapNode(mindmap.id, nodeId)
+          }}
+          onToggleNodeCollapsed={(nodeId) => {
+            void onToggleMindmapNodeCollapsed(mindmap.id, nodeId)
+          }}
+          onChangeLayoutMode={(layoutMode) => {
+            void onSetMindmapLayoutMode(mindmap.id, layoutMode)
           }}
         />
       ) : (
