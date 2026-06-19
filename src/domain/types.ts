@@ -134,6 +134,8 @@ export interface MindmapNode {
   collapsed?: boolean
 }
 
+export type MindmapLayoutMode = 'balanced' | 'right' | 'outline'
+
 export interface MindmapBlock extends BlockBase {
   type: 'mindmap'
   mindmapId: MindmapId
@@ -167,6 +169,7 @@ export interface MindmapRecord {
   id: MindmapId
   title: string
   rootNodeId: string
+  layoutMode: MindmapLayoutMode
   nodes: Record<string, MindmapNode>
   viewport: {
     x: number

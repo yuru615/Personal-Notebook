@@ -3,8 +3,11 @@ import {
   addMindmapChildNode as appendMindmapChildNode,
   addMindmapSiblingNode as appendMindmapSiblingNode,
   deleteMindmapNode as removeMindmapNode,
+  normalizeMindmapRecord,
   renameMindmap as updateMindmapTitle,
   renameMindmapNode as updateMindmapNodeText,
+  setMindmapLayoutMode as updateMindmapLayoutMode,
+  toggleMindmapNodeCollapsed as updateMindmapNodeCollapsed,
 } from '../components/mindmap/mindmapModel'
 import { getTextBlockStyle, isTextStyleableBlock } from '../domain/blockTextStyle'
 import { normalizeRichText, richTextFromPlainText } from '../domain/richText'
@@ -13,6 +16,7 @@ import type {
   BlockRecord,
   BlockType,
   BoardRecord,
+  MindmapLayoutMode,
   MindmapRecord,
   PageFontFamily,
   PageId,
@@ -57,8 +61,10 @@ export interface WorkspaceState {
   renameBoard: (boardId: string, title: string) => Promise<void>
   updateBoardSnapshot: (boardId: string, snapshot: unknown) => Promise<void>
   renameMindmap: (mindmapId: string, title: string) => Promise<void>
+  setMindmapLayoutMode: (mindmapId: string, layoutMode: MindmapLayoutMode) => Promise<void>
   addMindmapChildNode: (mindmapId: string, parentNodeId: string) => Promise<void>
   renameMindmapNode: (mindmapId: string, nodeId: string, text: string) => Promise<void>
+  toggleMindmapNodeCollapsed: (mindmapId: string, nodeId: string) => Promise<void>
   addMindmapSiblingNode: (mindmapId: string, nodeId: string) => Promise<void>
   deleteMindmapNode: (mindmapId: string, nodeId: string) => Promise<void>
   renamePage: (pageId: PageId, title: string) => Promise<void>
@@ -135,10 +141,16 @@ function createEmptyState(): WorkspaceState {
     renameMindmap: async () => {
       throw new Error('not implemented')
     },
+    setMindmapLayoutMode: async () => {
+      throw new Error('not implemented')
+    },
     addMindmapChildNode: async () => {
       throw new Error('not implemented')
     },
     renameMindmapNode: async () => {
+      throw new Error('not implemented')
+    },
+    toggleMindmapNodeCollapsed: async () => {
       throw new Error('not implemented')
     },
     addMindmapSiblingNode: async () => {
@@ -258,9 +270,18 @@ function normalizeWorkspaceSnapshot(snapshot: WorkspaceSnapshot) {
   const boards = Array.isArray((snapshot as WorkspaceSnapshot & { boards?: BoardRecord[] }).boards)
     ? snapshot.boards
     : []
-  const mindmaps = Array.isArray((snapshot as WorkspaceSnapshot & { mindmaps?: MindmapRecord[] }).mindmaps)
+  const rawMindmaps = Array.isArray((snapshot as WorkspaceSnapshot & { mindmaps?: MindmapRecord[] }).mindmaps)
     ? snapshot.mindmaps
     : []
+  const mindmaps = rawMindmaps.map((mindmap) => {
+    const normalized = normalizeMindmapRecord(mindmap)
+
+    if (normalized !== mindmap) {
+      didChange = true
+    }
+
+    return normalized
+  })
 
   const pages = snapshot.pages.map((page) => {
     const normalized = normalizeListBlocks(page.blocks)
@@ -834,6 +855,20 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       }
     },
 
+    setMindmapLayoutMode: async (mindmapId: string, layoutMode: MindmapLayoutMode) => {
+      const state = get()
+      const nextMindmaps = state.mindmaps.map((mindmap) =>
+        mindmap.id === mindmapId ? updateMindmapLayoutMode(mindmap, layoutMode) : mindmap,
+      )
+
+      pushUndoSnapshot(state)
+      try {
+        await persistNonPageAssets(state, { mindmaps: nextMindmaps })
+      } catch {
+        throw new Error('Failed to set mindmap layout mode')
+      }
+    },
+
     addMindmapChildNode: async (mindmapId: string, parentNodeId: string) => {
       const state = get()
       const nextMindmaps = state.mindmaps.map((mindmap) =>
@@ -859,6 +894,20 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         await persistNonPageAssets(state, { mindmaps: nextMindmaps })
       } catch {
         throw new Error('Failed to rename mindmap node')
+      }
+    },
+
+    toggleMindmapNodeCollapsed: async (mindmapId: string, nodeId: string) => {
+      const state = get()
+      const nextMindmaps = state.mindmaps.map((mindmap) =>
+        mindmap.id === mindmapId ? updateMindmapNodeCollapsed(mindmap, nodeId) : mindmap,
+      )
+
+      pushUndoSnapshot(state)
+      try {
+        await persistNonPageAssets(state, { mindmaps: nextMindmaps })
+      } catch {
+        throw new Error('Failed to toggle mindmap node collapsed state')
       }
     },
 

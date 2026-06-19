@@ -1,5 +1,8 @@
-import type { MindmapNode, MindmapRecord } from '../../domain/types'
+import type { MindmapLayoutMode, MindmapNode, MindmapRecord } from '../../domain/types'
 import { createId } from '../../utils/id'
+
+const DEFAULT_LAYOUT_MODE: MindmapLayoutMode = 'balanced'
+const MINDMAP_LAYOUT_MODES = new Set<MindmapLayoutMode>(['balanced', 'right', 'outline'])
 
 const UNTITLED_MINDMAP_TITLE = '未命名思维导图'
 const DEFAULT_ROOT_NODE_TEXT = '中心主题'
@@ -12,6 +15,7 @@ export function createEmptyMindmapRecord(now = new Date().toISOString()): Mindma
     id: createId('mindmap'),
     title: UNTITLED_MINDMAP_TITLE,
     rootNodeId,
+    layoutMode: DEFAULT_LAYOUT_MODE,
     nodes: {
       [rootNodeId]: {
         id: rootNodeId,
@@ -26,6 +30,29 @@ export function createEmptyMindmapRecord(now = new Date().toISOString()): Mindma
       zoom: 1,
     },
     createdAt: now,
+    updatedAt: now,
+  }
+}
+
+export function normalizeMindmapRecord(mindmap: MindmapRecord): MindmapRecord {
+  if (MINDMAP_LAYOUT_MODES.has(mindmap.layoutMode)) {
+    return mindmap
+  }
+
+  return {
+    ...mindmap,
+    layoutMode: DEFAULT_LAYOUT_MODE,
+  }
+}
+
+export function setMindmapLayoutMode(
+  mindmap: MindmapRecord,
+  layoutMode: MindmapLayoutMode,
+  now = new Date().toISOString(),
+): MindmapRecord {
+  return {
+    ...mindmap,
+    layoutMode,
     updatedAt: now,
   }
 }
@@ -123,6 +150,30 @@ export function deleteMindmapNode(
   return {
     ...mindmap,
     nodes: nextNodes,
+    updatedAt: now,
+  }
+}
+
+export function toggleMindmapNodeCollapsed(
+  mindmap: MindmapRecord,
+  nodeId: string,
+  now = new Date().toISOString(),
+): MindmapRecord {
+  const node = mindmap.nodes[nodeId]
+
+  if (!node || nodeId === mindmap.rootNodeId) {
+    return mindmap
+  }
+
+  return {
+    ...mindmap,
+    nodes: {
+      ...mindmap.nodes,
+      [nodeId]: {
+        ...node,
+        collapsed: !node.collapsed,
+      },
+    },
     updatedAt: now,
   }
 }

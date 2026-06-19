@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { WorkspaceSnapshot } from '../domain/types'
 import { createMemoryRepository } from '../test/memoryRepository'
 import { createWorkspaceStore } from './createWorkspaceStore'
 
@@ -489,6 +490,63 @@ describe('createWorkspaceStore', () => {
       type: 'mindmap',
       mindmapId: snapshot?.mindmaps[0].id,
     })
+  })
+
+  it('normalizes legacy mindmaps without a layout mode when bootstrapping', async () => {
+    const repository = createMemoryRepository({
+      boards: [],
+      mindmaps: [
+        {
+          id: 'mindmap-legacy',
+          title: 'Legacy Mindmap',
+          rootNodeId: 'node-root',
+          nodes: {
+            'node-root': {
+              id: 'node-root',
+              parentId: null,
+              text: 'Root',
+              order: 0,
+            },
+          },
+          viewport: {
+            x: 0,
+            y: 0,
+            zoom: 1,
+          },
+          createdAt: '2026-06-18T00:00:00.000Z',
+          updatedAt: '2026-06-18T00:00:00.000Z',
+        },
+      ] as unknown as WorkspaceSnapshot['mindmaps'],
+      pages: [
+        {
+          id: 'page-home',
+          parentId: null,
+          title: 'Home',
+          icon: null,
+          cover: null,
+          blocks: [
+            {
+              id: 'block-mindmap',
+              type: 'mindmap',
+              mindmapId: 'mindmap-legacy',
+            },
+          ],
+          createdAt: '2026-06-18T00:00:00.000Z',
+          updatedAt: '2026-06-18T00:00:00.000Z',
+        },
+      ],
+      settings: {
+        lastOpenedPageId: 'page-home',
+      },
+    })
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+
+    expect(store.getState().mindmaps[0].layoutMode).toBe('balanced')
+
+    const snapshot = await repository.load()
+    expect(snapshot?.mindmaps[0].layoutMode).toBe('balanced')
   })
 
   it('adds a child node to a mindmap', async () => {

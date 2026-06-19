@@ -36,6 +36,7 @@ export function createMindmapRecord(now = new Date().toISOString()): MindmapReco
     id: createId('mindmap'),
     title: '未命名思维导图',
     rootNodeId,
+    layoutMode: 'balanced',
     nodes: {
       [rootNodeId]: {
         id: rootNodeId,
