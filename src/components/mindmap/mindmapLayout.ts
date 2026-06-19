@@ -33,9 +33,10 @@ const NODE_SPACING_Y = 96
 const OUTLINE_ROW_HEIGHT = 72
 const MIN_WIDTH = 960
 const MIN_HEIGHT = 540
+const LAYOUT_PADDING = 40
 
 export function buildMindmapLayout(mindmap: MindmapRecord): MindmapLayout {
-  const root = mindmap.nodes[mindmap.rootNodeId]
+  const root = mindmap.nodes[mindmap.rootNodeId] ?? createFallbackRootNode(mindmap.rootNodeId)
   const childrenByParentId = buildChildrenByParentId(mindmap.nodes)
 
   if (mindmap.layoutMode === 'outline') {
@@ -215,17 +216,49 @@ function createLayoutNode(
 }
 
 function createLayout(root: MindmapLayoutNode, nodes: MindmapLayoutNode[]): MindmapLayout {
+  const normalized = normalizeLayoutBounds(nodes)
+  const normalizedRoot = normalized.nodes.find((node) => node.id === root.id) ?? normalized.nodes[0]
+
   return {
-    nodes,
-    edges: nodes
+    nodes: normalized.nodes,
+    edges: normalized.nodes
       .filter((node) => node.parentId !== null)
       .map((node) => ({
         id: `${node.parentId}-${node.id}`,
         from: node.parentId!,
         to: node.id,
       })),
-    root,
-    width: Math.max(MIN_WIDTH, Math.max(...nodes.map((node) => node.x)) + RIGHT_SPACING_X),
-    height: Math.max(MIN_HEIGHT, Math.max(...nodes.map((node) => node.y)) + NODE_SPACING_Y),
+    root: normalizedRoot,
+    width: normalized.width,
+    height: normalized.height,
+  }
+}
+
+function createFallbackRootNode(rootNodeId: string): MindmapNode {
+  return {
+    id: rootNodeId,
+    parentId: null,
+    text: '',
+    order: 0,
+  }
+}
+
+function normalizeLayoutBounds(nodes: MindmapLayoutNode[]) {
+  const minX = Math.min(...nodes.map((node) => node.x))
+  const minY = Math.min(...nodes.map((node) => node.y))
+  const shiftX = minX < LAYOUT_PADDING ? LAYOUT_PADDING - minX : 0
+  const shiftY = minY < LAYOUT_PADDING ? LAYOUT_PADDING - minY : 0
+  const normalizedNodes = nodes.map((node) => ({
+    ...node,
+    x: node.x + shiftX,
+    y: node.y + shiftY,
+  }))
+  const maxX = Math.max(...normalizedNodes.map((node) => node.x))
+  const maxY = Math.max(...normalizedNodes.map((node) => node.y))
+
+  return {
+    nodes: normalizedNodes,
+    width: Math.max(MIN_WIDTH, maxX + LAYOUT_PADDING),
+    height: Math.max(MIN_HEIGHT, maxY + LAYOUT_PADDING),
   }
 }

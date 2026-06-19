@@ -106,6 +106,113 @@ describe('mindmapLayout', () => {
       'visible-child',
     ])
   })
+
+  it('returns a fallback root layout when the root node is missing', () => {
+    const layout = buildMindmapLayout(
+      createMindmap({
+        layoutMode: 'right',
+        nodes: [],
+      }),
+    )
+
+    expect(layout.root).toMatchObject({
+      id: 'root',
+      parentId: null,
+      text: '',
+    })
+    expect(layout.nodes).toEqual([layout.root])
+    expect(layout.edges).toEqual([])
+  })
+
+  it('keeps balanced left-side deep descendants in positive bounds', () => {
+    const layout = buildMindmapLayout(
+      createMindmap({
+        layoutMode: 'balanced',
+        nodes: [
+          node('root', null, 0),
+          node('left-child', 'root', 0, { side: 'left' }),
+          node('left-grandchild', 'left-child', 0),
+          node('left-great-grandchild', 'left-grandchild', 0),
+        ],
+      }),
+    )
+
+    const deepestLeftNode = findLayoutNode(layout, 'left-great-grandchild')
+
+    expect(layout.nodes.every((layoutNode) => layoutNode.x > 0)).toBe(true)
+    expect(layout.width).toBeGreaterThan(deepestLeftNode.x)
+  })
+
+  it('keeps balanced descendants on their explicit root child side', () => {
+    const layout = buildMindmapLayout(
+      createMindmap({
+        layoutMode: 'balanced',
+        nodes: [
+          node('root', null, 0),
+          node('left-child', 'root', 0, { side: 'left' }),
+          node('left-grandchild', 'left-child', 0),
+          node('right-child', 'root', 1, { side: 'right' }),
+          node('right-grandchild', 'right-child', 0),
+        ],
+      }),
+    )
+
+    const root = findLayoutNode(layout, 'root')
+    const leftChild = findLayoutNode(layout, 'left-child')
+    const leftGrandchild = findLayoutNode(layout, 'left-grandchild')
+    const rightChild = findLayoutNode(layout, 'right-child')
+    const rightGrandchild = findLayoutNode(layout, 'right-grandchild')
+
+    expect(leftChild.side).toBe('left')
+    expect(leftGrandchild.side).toBe('left')
+    expect(leftGrandchild.x).toBeLessThan(leftChild.x)
+    expect(leftChild.x).toBeLessThan(root.x)
+    expect(rightChild.side).toBe('right')
+    expect(rightGrandchild.side).toBe('right')
+    expect(rightGrandchild.x).toBeGreaterThan(rightChild.x)
+    expect(rightChild.x).toBeGreaterThan(root.x)
+  })
+
+  it('omits balanced descendants of collapsed nodes from layout', () => {
+    const layout = buildMindmapLayout(
+      createMindmap({
+        layoutMode: 'balanced',
+        nodes: [
+          node('root', null, 0),
+          node('left-child', 'root', 0, { collapsed: true, side: 'left' }),
+          node('hidden-grandchild', 'left-child', 0),
+          node('right-child', 'root', 1, { side: 'right' }),
+        ],
+      }),
+    )
+
+    expect(layout.nodes.map((layoutNode) => layoutNode.id)).toEqual([
+      'root',
+      'left-child',
+      'right-child',
+    ])
+  })
+
+  it('creates visible parent-child edges only', () => {
+    const layout = buildMindmapLayout(
+      createMindmap({
+        layoutMode: 'right',
+        nodes: [
+          node('root', null, 0),
+          node('collapsed-child', 'root', 0, { collapsed: true }),
+          node('hidden-grandchild', 'collapsed-child', 0),
+          node('visible-child', 'root', 1),
+          node('visible-grandchild', 'visible-child', 0),
+        ],
+      }),
+    )
+
+    expect(layout.edges).toEqual([
+      { id: 'root-collapsed-child', from: 'root', to: 'collapsed-child' },
+      { id: 'root-visible-child', from: 'root', to: 'visible-child' },
+      { id: 'visible-child-visible-grandchild', from: 'visible-child', to: 'visible-grandchild' },
+    ])
+  })
 })
 
 type MindmapLayoutResult = ReturnType<typeof buildMindmapLayout>
