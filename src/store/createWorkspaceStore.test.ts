@@ -847,6 +847,78 @@ describe('createWorkspaceStore', () => {
     expect(store.getState().mindmaps[0]).toEqual(initialSnapshot.mindmaps[0])
   })
 
+  it('does not persist root sibling or root delete mindmap no-ops', async () => {
+    const initialSnapshot: WorkspaceSnapshot = {
+      boards: [],
+      mindmaps: [
+        {
+          id: 'mindmap-existing',
+          title: 'Existing Mindmap',
+          rootNodeId: 'node-root',
+          layoutMode: 'balanced',
+          nodes: {
+            'node-root': {
+              id: 'node-root',
+              parentId: null,
+              text: 'Root',
+              order: 0,
+            },
+          },
+          viewport: {
+            x: 0,
+            y: 0,
+            zoom: 1,
+          },
+          createdAt: '2026-06-18T00:00:00.000Z',
+          updatedAt: '2026-06-18T00:00:00.000Z',
+        },
+      ],
+      pages: [
+        {
+          id: 'page-home',
+          parentId: null,
+          title: 'Home',
+          icon: null,
+          cover: null,
+          blocks: [
+            {
+              id: 'block-mindmap',
+              type: 'mindmap',
+              mindmapId: 'mindmap-existing',
+            },
+          ],
+          createdAt: '2026-06-18T00:00:00.000Z',
+          updatedAt: '2026-06-18T00:00:00.000Z',
+        },
+      ],
+      settings: {
+        lastOpenedPageId: 'page-home',
+      },
+    }
+    let snapshot = structuredClone(initialSnapshot)
+    let persistCount = 0
+    const repository: WorkspaceRepository = {
+      async load() {
+        return structuredClone(snapshot)
+      },
+      async save(nextSnapshot) {
+        persistCount += 1
+        snapshot = structuredClone(nextSnapshot)
+      },
+      async replace(nextSnapshot) {
+        persistCount += 1
+        snapshot = structuredClone(nextSnapshot)
+      },
+    }
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    await store.getState().addMindmapSiblingNode('mindmap-existing', 'node-root')
+    await store.getState().deleteMindmapNode('mindmap-existing', 'node-root')
+
+    expect(persistCount).toBe(0)
+    expect(store.getState().mindmaps[0]).toEqual(initialSnapshot.mindmaps[0])
+  })
   it('adds a sibling node to a non-root node and persists it', async () => {
     const repository = createMemoryRepository()
     const store = createWorkspaceStore(repository)

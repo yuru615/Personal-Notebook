@@ -140,7 +140,26 @@ describe('mindmapLayout', () => {
     const deepestLeftNode = findLayoutNode(layout, 'left-great-grandchild')
 
     expect(layout.nodes.every((layoutNode) => layoutNode.x > 0)).toBe(true)
-    expect(layout.width).toBeGreaterThan(deepestLeftNode.x)
+    expect(deepestLeftNode.x).toBeGreaterThan(96)
+    expect(layout.width).toBeGreaterThan(deepestLeftNode.x + 96)
+  })
+
+  it('expands right-side bounds to include node card width', () => {
+    const layout = buildMindmapLayout(
+      createMindmap({
+        layoutMode: 'right',
+        nodes: [
+          node('root', null, 0),
+          node('child', 'root', 0),
+          node('grandchild', 'child', 0),
+          node('great-grandchild', 'grandchild', 0),
+        ],
+      }),
+    )
+
+    const deepestRightNode = findLayoutNode(layout, 'great-grandchild')
+
+    expect(layout.width).toBeGreaterThan(deepestRightNode.x + 96)
   })
 
   it('keeps balanced descendants on their explicit root child side', () => {

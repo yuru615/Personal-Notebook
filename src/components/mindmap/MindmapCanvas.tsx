@@ -121,10 +121,6 @@ export function MindmapCanvas({
                       return
                     }
 
-                    if (event.key === 'Delete' && !isRoot) {
-                      event.preventDefault()
-                      onDeleteNode(node.id)
-                    }
                   }}
                 />
                 <div className="mindmap-node-actions">

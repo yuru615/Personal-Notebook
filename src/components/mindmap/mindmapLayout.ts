@@ -34,6 +34,8 @@ const OUTLINE_ROW_HEIGHT = 72
 const MIN_WIDTH = 960
 const MIN_HEIGHT = 540
 const LAYOUT_PADDING = 40
+const NODE_HALF_WIDTH = 96
+const NODE_HALF_HEIGHT = 56
 
 export function buildMindmapLayout(mindmap: MindmapRecord): MindmapLayout {
   const root = mindmap.nodes[mindmap.rootNodeId] ?? createFallbackRootNode(mindmap.rootNodeId)
@@ -246,8 +248,10 @@ function createFallbackRootNode(rootNodeId: string): MindmapNode {
 function normalizeLayoutBounds(nodes: MindmapLayoutNode[]) {
   const minX = Math.min(...nodes.map((node) => node.x))
   const minY = Math.min(...nodes.map((node) => node.y))
-  const shiftX = minX < LAYOUT_PADDING ? LAYOUT_PADDING - minX : 0
-  const shiftY = minY < LAYOUT_PADDING ? LAYOUT_PADDING - minY : 0
+  const minCenterX = NODE_HALF_WIDTH + LAYOUT_PADDING
+  const minCenterY = NODE_HALF_HEIGHT + LAYOUT_PADDING
+  const shiftX = minX < minCenterX ? minCenterX - minX : 0
+  const shiftY = minY < minCenterY ? minCenterY - minY : 0
   const normalizedNodes = nodes.map((node) => ({
     ...node,
     x: node.x + shiftX,
@@ -258,7 +262,7 @@ function normalizeLayoutBounds(nodes: MindmapLayoutNode[]) {
 
   return {
     nodes: normalizedNodes,
-    width: Math.max(MIN_WIDTH, maxX + LAYOUT_PADDING),
-    height: Math.max(MIN_HEIGHT, maxY + LAYOUT_PADDING),
+    width: Math.max(MIN_WIDTH, maxX + NODE_HALF_WIDTH + LAYOUT_PADDING),
+    height: Math.max(MIN_HEIGHT, maxY + NODE_HALF_HEIGHT + LAYOUT_PADDING),
   }
 }

@@ -152,7 +152,7 @@ describe('MindmapCanvas', () => {
     expect(onAddChildNode).toHaveBeenCalledWith(mindmap.rootNodeId)
   })
 
-  it('deletes a non-root focused node when pressing Delete', () => {
+  it('does not delete a non-root focused node when pressing Delete inside the input', () => {
     const base = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')
     const childId = 'mindmap-node-child'
     const mindmap = {
@@ -175,7 +175,7 @@ describe('MindmapCanvas', () => {
       key: 'Delete',
     })
 
-    expect(onDeleteNode).toHaveBeenCalledWith(childId)
+    expect(onDeleteNode).not.toHaveBeenCalled()
   })
 
   it('does not delete the root node when pressing Delete', () => {

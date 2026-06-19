@@ -883,9 +883,21 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
     addMindmapChildNode: async (mindmapId: string, parentNodeId: string) => {
       const state = get()
-      const nextMindmaps = state.mindmaps.map((mindmap) =>
-        mindmap.id === mindmapId ? appendMindmapChildNode(mindmap, parentNodeId) : mindmap,
-      )
+      let didChange = false
+      const nextMindmaps = state.mindmaps.map((mindmap) => {
+        if (mindmap.id !== mindmapId) {
+          return mindmap
+        }
+
+        const nextMindmap = appendMindmapChildNode(mindmap, parentNodeId)
+        didChange ||= nextMindmap !== mindmap
+
+        return nextMindmap
+      })
+
+      if (!didChange) {
+        return
+      }
 
       pushUndoSnapshot(state)
       try {
@@ -897,9 +909,21 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
     renameMindmapNode: async (mindmapId: string, nodeId: string, text: string) => {
       const state = get()
-      const nextMindmaps = state.mindmaps.map((mindmap) =>
-        mindmap.id === mindmapId ? updateMindmapNodeText(mindmap, nodeId, text) : mindmap,
-      )
+      let didChange = false
+      const nextMindmaps = state.mindmaps.map((mindmap) => {
+        if (mindmap.id !== mindmapId) {
+          return mindmap
+        }
+
+        const nextMindmap = updateMindmapNodeText(mindmap, nodeId, text)
+        didChange ||= nextMindmap !== mindmap
+
+        return nextMindmap
+      })
+
+      if (!didChange) {
+        return
+      }
 
       pushUndoSnapshot(state)
       try {
@@ -937,9 +961,21 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
     addMindmapSiblingNode: async (mindmapId: string, nodeId: string) => {
       const state = get()
-      const nextMindmaps = state.mindmaps.map((mindmap) =>
-        mindmap.id === mindmapId ? appendMindmapSiblingNode(mindmap, nodeId) : mindmap,
-      )
+      let didChange = false
+      const nextMindmaps = state.mindmaps.map((mindmap) => {
+        if (mindmap.id !== mindmapId) {
+          return mindmap
+        }
+
+        const nextMindmap = appendMindmapSiblingNode(mindmap, nodeId)
+        didChange ||= nextMindmap !== mindmap
+
+        return nextMindmap
+      })
+
+      if (!didChange) {
+        return
+      }
 
       pushUndoSnapshot(state)
       try {
@@ -951,9 +987,21 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
     deleteMindmapNode: async (mindmapId: string, nodeId: string) => {
       const state = get()
-      const nextMindmaps = state.mindmaps.map((mindmap) =>
-        mindmap.id === mindmapId ? removeMindmapNode(mindmap, nodeId) : mindmap,
-      )
+      let didChange = false
+      const nextMindmaps = state.mindmaps.map((mindmap) => {
+        if (mindmap.id !== mindmapId) {
+          return mindmap
+        }
+
+        const nextMindmap = removeMindmapNode(mindmap, nodeId)
+        didChange ||= nextMindmap !== mindmap
+
+        return nextMindmap
+      })
+
+      if (!didChange) {
+        return
+      }
 
       pushUndoSnapshot(state)
       try {

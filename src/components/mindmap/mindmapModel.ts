@@ -71,6 +71,10 @@ export function addMindmapChildNode(
   parentId: string,
   now = new Date().toISOString(),
 ): MindmapRecord {
+  if (!mindmap.nodes[parentId]) {
+    return mindmap
+  }
+
   const siblingCount = Object.values(mindmap.nodes).filter((node) => node.parentId === parentId).length
   const nodeId = createId('mindmap_node')
 
@@ -109,7 +113,7 @@ export function renameMindmapNode(
 ): MindmapRecord {
   const node = mindmap.nodes[nodeId]
 
-  if (!node) {
+  if (!node || node.text === text) {
     return mindmap
   }
 
