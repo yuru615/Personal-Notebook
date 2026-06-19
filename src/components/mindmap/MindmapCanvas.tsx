@@ -26,7 +26,7 @@ export function MindmapCanvas({
   const nodesById = new Map(layout.nodes.map((node) => [node.id, node]))
 
   return (
-    <div className="mindmap-canvas">
+    <div className="mindmap-workspace">
       <div className="mindmap-layout-toolbar" aria-label="导图布局">
         <button
           type="button"
@@ -50,14 +50,15 @@ export function MindmapCanvas({
           大纲导图
         </button>
       </div>
-      <svg
-        className="mindmap-canvas-svg"
-        viewBox={`0 0 ${layout.width} ${layout.height}`}
-        width={layout.width}
-        height={layout.height}
-        aria-label="思维导图画布"
-      >
-        {layout.edges.map((edge) => {
+      <div className="mindmap-canvas">
+        <svg
+          className="mindmap-canvas-svg"
+          viewBox={`0 0 ${layout.width} ${layout.height}`}
+          width={layout.width}
+          height={layout.height}
+          aria-label="思维导图画布"
+        >
+          {layout.edges.map((edge) => {
             const from = nodesById.get(edge.from)
             const to = nodesById.get(edge.to)
             if (!from || !to) {
@@ -73,76 +74,81 @@ export function MindmapCanvas({
               />
             )
           })}
-      </svg>
-      <div
-        className="mindmap-node-layer"
-        style={{ width: `${layout.width}px`, height: `${layout.height}px` }}
-      >
-        {layout.nodes.map((node) => {
-          const isRoot = node.id === mindmap.rootNodeId
-          const isCollapsed = mindmap.nodes[node.id]?.collapsed === true
+        </svg>
+        <div
+          className="mindmap-node-layer"
+          style={{ width: `${layout.width}px`, height: `${layout.height}px` }}
+        >
+          {layout.nodes.map((node) => {
+            const isRoot = node.id === mindmap.rootNodeId
+            const isCollapsed = mindmap.nodes[node.id]?.collapsed === true
 
-          return (
-            <div
-              key={node.id}
-              className={[
-                'mindmap-node-card',
-                selectedNodeId === node.id ? 'mindmap-node-card-selected' : '',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-              style={{ left: `${node.x}px`, top: `${node.y}px` }}
-              onMouseDown={() => setSelectedNodeId(node.id)}
-            >
-              <input
-                aria-label={`节点 ${node.id}`}
-                value={node.text}
-                onFocus={() => setSelectedNodeId(node.id)}
-                onChange={(event) => onRenameNode(node.id, event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.nativeEvent.isComposing) {
-                    return
-                  }
+            return (
+              <div
+                key={node.id}
+                className={[
+                  'mindmap-node-card',
+                  selectedNodeId === node.id ? 'mindmap-node-card-selected' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                style={{ left: `${node.x}px`, top: `${node.y}px` }}
+                onMouseDown={() => setSelectedNodeId(node.id)}
+              >
+                <input
+                  aria-label={`节点 ${node.id}`}
+                  value={node.text}
+                  onFocus={() => setSelectedNodeId(node.id)}
+                  onChange={(event) => onRenameNode(node.id, event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.nativeEvent.isComposing) {
+                      return
+                    }
 
-                  if (event.key === 'Enter') {
-                    event.preventDefault()
-                    onAddSiblingNode(node.id)
-                    return
-                  }
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      if (isRoot) {
+                        onAddChildNode(node.id)
+                      } else {
+                        onAddSiblingNode(node.id)
+                      }
+                      return
+                    }
 
-                  if (event.key === 'Tab') {
-                    event.preventDefault()
-                    onAddChildNode(node.id)
-                    return
-                  }
+                    if (event.key === 'Tab') {
+                      event.preventDefault()
+                      onAddChildNode(node.id)
+                      return
+                    }
 
-                  if (event.key === 'Delete' && !isRoot) {
-                    event.preventDefault()
-                    onDeleteNode(node.id)
-                  }
-                }}
-              />
-              <div className="mindmap-node-actions">
-                <button type="button" onClick={() => onAddChildNode(node.id)}>
-                  子级
-                </button>
-                <button type="button" onClick={() => onAddSiblingNode(node.id)}>
-                  同级
-                </button>
-                {node.parentId ? (
-                  <>
-                    <button type="button" onClick={() => onToggleNodeCollapsed(node.id)}>
-                      {isCollapsed ? '展开' : '折叠'}
-                    </button>
-                    <button type="button" onClick={() => onDeleteNode(node.id)}>
-                      删除
-                    </button>
-                  </>
-                ) : null}
+                    if (event.key === 'Delete' && !isRoot) {
+                      event.preventDefault()
+                      onDeleteNode(node.id)
+                    }
+                  }}
+                />
+                <div className="mindmap-node-actions">
+                  <button type="button" onClick={() => onAddChildNode(node.id)}>
+                    子级
+                  </button>
+                  {!isRoot ? (
+                    <>
+                      <button type="button" onClick={() => onAddSiblingNode(node.id)}>
+                        同级
+                      </button>
+                      <button type="button" onClick={() => onToggleNodeCollapsed(node.id)}>
+                        {isCollapsed ? '展开' : '折叠'}
+                      </button>
+                      <button type="button" onClick={() => onDeleteNode(node.id)}>
+                        删除
+                      </button>
+                    </>
+                  ) : null}
+                </div>
               </div>
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
       </div>
     </div>
   )

@@ -524,7 +524,7 @@ describe('App shell', () => {
     const rootInput = screen.getByLabelText('节点 mindmap-node-root')
     fireEvent.input(rootInput, { target: { value: '研究主题' } })
 
-    await user.click(screen.getAllByRole('button', { name: '同级' })[1])
+    await user.click(screen.getByRole('button', { name: '同级' }))
     await user.click(screen.getAllByRole('button', { name: '删除' })[0])
 
     await waitFor(async () => {

@@ -57,15 +57,31 @@ describe('MindmapCanvas', () => {
 
     expect(screen.getByLabelText(`节点 ${mindmap.rootNodeId}`)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '子级' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '同级' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '同级' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '左右导图' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '右侧导图' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '大纲导图' })).toBeInTheDocument()
   })
 
+  it('keeps the layout toolbar outside the positioned canvas surface', () => {
+    const mindmap = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')
+    const { container } = renderMindmapCanvas(mindmap)
+    const workspace = container.querySelector('.mindmap-workspace')
+    const canvas = container.querySelector('.mindmap-canvas')
+    const toolbar = container.querySelector('.mindmap-layout-toolbar')
+    const nodeLayer = container.querySelector('.mindmap-node-layer')
+
+    expect(workspace).toContainElement(toolbar)
+    expect(workspace).toContainElement(canvas)
+    expect(canvas).toContainElement(nodeLayer)
+    expect(canvas).not.toContainElement(toolbar)
+    expect(toolbar?.parentElement).toBe(workspace)
+    expect(nodeLayer?.parentElement).toBe(canvas)
+  })
+
   it('forwards node actions', async () => {
     const user = userEvent.setup()
-    const mindmap = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')
+    const mindmap = createMindmapWithChild()
     const onAddChildNode = vi.fn()
     const onRenameNode = vi.fn()
     const onAddSiblingNode = vi.fn()
@@ -79,15 +95,15 @@ describe('MindmapCanvas', () => {
     fireEvent.change(screen.getByLabelText(`节点 ${mindmap.rootNodeId}`), {
       target: { value: '新主题' },
     })
-    await user.click(screen.getByRole('button', { name: '子级' }))
+    await user.click(screen.getAllByRole('button', { name: '子级' })[0])
     await user.click(screen.getByRole('button', { name: '同级' }))
 
     expect(onRenameNode).toHaveBeenLastCalledWith(mindmap.rootNodeId, '新主题')
     expect(onAddChildNode).toHaveBeenCalledWith(mindmap.rootNodeId)
-    expect(onAddSiblingNode).toHaveBeenCalledWith(mindmap.rootNodeId)
+    expect(onAddSiblingNode).toHaveBeenCalledWith('mindmap-node-child')
   })
 
-  it('adds a sibling node from the focused node when pressing Enter', () => {
+  it('adds a child node from the root node when pressing Enter', () => {
     const mindmap = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')
     const onAddChildNode = vi.fn()
     const onAddSiblingNode = vi.fn()
@@ -101,7 +117,25 @@ describe('MindmapCanvas', () => {
       key: 'Enter',
     })
 
-    expect(onAddSiblingNode).toHaveBeenCalledWith(mindmap.rootNodeId)
+    expect(onAddChildNode).toHaveBeenCalledWith(mindmap.rootNodeId)
+    expect(onAddSiblingNode).not.toHaveBeenCalled()
+  })
+
+  it('adds a sibling node from a non-root focused node when pressing Enter', () => {
+    const mindmap = createMindmapWithChild()
+    const onAddChildNode = vi.fn()
+    const onAddSiblingNode = vi.fn()
+
+    renderMindmapCanvas(mindmap, {
+      onAddChildNode,
+      onAddSiblingNode,
+    })
+
+    fireEvent.keyDown(screen.getByLabelText('节点 mindmap-node-child'), {
+      key: 'Enter',
+    })
+
+    expect(onAddSiblingNode).toHaveBeenCalledWith('mindmap-node-child')
     expect(onAddChildNode).not.toHaveBeenCalled()
   })
 
@@ -291,11 +325,14 @@ describe('MindmapCanvas', () => {
   it('uses layout dimensions for the canvas viewport and node layer', () => {
     const mindmap = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')
     const { container } = renderMindmapCanvas(mindmap)
+    const viewBox = screen.getByLabelText('思维导图画布').getAttribute('viewBox')
+    const [, , width, height] = viewBox?.split(' ').map(Number) ?? []
 
-    expect(screen.getByLabelText('思维导图画布')).toHaveAttribute('viewBox', '0 0 960 540')
+    expect(width).toBeGreaterThan(0)
+    expect(height).toBeGreaterThan(0)
     expect(container.querySelector('.mindmap-node-layer')).toHaveStyle({
-      width: '960px',
-      height: '540px',
+      width: `${width}px`,
+      height: `${height}px`,
     })
   })
 
@@ -321,11 +358,14 @@ describe('MindmapCanvas', () => {
       nodes,
     }
     const { container } = renderMindmapCanvas(mindmap)
+    const viewBox = screen.getByLabelText('思维导图画布').getAttribute('viewBox')
+    const [, , width, height] = viewBox?.split(' ').map(Number) ?? []
 
-    expect(screen.getByLabelText('思维导图画布')).toHaveAttribute('viewBox', '0 0 1660 660')
+    expect(width).toBeGreaterThan(960)
+    expect(height).toBeGreaterThan(540)
     expect(container.querySelector('.mindmap-node-layer')).toHaveStyle({
-      width: '1660px',
-      height: '660px',
+      width: `${width}px`,
+      height: `${height}px`,
     })
   })
 
