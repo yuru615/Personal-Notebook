@@ -73,4 +73,12 @@ describe('buildMindmapPreviewSvgDataUrl', () => {
     expect(svg).toContain('data-layout="balanced"')
     expect(svg).not.toContain(payload)
   })
+
+  it('renders a softer preview frame with curved branch paths', () => {
+    const svg = decodePreviewSvg(createMindmap())
+
+    expect(svg).toContain('<path')
+    expect(svg).toContain('stroke-linecap="round"')
+    expect(svg).toContain('rx="18"')
+  })
 })
