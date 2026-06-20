@@ -24,12 +24,18 @@ interface MindmapLayout {
   height: number
 }
 
+interface MindmapSubtreeLayout {
+  height: number
+  nodes: MindmapLayoutNode[]
+}
+
 const ROOT_X = 420
 const ROOT_Y = 220
 const RIGHT_SPACING_X = 200
 const BALANCED_SPACING_X = 200
 const OUTLINE_INDENT_X = 48
 const NODE_SPACING_Y = 96
+const BRANCH_GAP_Y = 36
 const OUTLINE_ROW_HEIGHT = 72
 const MIN_WIDTH = 960
 const MIN_HEIGHT = 540
@@ -75,73 +81,68 @@ function buildChildrenByParentId(nodes: MindmapRecord['nodes']) {
 function buildDirectionalLayout(
   root: MindmapNode,
   childrenByParentId: Map<string, MindmapNode[]>,
-  mode: Exclude<MindmapLayoutMode, 'outline' | 'balanced'>,
+  side: Exclude<MindmapLayoutMode, 'outline' | 'balanced'>,
 ): MindmapLayout {
+  const childLayouts = getVisibleChildren(root, childrenByParentId).map((child) =>
+    layoutSubtree(child, childrenByParentId, 1, side, 0, RIGHT_SPACING_X),
+  )
+  const contentHeight = Math.max(measureStackHeight(childLayouts), NODE_SPACING_Y)
+  const rootY = Math.max(ROOT_Y, contentHeight / 2)
   const rootLayoutNode = createLayoutNode(root, {
     x: ROOT_X,
-    y: ROOT_Y,
+    y: rootY,
     depth: 0,
   })
-  const nodes = [rootLayoutNode]
-  let visibleNodeIndex = 0
-
-  walkVisibleChildren(root.id, childrenByParentId, (node, depth) => {
-    nodes.push(
-      createLayoutNode(node, {
-        x: ROOT_X + depth * RIGHT_SPACING_X,
-        y: 140 + visibleNodeIndex * NODE_SPACING_Y,
-        depth,
-        side: mode,
-      }),
-    )
-    visibleNodeIndex += 1
-  })
+  const nodes = [
+    rootLayoutNode,
+    ...stackSubtreeLayouts(childLayouts, rootY).flatMap((layout) => layout.nodes),
+  ]
 
   return createLayout(rootLayoutNode, nodes)
 }
 
 function buildBalancedLayout(root: MindmapNode, childrenByParentId: Map<string, MindmapNode[]>): MindmapLayout {
-  const rootLayoutNode = createLayoutNode(root, {
-    x: ROOT_X,
-    y: ROOT_Y,
-    depth: 0,
-  })
-  const nodes = [rootLayoutNode]
   const rootChildren = childrenByParentId.get(root.id) ?? []
-  const leftNodes: Array<{ node: MindmapNode; depth: number }> = []
-  const rightNodes: Array<{ node: MindmapNode; depth: number }> = []
+  const leftLayouts: MindmapSubtreeLayout[] = []
+  const rightLayouts: MindmapSubtreeLayout[] = []
 
   rootChildren.forEach((child, index) => {
     const side = child.side ?? (index % 2 === 0 ? 'left' : 'right')
-    const bucket = side === 'left' ? leftNodes : rightNodes
-    bucket.push({ node: child, depth: 1 })
-    collectVisibleDescendants(child, childrenByParentId, 2, bucket)
+    const subtreeLayout = layoutSubtree(
+      child,
+      childrenByParentId,
+      1,
+      side,
+      0,
+      BALANCED_SPACING_X,
+    )
+
+    if (side === 'left') {
+      leftLayouts.push(subtreeLayout)
+      return
+    }
+
+    rightLayouts.push(subtreeLayout)
   })
 
-  appendBalancedSideNodes(nodes, leftNodes, 'left')
-  appendBalancedSideNodes(nodes, rightNodes, 'right')
+  const contentHeight = Math.max(
+    measureStackHeight(leftLayouts),
+    measureStackHeight(rightLayouts),
+    NODE_SPACING_Y,
+  )
+  const rootY = Math.max(ROOT_Y, contentHeight / 2)
+  const rootLayoutNode = createLayoutNode(root, {
+    x: ROOT_X,
+    y: rootY,
+    depth: 0,
+  })
+  const nodes = [
+    rootLayoutNode,
+    ...stackSubtreeLayouts(leftLayouts, rootY).flatMap((layout) => layout.nodes),
+    ...stackSubtreeLayouts(rightLayouts, rootY).flatMap((layout) => layout.nodes),
+  ]
 
   return createLayout(rootLayoutNode, nodes)
-}
-
-function appendBalancedSideNodes(
-  nodes: MindmapLayoutNode[],
-  sideNodes: Array<{ node: MindmapNode; depth: number }>,
-  side: 'left' | 'right',
-) {
-  const topY = ROOT_Y - ((sideNodes.length - 1) * NODE_SPACING_Y) / 2
-  const direction = side === 'left' ? -1 : 1
-
-  sideNodes.forEach(({ node, depth }, index) => {
-    nodes.push(
-      createLayoutNode(node, {
-        x: ROOT_X + direction * depth * BALANCED_SPACING_X,
-        y: topY + index * NODE_SPACING_Y,
-        depth,
-        side,
-      }),
-    )
-  })
 }
 
 function buildOutlineLayout(root: MindmapNode, childrenByParentId: Map<string, MindmapNode[]>): MindmapLayout {
@@ -184,21 +185,69 @@ function walkVisibleChildren(
   })
 }
 
-function collectVisibleDescendants(
-  parent: MindmapNode,
+function layoutSubtree(
+  node: MindmapNode,
   childrenByParentId: Map<string, MindmapNode[]>,
   depth: number,
-  result: Array<{ node: MindmapNode; depth: number }>,
+  side: 'left' | 'right',
+  topY: number,
+  spacingX: number,
+): MindmapSubtreeLayout {
+  const childLayouts = getVisibleChildren(node, childrenByParentId).map((child) =>
+    layoutSubtree(child, childrenByParentId, depth + 1, side, 0, spacingX),
+  )
+  const height = Math.max(NODE_SPACING_Y, measureStackHeight(childLayouts))
+  const centerY = topY + height / 2
+  const direction = side === 'left' ? -1 : 1
+
+  return {
+    height,
+    nodes: [
+      createLayoutNode(node, {
+        x: ROOT_X + direction * depth * spacingX,
+        y: centerY,
+        depth,
+        side,
+      }),
+      ...stackSubtreeLayouts(childLayouts, centerY).flatMap((layout) => layout.nodes),
+    ],
+  }
+}
+
+function getVisibleChildren(
+  parent: MindmapNode,
+  childrenByParentId: Map<string, MindmapNode[]>,
 ) {
   if (parent.collapsed) {
-    return
+    return []
   }
 
-  const children = childrenByParentId.get(parent.id) ?? []
+  return childrenByParentId.get(parent.id) ?? []
+}
 
-  children.forEach((child) => {
-    result.push({ node: child, depth })
-    collectVisibleDescendants(child, childrenByParentId, depth + 1, result)
+function measureStackHeight(layouts: MindmapSubtreeLayout[]) {
+  if (layouts.length === 0) {
+    return 0
+  }
+
+  return layouts.reduce((total, layout) => total + layout.height, 0) + BRANCH_GAP_Y * (layouts.length - 1)
+}
+
+function stackSubtreeLayouts(layouts: MindmapSubtreeLayout[], centerY: number) {
+  const totalHeight = measureStackHeight(layouts)
+  let cursorY = centerY - totalHeight / 2
+
+  return layouts.map((layout) => {
+    const offsetY = cursorY
+    cursorY += layout.height + BRANCH_GAP_Y
+
+    return {
+      ...layout,
+      nodes: layout.nodes.map((node) => ({
+        ...node,
+        y: node.y + offsetY,
+      })),
+    }
   })
 }
 

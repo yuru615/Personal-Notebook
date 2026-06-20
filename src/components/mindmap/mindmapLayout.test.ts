@@ -87,6 +87,54 @@ describe('mindmapLayout', () => {
     expect(grandchild.x).toBeGreaterThan(child.x)
   })
 
+  it('keeps siblings under the same parent closer together than separate branches', () => {
+    const layout = buildMindmapLayout(
+      createMindmap({
+        layoutMode: 'right',
+        nodes: [
+          node('root', null, 0),
+          node('branch-a', 'root', 0),
+          node('branch-a-1', 'branch-a', 0),
+          node('branch-a-2', 'branch-a', 1),
+          node('branch-b', 'root', 1),
+        ],
+      }),
+    )
+
+    const branchA = findLayoutNode(layout, 'branch-a')
+    const childA1 = findLayoutNode(layout, 'branch-a-1')
+    const childA2 = findLayoutNode(layout, 'branch-a-2')
+    const branchB = findLayoutNode(layout, 'branch-b')
+
+    expect(Math.abs(childA1.y - childA2.y)).toBeLessThan(Math.abs(branchA.y - branchB.y))
+  })
+
+  it('keeps the root vertically centered against both balanced-side subtrees', () => {
+    const layout = buildMindmapLayout(
+      createMindmap({
+        layoutMode: 'balanced',
+        nodes: [
+          node('root', null, 0),
+          node('left', 'root', 0, { side: 'left' }),
+          node('left-top', 'left', 0),
+          node('left-bottom', 'left', 1),
+          node('right', 'root', 1, { side: 'right' }),
+        ],
+      }),
+    )
+
+    const root = findLayoutNode(layout, 'root')
+    const leftTop = findLayoutNode(layout, 'left-top')
+    const leftBottom = findLayoutNode(layout, 'left-bottom')
+    const minY = Math.min(...layout.nodes.map((item) => item.y))
+    const maxY = Math.max(...layout.nodes.map((item) => item.y))
+
+    expect(root.y).toBeGreaterThan(minY)
+    expect(root.y).toBeLessThan(maxY)
+    expect(root.y).toBeGreaterThan(leftTop.y)
+    expect(root.y).toBeLessThan(leftBottom.y)
+  })
+
   it('omits descendants of collapsed nodes from layout', () => {
     const layout = buildMindmapLayout(
       createMindmap({
