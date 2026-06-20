@@ -50,17 +50,17 @@ function fireComposingKeyDown(element: HTMLElement, key: string) {
 }
 
 describe('MindmapCanvas', () => {
-  it('renders the root node input and node action buttons', () => {
+  it('renders the root node input and layout toolbar', () => {
     const mindmap = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')
 
     renderMindmapCanvas(mindmap)
 
     expect(screen.getByLabelText(`节点 ${mindmap.rootNodeId}`)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '子级' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '同级' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '左右导图' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '右侧导图' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '大纲导图' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '新增子级' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '新增同级' })).not.toBeInTheDocument()
   })
 
   it('keeps the layout toolbar outside the positioned canvas surface', () => {
@@ -95,12 +95,36 @@ describe('MindmapCanvas', () => {
     fireEvent.change(screen.getByLabelText(`节点 ${mindmap.rootNodeId}`), {
       target: { value: '新主题' },
     })
-    await user.click(screen.getAllByRole('button', { name: '子级' })[0])
-    await user.click(screen.getByRole('button', { name: '同级' }))
+    fireEvent.focus(screen.getByLabelText(`节点 ${mindmap.rootNodeId}`))
+    await user.click(screen.getByRole('button', { name: '新增子级' }))
+    fireEvent.mouseDown(screen.getByLabelText('节点 mindmap-node-child').closest('.mindmap-node'))
+    await user.click(screen.getByRole('button', { name: '新增同级' }))
 
     expect(onRenameNode).toHaveBeenLastCalledWith(mindmap.rootNodeId, '新主题')
     expect(onAddChildNode).toHaveBeenCalledWith(mindmap.rootNodeId)
     expect(onAddSiblingNode).toHaveBeenCalledWith('mindmap-node-child')
+  })
+
+  it('hides node actions until a node is selected', () => {
+    const mindmap = createMindmapWithChild()
+    const { container } = renderMindmapCanvas(mindmap)
+
+    expect(container.querySelector('.mindmap-node-toolbar')).not.toBeInTheDocument()
+
+    fireEvent.mouseDown(screen.getByLabelText('节点 mindmap-node-child').closest('.mindmap-node')!)
+
+    expect(screen.getByRole('button', { name: '新增子级' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '新增同级' })).toBeInTheDocument()
+  })
+
+  it('clears the selected node when clicking empty canvas space', () => {
+    const mindmap = createMindmapWithChild()
+    const { container } = renderMindmapCanvas(mindmap)
+
+    fireEvent.mouseDown(screen.getByLabelText('节点 mindmap-node-child').closest('.mindmap-node')!)
+    fireEvent.mouseDown(screen.getByLabelText('思维导图画布'))
+
+    expect(container.querySelector('.mindmap-node-selected')).not.toBeInTheDocument()
   })
 
   it('adds a child node from the root node when pressing Enter', () => {
@@ -211,7 +235,9 @@ describe('MindmapCanvas', () => {
 
     renderMindmapCanvas(mindmap, { onDeleteNode })
 
-    const deleteButtons = screen.getAllByRole('button', { name: '删除' })
+    fireEvent.mouseDown(screen.getByLabelText(`节点 ${childId}`).closest('.mindmap-node')!)
+
+    const deleteButtons = screen.getAllByRole('button', { name: '删除节点' })
     expect(deleteButtons).toHaveLength(1)
 
     await user.click(deleteButtons[0])
@@ -251,6 +277,7 @@ describe('MindmapCanvas', () => {
     const user = userEvent.setup()
     const base = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')
     const childId = 'mindmap-node-child'
+    const grandchildId = 'mindmap-node-grandchild'
     const onToggleNodeCollapsed = vi.fn()
     const expandedMindmap = {
       ...base,
@@ -262,11 +289,18 @@ describe('MindmapCanvas', () => {
           text: '分支',
           order: 0,
         },
+        [grandchildId]: {
+          id: grandchildId,
+          parentId: childId,
+          text: '子分支',
+          order: 0,
+        },
       },
     }
     const { rerender } = renderMindmapCanvas(expandedMindmap, { onToggleNodeCollapsed })
 
-    await user.click(screen.getByRole('button', { name: '折叠' }))
+    fireEvent.mouseDown(screen.getByLabelText(`节点 ${childId}`).closest('.mindmap-node')!)
+    await user.click(screen.getByRole('button', { name: '折叠节点' }))
 
     expect(onToggleNodeCollapsed).toHaveBeenCalledWith(childId)
 
@@ -291,7 +325,8 @@ describe('MindmapCanvas', () => {
       />,
     )
 
-    await user.click(screen.getByRole('button', { name: '展开' }))
+    fireEvent.mouseDown(screen.getByLabelText(`节点 ${childId}`).closest('.mindmap-node')!)
+    await user.click(screen.getByRole('button', { name: '展开节点' }))
 
     expect(onToggleNodeCollapsed).toHaveBeenLastCalledWith(childId)
   })
@@ -303,14 +338,14 @@ describe('MindmapCanvas', () => {
 
     fireEvent.focus(screen.getByRole('textbox'))
 
-    expect(container.querySelector('.mindmap-node-card-selected')).toBeInTheDocument()
+    expect(container.querySelector('.mindmap-node-selected')).toBeInTheDocument()
   })
 
   it('marks a node as selected on mouse down', () => {
     const mindmap = createMindmapWithChild()
     const { container } = renderMindmapCanvas(mindmap)
     const childInput = screen.getByLabelText('节点 mindmap-node-child')
-    const childCard = childInput.closest('.mindmap-node-card')
+    const childCard = childInput.closest('.mindmap-node')
 
     if (!childCard) {
       throw new Error('Expected child node card')
@@ -318,8 +353,8 @@ describe('MindmapCanvas', () => {
 
     fireEvent.mouseDown(childCard)
 
-    expect(childCard).toHaveClass('mindmap-node-card-selected')
-    expect(container.querySelectorAll('.mindmap-node-card-selected')).toHaveLength(1)
+    expect(childCard).toHaveClass('mindmap-node-selected')
+    expect(container.querySelectorAll('.mindmap-node-selected')).toHaveLength(1)
   })
 
   it('uses layout dimensions for the canvas viewport and node layer', () => {
@@ -350,6 +385,16 @@ describe('MindmapCanvas', () => {
         order: 0,
       }
       parentId = nodeId
+    })
+
+    Array.from({ length: 6 }).forEach((_, index) => {
+      const nodeId = `mindmap-node-sibling-${index}`
+      nodes[nodeId] = {
+        id: nodeId,
+        parentId: base.rootNodeId,
+        text: `并列 ${index}`,
+        order: index,
+      }
     })
 
     const mindmap = {
