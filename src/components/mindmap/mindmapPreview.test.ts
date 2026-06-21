@@ -1,84 +1,106 @@
-import { describe, expect, it } from 'vitest'
-import type { MindmapRecord } from '../../domain/types'
-import { buildMindmapPreviewSvgDataUrl } from './mindmapPreview'
+﻿import { describe, expect, it } from 'vitest'
+import { buildMindmapPreviewSvgDataUrl, summarizeMindmapSnapshot } from './mindmapPreview'
+import type { MindmapSnapshot } from './mindmapModel'
 
-function createMindmap(overrides: Partial<MindmapRecord> = {}): MindmapRecord {
-  return {
-    id: 'mindmap-preview',
-    title: 'Preview',
-    rootNodeId: 'root',
-    layoutMode: 'right',
-    nodes: {
-      root: {
-        id: 'root',
-        parentId: null,
-        text: '中心主题',
-        order: 0,
-      },
+const snapshot: MindmapSnapshot = {
+  camera: {
+    x: 0,
+    y: 0,
+    scale: 1,
+  },
+  color: '#17202a',
+  strokeSize: 6,
+  textFontFamily: 'Inter, Segoe UI, sans-serif',
+  textFontSize: 24,
+  lineMode: 'straight',
+  shapeType: 'rect',
+  shapes: [
+    {
+      id: 'shape-1',
+      type: 'rect',
+      x: 300,
+      y: 36,
+      w: 180,
+      h: 120,
+      color: '#3b82f6',
+      size: 3,
+      text: '',
+      z: 2,
     },
-    viewport: {
-      x: 0,
-      y: 0,
-      zoom: 1,
+  ],
+  strokes: [],
+  connections: [],
+  notes: [
+    {
+      id: 'note-1',
+      x: 24,
+      y: 20,
+      w: 220,
+      h: 150,
+      text: '娴佺▼',
+      color: '#ffe681',
+      z: 1,
     },
-    createdAt: '2026-06-20T00:00:00.000Z',
-    updatedAt: '2026-06-20T00:00:00.000Z',
-    ...overrides,
-  }
+  ],
+  texts: [
+    {
+      id: 'text-1',
+      x: 54,
+      y: 62,
+      w: 160,
+      h: 48,
+      text: '璇存槑',
+      color: '#17202a',
+      fontFamily: 'Inter, Segoe UI, sans-serif',
+      fontSize: 24,
+      fontWeight: '400',
+      fontStyle: 'normal',
+      autoSize: true,
+      z: 3,
+    },
+  ],
+  images: [],
 }
 
-function decodePreviewSvg(mindmap: MindmapRecord): string {
-  return decodeURIComponent(buildMindmapPreviewSvgDataUrl(mindmap).split(',')[1] ?? '')
-}
-
-describe('buildMindmapPreviewSvgDataUrl', () => {
-  it('includes the root text and layout mode on the svg root', () => {
-    const svg = decodePreviewSvg(createMindmap())
-
-    expect(svg).toContain('<svg')
-    expect(svg).toContain('data-layout="right"')
-    expect(svg).toContain('中心主题')
+describe('mindmapPreview', () => {
+  it('summarizes snapshot content', () => {
+    expect(summarizeMindmapSnapshot(snapshot)).toEqual({
+      elementCount: 3,
+      isEmpty: false,
+    })
   })
 
-  it('escapes root text before embedding it in the svg', () => {
-    const svg = decodePreviewSvg(
-      createMindmap({
-        nodes: {
-          root: {
-            id: 'root',
-            parentId: null,
-            text: 'A < B & C',
-            order: 0,
-          },
-        },
-      }),
-    )
+  it('builds an svg preview data url for non-empty legacy boards', () => {
+    const preview = buildMindmapPreviewSvgDataUrl(snapshot)
 
-    expect(svg).toContain('A &lt; B &amp; C')
-    expect(svg).not.toContain('A < B & C')
+    expect(preview?.startsWith('data:image/svg+xml;charset=utf-8,')).toBe(true)
+    expect(decodeURIComponent(preview ?? '')).toContain('<svg')
+    expect(decodeURIComponent(preview ?? '')).toContain('娴佺▼')
   })
 
-  it('defaults missing layout mode to balanced', () => {
-    const mindmap = createMindmap({ layoutMode: undefined as never })
-    const svg = decodePreviewSvg(mindmap)
-
-    expect(svg).toContain('data-layout="balanced"')
-  })
-
-  it('defaults invalid layout mode payloads to balanced before embedding attributes', () => {
-    const payload = 'right" data-payload="quote-break'
-    const mindmap = createMindmap({ layoutMode: payload as never })
-    const svg = decodePreviewSvg(mindmap)
-
-    expect(svg).toContain('data-layout="balanced"')
-    expect(svg).not.toContain(payload)
-  })
-
-  it('renders a softer preview frame with curved branch paths', () => {
-    const svg = decodePreviewSvg(createMindmap())
-
-    expect(svg).toContain('<path')
-    expect(svg).toContain('stroke-linecap="round"')
-    expect(svg).toContain('rx="18"')
+  it('returns null for empty boards', () => {
+    expect(buildMindmapPreviewSvgDataUrl(createEmptySnapshot())).toBeNull()
   })
 })
+
+function createEmptySnapshot(): MindmapSnapshot {
+  return {
+    camera: {
+      x: 0,
+      y: 0,
+      scale: 1,
+    },
+    color: '#17202a',
+    strokeSize: 6,
+    textFontFamily: 'Inter, Segoe UI, sans-serif',
+    textFontSize: 24,
+    lineMode: 'straight',
+    shapeType: 'rect',
+    shapes: [],
+    strokes: [],
+    connections: [],
+    notes: [],
+    texts: [],
+    images: [],
+  }
+}

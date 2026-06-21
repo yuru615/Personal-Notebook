@@ -1,0 +1,228 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Flowboard</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar" aria-label="鐧芥澘宸ュ叿鏍?>
+        <div class="tool-strip" role="group" aria-label="宸ュ叿">
+          <button class="icon-button is-active" data-tool="select" data-tip="閫夋嫨" aria-label="閫夋嫨">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 3l13 9-6 1.2 3.2 6.1-2.6 1.4-3.2-6L5 19V3z" />
+            </svg>
+          </button>
+          <button class="icon-button" data-tool="hand" data-tip="绉诲姩鐢诲竷" aria-label="绉诲姩鐢诲竷">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 12V6a2 2 0 1 1 4 0v5" />
+              <path d="M12 11V5a2 2 0 1 1 4 0v8" />
+              <path d="M16 13V8a2 2 0 1 1 4 0v6c0 4.2-2.8 7-7 7h-1.2a7 7 0 0 1-5.5-2.7L3.4 14.5a1.9 1.9 0 0 1 .3-2.6 2 2 0 0 1 2.8.2L8 14" />
+            </svg>
+          </button>
+          <button class="icon-button" data-tool="note" data-tip="渚跨" aria-label="渚跨">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 3h12a2 2 0 0 1 2 2v10l-6 6H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+              <path d="M14 21v-6h6" />
+            </svg>
+          </button>
+          <button class="icon-button" data-tool="text" data-tip="鏂囨湰" aria-label="鏂囨湰">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 5h14" />
+              <path d="M12 5v14" />
+              <path d="M8 19h8" />
+            </svg>
+          </button>
+          <button class="icon-button" data-tool="connector" data-tip="杩炵嚎" aria-label="杩炵嚎">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M7 7h.01" />
+              <path d="M17 17h.01" />
+              <path d="M8.5 8.5l7 7" />
+              <path d="M5 5m-2 0a2 2 0 1 0 4 0 2 2 0 1 0-4 0" />
+              <path d="M19 19m-2 0a2 2 0 1 0 4 0 2 2 0 1 0-4 0" />
+            </svg>
+          </button>
+          <div class="shape-picker" id="shape-picker">
+            <button class="icon-button" data-tool="shape" data-tip="鍥惧舰" aria-label="鍥惧舰">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="6" y="6" width="12" height="12" />
+              </svg>
+            </button>
+            <div class="tool-strip shape-strip" id="shape-strip" role="group" aria-label="鍥惧舰绫诲瀷">
+              <button class="icon-button is-active" data-shape-type="rect" data-tip="鐭╁舰" aria-label="鐭╁舰">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="6" y="6" width="12" height="12" />
+                </svg>
+              </button>
+              <button class="icon-button" data-shape-type="ellipse" data-tip="鍦嗗舰" aria-label="鍦嗗舰">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="6" />
+                </svg>
+              </button>
+              <button class="icon-button" data-shape-type="diamond" data-tip="鑿卞舰" aria-label="鑿卞舰">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 3l8 9-8 9-8-9z" />
+                </svg>
+              </button>
+              <button class="icon-button" data-shape-type="triangle" data-tip="涓夎褰? aria-label="涓夎褰?>
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 4l9 16H3z" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <button class="icon-button" data-tool="pen" data-tip="鐢荤瑪" aria-label="鐢荤瑪">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+            </svg>
+          </button>
+          <button class="icon-button" data-tool="eraser" data-tip="姗＄毊鎿? aria-label="姗＄毊鎿?>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 20H8l-5-5a2.8 2.8 0 0 1 0-4L10 4a2.8 2.8 0 0 1 4 0l7 7a2.8 2.8 0 0 1 0 4l-5 5" />
+              <path d="M6.5 8.5l9 9" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="color-picker" id="color-picker">
+          <button class="color-toggle" id="color-toggle" data-tip="棰滆壊" aria-label="棰滆壊" aria-expanded="false" aria-controls="color-panel">
+            <span class="current-swatch" id="current-color-swatch" style="--swatch: #17202a" aria-hidden="true"></span>
+          </button>
+          <div class="color-panel" id="color-panel" role="group" aria-label="棰滆壊" hidden>
+            <div class="color-grid">
+              <button class="swatch is-active" data-color="#17202a" style="--swatch: #17202a" aria-label="榛戣壊"></button>
+              <button class="swatch" data-color="#475569" style="--swatch: #475569" aria-label="鐏拌摑"></button>
+              <button class="swatch" data-color="#ef4444" style="--swatch: #ef4444" aria-label="绾㈣壊"></button>
+              <button class="swatch" data-color="#f97316" style="--swatch: #f97316" aria-label="姗欒壊"></button>
+              <button class="swatch" data-color="#f59e0b" style="--swatch: #f59e0b" aria-label="鐞ョ弨"></button>
+              <button class="swatch" data-color="#eab308" style="--swatch: #eab308" aria-label="榛勮壊"></button>
+              <button class="swatch" data-color="#84cc16" style="--swatch: #84cc16" aria-label="榛勭豢"></button>
+              <button class="swatch" data-color="#22c55e" style="--swatch: #22c55e" aria-label="缁胯壊"></button>
+              <button class="swatch" data-color="#0f766e" style="--swatch: #0f766e" aria-label="闈掕壊"></button>
+              <button class="swatch" data-color="#06b6d4" style="--swatch: #06b6d4" aria-label="钃濈豢"></button>
+              <button class="swatch" data-color="#3b82f6" style="--swatch: #3b82f6" aria-label="钃濊壊"></button>
+              <button class="swatch" data-color="#2563eb" style="--swatch: #2563eb" aria-label="娣辫摑"></button>
+              <button class="swatch" data-color="#7c3aed" style="--swatch: #7c3aed" aria-label="绱壊"></button>
+              <button class="swatch" data-color="#a855f7" style="--swatch: #a855f7" aria-label="浜传"></button>
+              <button class="swatch" data-color="#d946ef" style="--swatch: #d946ef" aria-label="鍝佺孩"></button>
+              <button class="swatch" data-color="#ec4899" style="--swatch: #ec4899" aria-label="绮夎壊"></button>
+              <button class="swatch" data-color="#cf3f55" style="--swatch: #cf3f55" aria-label="鐜孩"></button>
+              <button class="swatch" data-color="#ffffff" style="--swatch: #ffffff" aria-label="鐧借壊"></button>
+            </div>
+            <label class="color-value-row" for="color-value">
+              <span>#</span>
+              <input id="color-value" type="text" value="17202A" maxlength="6" spellcheck="false" inputmode="text" aria-label="棰滆壊鍊? />
+            </label>
+          </div>
+        </div>
+
+        <div class="tool-strip mode-strip" role="group" aria-label="杩炴帴绫诲瀷">
+          <button class="icon-button is-active" data-line-mode="straight" data-tip="鐩寸嚎" aria-label="鐩寸嚎杩炴帴">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 19L19 5" />
+              <path d="M5 19h.01" />
+              <path d="M19 5h.01" />
+            </svg>
+          </button>
+          <button class="icon-button" data-line-mode="curve" data-tip="鏇茬嚎" aria-label="璐濆灏旀洸绾胯繛鎺?>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 18C8 6 16 6 20 18" />
+              <path d="M4 18h.01" />
+              <path d="M20 18h.01" />
+            </svg>
+          </button>
+        </div>
+
+        <label class="range-wrap" data-tip="绮楃粏">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 12h16" />
+            <path d="M4 12a1.5 1.5 0 1 0 3 0 1.5 1.5 0 0 0-3 0z" />
+            <path d="M15 12a2.5 2.5 0 1 0 5 0 2.5 2.5 0 0 0-5 0z" />
+          </svg>
+          <input id="stroke-size" type="range" min="2" max="36" value="6" aria-label="绗旇Е绮楃粏" />
+        </label>
+
+        <div class="topbar-spacer"></div>
+
+        <div class="tool-strip action-strip" role="group" aria-label="鎿嶄綔">
+          <button class="icon-button" id="undo" data-tip="涓婁竴姝? aria-label="涓婁竴姝?>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9 14l-5-5 5-5" />
+              <path d="M4 9h9a7 7 0 0 1 7 7v1" />
+            </svg>
+          </button>
+          <button class="icon-button" id="redo" data-tip="涓嬩竴姝? aria-label="涓嬩竴姝?>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M15 14l5-5-5-5" />
+              <path d="M20 9h-9a7 7 0 0 0-7 7v1" />
+            </svg>
+          </button>
+          <div class="history-menu-wrap">
+            <button
+              class="history-toggle"
+              id="history-toggle"
+              type="button"
+              data-tip="鍘嗗彶璁板綍"
+              aria-label="鍘嗗彶璁板綍"
+              aria-expanded="false"
+              aria-controls="history-menu"
+            >
+              <span class="history-counts" id="history-counts">0 / 0</span>
+            </button>
+            <div class="history-menu" id="history-menu" role="menu" aria-label="鍘嗗彶璁板綍" hidden>
+              <div class="history-menu-status" id="history-status">鍙洖閫€ 0 姝ワ紝鍙墠杩?0 姝?/div>
+              <button type="button" role="menuitem" data-history-action="undo-1">鍥為€€ 1 姝?/button>
+              <button type="button" role="menuitem" data-history-action="undo-5">鍥為€€ 5 姝?/button>
+              <button type="button" role="menuitem" data-history-action="undo-all">鍥炲埌鏈€鏃?/button>
+              <div class="menu-separator" aria-hidden="true"></div>
+              <button type="button" role="menuitem" data-history-action="redo-1">鍓嶈繘 1 姝?/button>
+              <button type="button" role="menuitem" data-history-action="redo-5">鍓嶈繘 5 姝?/button>
+              <button type="button" role="menuitem" data-history-action="redo-all">鍥炲埌鏈€鏂?/button>
+            </div>
+          </div>
+          <button class="icon-button" id="export-board" data-tip="瀵煎嚭" aria-label="瀵煎嚭" aria-expanded="false" aria-controls="export-menu">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v12" />
+              <path d="M7 10l5 5 5-5" />
+              <path d="M5 21h14" />
+            </svg>
+          </button>
+          <div class="export-menu" id="export-menu" role="menu" aria-label="瀵煎嚭鏍煎紡" hidden>
+            <button type="button" role="menuitem" data-export-format="json">JSON 鏁版嵁</button>
+            <button type="button" role="menuitem" data-export-format="png">PNG 鍥剧墖</button>
+            <button type="button" role="menuitem" data-export-format="pdf">PDF 鏂囨。</button>
+          </div>
+          <button class="icon-button" id="import-board" data-tip="瀵煎叆" aria-label="瀵煎叆">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 21V9" />
+              <path d="M7 14l5-5 5 5" />
+              <path d="M5 3h14" />
+            </svg>
+          </button>
+          <button class="icon-button danger" id="clear-board" data-tip="娓呯┖" aria-label="娓呯┖">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7h16" />
+              <path d="M10 11v6" />
+              <path d="M14 11v6" />
+              <path d="M6 7l1 14h10l1-14" />
+              <path d="M9 7V4h6v3" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <main id="viewport" aria-label="鏃犻檺鐧芥澘">
+        <canvas id="board"></canvas>
+        <div id="note-layer" aria-live="polite"></div>
+        <div class="status-pill" id="zoom-readout">100%</div>
+      </main>
+
+      <input id="import-file" type="file" accept="application/json,.json,image/*" hidden />
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

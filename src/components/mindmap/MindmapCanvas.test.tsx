@@ -1,448 +1,292 @@
-import { createEvent, fireEvent, render, screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import type { ComponentProps } from 'react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { MindmapRecord } from '../../domain/types'
 import { MindmapCanvas } from './MindmapCanvas'
-import { createEmptyMindmapRecord } from './mindmapModel'
+import { LEGACY_MINDMAP_DOCUMENT_VERSION } from './mindmapDocument'
+import type { MindmapSnapshot } from './mindmapModel'
 
-function renderMindmapCanvas(
-  mindmap: MindmapRecord,
-  props: Partial<ComponentProps<typeof MindmapCanvas>> = {},
-) {
-  return render(
-    <MindmapCanvas
-      mindmap={mindmap}
-      onRenameNode={() => undefined}
-      onAddChildNode={() => undefined}
-      onAddSiblingNode={() => undefined}
-      onDeleteNode={() => undefined}
-      onToggleNodeCollapsed={() => undefined}
-      onChangeLayoutMode={() => undefined}
-      {...props}
-    />,
-  )
-}
-
-function createMindmapWithChild(collapsed = false): MindmapRecord {
-  const base = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')
-  const childId = 'mindmap-node-child'
-
+function createSnapshot(): MindmapSnapshot {
   return {
-    ...base,
-    nodes: {
-      ...base.nodes,
-      [childId]: {
-        id: childId,
-        parentId: base.rootNodeId,
-        text: '分支',
-        order: 0,
-        collapsed,
+    camera: { x: 36, y: 48, scale: 0.75 },
+    color: '#17202a',
+    strokeSize: 8,
+    textFontFamily: 'Inter, Segoe UI, sans-serif',
+    textFontSize: 24,
+    lineMode: 'curve',
+    shapeType: 'diamond',
+    shapes: [
+      {
+        id: 'shape-1',
+        type: 'diamond',
+        x: 320,
+        y: 120,
+        w: 160,
+        h: 120,
+        color: '#3b82f6',
+        size: 3,
+        text: '',
+        z: 2,
       },
-    },
+    ],
+    strokes: [
+      {
+        id: 'stroke-1',
+        color: '#ef4444',
+        size: 4,
+        points: [
+          { x: 80, y: 260 },
+          { x: 240, y: 324 },
+        ],
+      },
+    ],
+    connections: [
+      {
+        id: 'connection-1',
+        from: 'note-1',
+        to: 'shape-1',
+        fromSide: 'e',
+        mode: 'curve',
+        color: '#17202a',
+        size: 3,
+      },
+    ],
+    notes: [
+      {
+        id: 'note-1',
+        x: 48,
+        y: 40,
+        w: 220,
+        h: 148,
+        text: 'Legacy note',
+        color: '#ffe681',
+        z: 1,
+      },
+    ],
+    texts: [
+      {
+        id: 'text-1',
+        x: 560,
+        y: 84,
+        w: 180,
+        h: 52,
+        text: 'Legacy text',
+        color: '#17202a',
+        fontFamily: 'Inter, Segoe UI, sans-serif',
+        fontSize: 24,
+        fontWeight: '600',
+        fontStyle: 'normal',
+        autoSize: false,
+        z: 3,
+      },
+    ],
+    images: [
+      {
+        id: 'image-1',
+        x: 560,
+        y: 188,
+        w: 140,
+        h: 100,
+        src: 'data:image/png;base64,AA==',
+        name: 'legacy.png',
+        z: 4,
+      },
+    ],
   }
 }
 
-function fireComposingKeyDown(element: HTMLElement, key: string) {
-  const event = createEvent.keyDown(element, { key })
-  Object.defineProperty(event, 'isComposing', { value: true })
-  fireEvent(element, event)
+function createMindmap(
+  snapshot: MindmapSnapshot,
+  updatedAt = '2026-06-17T00:00:00.000Z',
+): MindmapRecord {
+  return {
+    id: 'mindmap-1',
+    title: '思维导图',
+    snapshot,
+    createdAt: '2026-06-17T00:00:00.000Z',
+    updatedAt,
+  }
 }
 
 describe('MindmapCanvas', () => {
-  it('renders the root node input and layout toolbar', () => {
-    const mindmap = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')
+  it('renders the forked mindmap runtime in an iframe document', () => {
+    render(<MindmapCanvas mindmap={createMindmap(createSnapshot())} onChange={() => undefined} />)
 
-    renderMindmapCanvas(mindmap)
-
-    expect(screen.getByLabelText(`节点 ${mindmap.rootNodeId}`)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '左右导图' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '右侧导图' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '大纲导图' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '新增子级' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '新增同级' })).not.toBeInTheDocument()
+    const frame = screen.getByTitle('思维导图编辑器')
+    expect(frame).toBeInTheDocument()
+    expect(frame).toHaveAttribute('srcdoc')
+    expect(frame).toHaveAttribute(
+      'data-flowboard-document-version',
+      LEGACY_MINDMAP_DOCUMENT_VERSION,
+    )
+    expect(frame.getAttribute('srcdoc')).toContain('mindmap-host')
+    expect(frame.getAttribute('srcdoc')).toContain(LEGACY_MINDMAP_DOCUMENT_VERSION)
+    expect(frame.getAttribute('srcdoc')).toContain('Legacy note')
   })
 
-  it('keeps the layout toolbar outside the positioned canvas surface', () => {
-    const mindmap = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')
-    const { container } = renderMindmapCanvas(mindmap)
-    const workspace = container.querySelector('.mindmap-workspace')
-    const canvas = container.querySelector('.mindmap-canvas')
-    const toolbar = container.querySelector('.mindmap-layout-toolbar')
-    const nodeLayer = container.querySelector('.mindmap-node-layer')
-
-    expect(workspace).toContainElement(toolbar)
-    expect(workspace).toContainElement(canvas)
-    expect(canvas).toContainElement(nodeLayer)
-    expect(canvas).not.toContainElement(toolbar)
-    expect(toolbar?.parentElement).toBe(workspace)
-    expect(nodeLayer?.parentElement).toBe(canvas)
-  })
-
-  it('forwards node actions', async () => {
-    const user = userEvent.setup()
-    const mindmap = createMindmapWithChild()
-    const onAddChildNode = vi.fn()
-    const onRenameNode = vi.fn()
-    const onAddSiblingNode = vi.fn()
-
-    renderMindmapCanvas(mindmap, {
-      onRenameNode,
-      onAddChildNode,
-      onAddSiblingNode,
-    })
-
-    fireEvent.change(screen.getByLabelText(`节点 ${mindmap.rootNodeId}`), {
-      target: { value: '新主题' },
-    })
-    fireEvent.focus(screen.getByLabelText(`节点 ${mindmap.rootNodeId}`))
-    await user.click(screen.getByRole('button', { name: '新增子级' }))
-    fireEvent.mouseDown(screen.getByLabelText('节点 mindmap-node-child').closest('.mindmap-node'))
-    await user.click(screen.getByRole('button', { name: '新增同级' }))
-
-    expect(onRenameNode).toHaveBeenLastCalledWith(mindmap.rootNodeId, '新主题')
-    expect(onAddChildNode).toHaveBeenCalledWith(mindmap.rootNodeId)
-    expect(onAddSiblingNode).toHaveBeenCalledWith('mindmap-node-child')
-  })
-
-  it('hides node actions until a node is selected', () => {
-    const mindmap = createMindmapWithChild()
-    const { container } = renderMindmapCanvas(mindmap)
-
-    expect(container.querySelector('.mindmap-node-toolbar')).not.toBeInTheDocument()
-
-    fireEvent.mouseDown(screen.getByLabelText('节点 mindmap-node-child').closest('.mindmap-node')!)
-
-    expect(screen.getByRole('button', { name: '新增子级' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '新增同级' })).toBeInTheDocument()
-  })
-
-  it('clears the selected node when clicking empty canvas space', () => {
-    const mindmap = createMindmapWithChild()
-    const { container } = renderMindmapCanvas(mindmap)
-
-    fireEvent.mouseDown(screen.getByLabelText('节点 mindmap-node-child').closest('.mindmap-node')!)
-    fireEvent.mouseDown(screen.getByLabelText('思维导图画布'))
-
-    expect(container.querySelector('.mindmap-node-selected')).not.toBeInTheDocument()
-  })
-
-  it('adds a child node from the root node when pressing Enter', () => {
-    const mindmap = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')
-    const onAddChildNode = vi.fn()
-    const onAddSiblingNode = vi.fn()
-
-    renderMindmapCanvas(mindmap, {
-      onAddChildNode,
-      onAddSiblingNode,
-    })
-
-    fireEvent.keyDown(screen.getByRole('textbox'), {
-      key: 'Enter',
-    })
-
-    expect(onAddChildNode).toHaveBeenCalledWith(mindmap.rootNodeId)
-    expect(onAddSiblingNode).not.toHaveBeenCalled()
-  })
-
-  it('adds a sibling node from a non-root focused node when pressing Enter', () => {
-    const mindmap = createMindmapWithChild()
-    const onAddChildNode = vi.fn()
-    const onAddSiblingNode = vi.fn()
-
-    renderMindmapCanvas(mindmap, {
-      onAddChildNode,
-      onAddSiblingNode,
-    })
-
-    fireEvent.keyDown(screen.getByLabelText('节点 mindmap-node-child'), {
-      key: 'Enter',
-    })
-
-    expect(onAddSiblingNode).toHaveBeenCalledWith('mindmap-node-child')
-    expect(onAddChildNode).not.toHaveBeenCalled()
-  })
-
-  it('adds a child node from the focused node when pressing Tab', () => {
-    const mindmap = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')
-    const onAddChildNode = vi.fn()
-
-    renderMindmapCanvas(mindmap, { onAddChildNode })
-
-    fireEvent.keyDown(screen.getByRole('textbox'), {
-      key: 'Tab',
-    })
-
-    expect(onAddChildNode).toHaveBeenCalledWith(mindmap.rootNodeId)
-  })
-
-  it('does not delete a non-root focused node when pressing Delete inside the input', () => {
-    const base = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')
-    const childId = 'mindmap-node-child'
-    const mindmap = {
-      ...base,
-      nodes: {
-        ...base.nodes,
-        [childId]: {
-          id: childId,
-          parentId: base.rootNodeId,
-          text: '分支',
-          order: 0,
+  it('forwards save messages from the iframe runtime to the parent store', () => {
+    const onChange = vi.fn()
+    const nextSnapshot: MindmapSnapshot = {
+      ...createSnapshot(),
+      notes: [
+        {
+          id: 'note-1',
+          x: 48,
+          y: 40,
+          w: 260,
+          h: 188,
+          text: 'Saved note',
+          color: '#ffe681',
+          z: 1,
         },
-      },
+      ],
     }
-    const onDeleteNode = vi.fn()
 
-    renderMindmapCanvas(mindmap, { onDeleteNode })
+    render(<MindmapCanvas mindmap={createMindmap(createSnapshot())} onChange={onChange} />)
 
-    fireEvent.keyDown(screen.getByLabelText(`节点 ${childId}`), {
-      key: 'Delete',
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: {
+            source: 'mindmap-bridge',
+            type: 'mindmap-save',
+            mindmapId: 'mindmap-1',
+            snapshot: nextSnapshot,
+          },
+        }),
+      )
     })
 
-    expect(onDeleteNode).not.toHaveBeenCalled()
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onChange).toHaveBeenCalledWith(nextSnapshot)
   })
 
-  it('does not delete the root node when pressing Delete', () => {
-    const mindmap = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')
-    const onDeleteNode = vi.fn()
+  it('ignores duplicate save payloads', () => {
+    const onChange = vi.fn()
 
-    renderMindmapCanvas(mindmap, { onDeleteNode })
+    render(<MindmapCanvas mindmap={createMindmap(createSnapshot())} onChange={onChange} />)
 
-    fireEvent.keyDown(screen.getByRole('textbox'), {
-      key: 'Delete',
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: {
+            source: 'mindmap-bridge',
+            type: 'mindmap-save',
+            mindmapId: 'mindmap-1',
+            snapshot: createSnapshot(),
+          },
+        }),
+      )
     })
 
-    expect(onDeleteNode).not.toHaveBeenCalled()
+    expect(onChange).not.toHaveBeenCalled()
   })
 
-  it('shows delete action for child nodes and forwards the delete callback', async () => {
-    const user = userEvent.setup()
-    const base = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')
-    const childId = 'mindmap-node-child'
-    const mindmap = {
-      ...base,
-      nodes: {
-        ...base.nodes,
-        [childId]: {
-          id: childId,
-          parentId: base.rootNodeId,
-          text: '分支',
-          order: 0,
+  it('posts replacement snapshots into the iframe when props change', () => {
+    const onChange = vi.fn()
+    const initialMindmap = createMindmap(createSnapshot())
+    const nextSnapshot: MindmapSnapshot = {
+      ...createSnapshot(),
+      notes: [
+        {
+          id: 'note-1',
+          x: 96,
+          y: 72,
+          w: 280,
+          h: 188,
+          text: 'Replaced note',
+          color: '#ffe681',
+          z: 1,
         },
-      },
+      ],
     }
-    const onDeleteNode = vi.fn()
 
-    renderMindmapCanvas(mindmap, { onDeleteNode })
+    const { rerender } = render(<MindmapCanvas mindmap={initialMindmap} onChange={onChange} />)
 
-    fireEvent.mouseDown(screen.getByLabelText(`节点 ${childId}`).closest('.mindmap-node')!)
-
-    const deleteButtons = screen.getAllByRole('button', { name: '删除节点' })
-    expect(deleteButtons).toHaveLength(1)
-
-    await user.click(deleteButtons[0])
-
-    expect(onDeleteNode).toHaveBeenCalledWith(childId)
-  })
-
-  it('forwards outline layout mode changes', async () => {
-    const user = userEvent.setup()
-    const mindmap = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')
-    const onChangeLayoutMode = vi.fn()
-
-    renderMindmapCanvas(mindmap, { onChangeLayoutMode })
-
-    await user.click(screen.getByRole('button', { name: '大纲导图' }))
-
-    expect(onChangeLayoutMode).toHaveBeenCalledWith('outline')
-  })
-
-  it('forwards all layout toolbar mode changes', async () => {
-    const user = userEvent.setup()
-    const mindmap = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')
-    const onChangeLayoutMode = vi.fn()
-
-    renderMindmapCanvas(mindmap, { onChangeLayoutMode })
-
-    await user.click(screen.getByRole('button', { name: '左右导图' }))
-    await user.click(screen.getByRole('button', { name: '右侧导图' }))
-    await user.click(screen.getByRole('button', { name: '大纲导图' }))
-
-    expect(onChangeLayoutMode).toHaveBeenNthCalledWith(1, 'balanced')
-    expect(onChangeLayoutMode).toHaveBeenNthCalledWith(2, 'right')
-    expect(onChangeLayoutMode).toHaveBeenNthCalledWith(3, 'outline')
-  })
-
-  it('shows collapse and expand actions for non-root nodes', async () => {
-    const user = userEvent.setup()
-    const base = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')
-    const childId = 'mindmap-node-child'
-    const grandchildId = 'mindmap-node-grandchild'
-    const onToggleNodeCollapsed = vi.fn()
-    const expandedMindmap = {
-      ...base,
-      nodes: {
-        ...base.nodes,
-        [childId]: {
-          id: childId,
-          parentId: base.rootNodeId,
-          text: '分支',
-          order: 0,
-        },
-        [grandchildId]: {
-          id: grandchildId,
-          parentId: childId,
-          text: '子分支',
-          order: 0,
-        },
+    const frame = screen.getByTitle('思维导图编辑器') as HTMLIFrameElement
+    const postMessage = vi.fn()
+    Object.defineProperty(frame, 'contentWindow', {
+      value: {
+        __FLOWBOARD_DOCUMENT_VERSION__: LEGACY_MINDMAP_DOCUMENT_VERSION,
+        postMessage,
       },
-    }
-    const { rerender } = renderMindmapCanvas(expandedMindmap, { onToggleNodeCollapsed })
+      configurable: true,
+    })
 
-    fireEvent.mouseDown(screen.getByLabelText(`节点 ${childId}`).closest('.mindmap-node')!)
-    await user.click(screen.getByRole('button', { name: '折叠节点' }))
-
-    expect(onToggleNodeCollapsed).toHaveBeenCalledWith(childId)
+    fireEvent.load(frame)
 
     rerender(
       <MindmapCanvas
-        mindmap={{
-          ...expandedMindmap,
-          nodes: {
-            ...expandedMindmap.nodes,
-            [childId]: {
-              ...expandedMindmap.nodes[childId],
-              collapsed: true,
-            },
-          },
-        }}
-        onRenameNode={() => undefined}
-        onAddChildNode={() => undefined}
-        onAddSiblingNode={() => undefined}
-        onDeleteNode={() => undefined}
-        onToggleNodeCollapsed={onToggleNodeCollapsed}
-        onChangeLayoutMode={() => undefined}
+        mindmap={createMindmap(nextSnapshot, '2026-06-17T00:00:01.000Z')}
+        onChange={onChange}
       />,
     )
 
-    fireEvent.mouseDown(screen.getByLabelText(`节点 ${childId}`).closest('.mindmap-node')!)
-    await user.click(screen.getByRole('button', { name: '展开节点' }))
-
-    expect(onToggleNodeCollapsed).toHaveBeenLastCalledWith(childId)
+    expect(postMessage).toHaveBeenCalledTimes(1)
+    expect(postMessage).toHaveBeenCalledWith(
+      {
+        source: 'mindmap-host',
+        type: 'mindmap-replace',
+        mindmapId: 'mindmap-1',
+        snapshot: nextSnapshot,
+        updatedAt: '2026-06-17T00:00:01.000Z',
+      },
+      '*',
+    )
   })
 
-  it('marks a focused node as selected', () => {
-    const mindmap = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')
+  it('keeps the iframe document stable when the same mindmap saves new content', () => {
+    const { container, rerender } = render(
+      <MindmapCanvas
+        mindmap={createMindmap(createSnapshot(), '2026-06-17T00:00:00.000Z')}
+        onChange={() => undefined}
+      />,
+    )
 
-    const { container } = renderMindmapCanvas(mindmap)
-
-    fireEvent.focus(screen.getByRole('textbox'))
-
-    expect(container.querySelector('.mindmap-node-selected')).toBeInTheDocument()
-  })
-
-  it('marks a node as selected on mouse down', () => {
-    const mindmap = createMindmapWithChild()
-    const { container } = renderMindmapCanvas(mindmap)
-    const childInput = screen.getByLabelText('节点 mindmap-node-child')
-    const childCard = childInput.closest('.mindmap-node')
-
-    if (!childCard) {
-      throw new Error('Expected child node card')
+    const nextSnapshot: MindmapSnapshot = {
+      ...createSnapshot(),
+      notes: [
+        {
+          id: 'note-1',
+          x: 48,
+          y: 40,
+          w: 260,
+          h: 188,
+          text: 'Updated note',
+          color: '#ffe681',
+          z: 1,
+        },
+      ],
     }
 
-    fireEvent.mouseDown(childCard)
+    const initialSrcDoc = container.querySelector('iframe')?.getAttribute('srcdoc')
 
-    expect(childCard).toHaveClass('mindmap-node-selected')
-    expect(container.querySelectorAll('.mindmap-node-selected')).toHaveLength(1)
+    rerender(
+      <MindmapCanvas
+        mindmap={createMindmap(nextSnapshot, '2026-06-17T00:00:01.000Z')}
+        onChange={() => undefined}
+      />,
+    )
+
+    expect(container.querySelector('iframe')?.getAttribute('srcdoc')).toBe(initialSrcDoc)
   })
 
-  it('uses layout dimensions for the canvas viewport and node layer', () => {
-    const mindmap = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')
-    const { container } = renderMindmapCanvas(mindmap)
-    const viewBox = screen.getByLabelText('思维导图画布').getAttribute('viewBox')
-    const [, , width, height] = viewBox?.split(' ').map(Number) ?? []
+  it('rebuilds the iframe when the loaded document version is stale', async () => {
+    const { container } = render(
+      <MindmapCanvas mindmap={createMindmap(createSnapshot())} onChange={() => undefined} />,
+    )
 
-    expect(width).toBeGreaterThan(0)
-    expect(height).toBeGreaterThan(0)
-    expect(container.querySelector('.mindmap-node-layer')).toHaveStyle({
-      width: `${width}px`,
-      height: `${height}px`,
-    })
-  })
-
-  it('uses expanded layout dimensions when nodes exceed the default canvas bounds', () => {
-    const base = createEmptyMindmapRecord('2026-06-18T00:00:00.000Z')
-    const nodes = { ...base.nodes }
-    let parentId = base.rootNodeId
-
-    Array.from({ length: 6 }).forEach((_, index) => {
-      const nodeId = `mindmap-node-deep-${index}`
-      nodes[nodeId] = {
-        id: nodeId,
-        parentId,
-        text: `深层 ${index}`,
-        order: 0,
-      }
-      parentId = nodeId
+    const initialFrame = container.querySelector('iframe') as HTMLIFrameElement
+    Object.defineProperty(initialFrame, 'contentWindow', {
+      value: {
+        __FLOWBOARD_DOCUMENT_VERSION__: 'outdated-version',
+      },
+      configurable: true,
     })
 
-    Array.from({ length: 6 }).forEach((_, index) => {
-      const nodeId = `mindmap-node-sibling-${index}`
-      nodes[nodeId] = {
-        id: nodeId,
-        parentId: base.rootNodeId,
-        text: `并列 ${index}`,
-        order: index,
-      }
+    fireEvent.load(initialFrame)
+
+    await waitFor(() => {
+      expect(container.querySelector('iframe')).not.toBe(initialFrame)
     })
-
-    const mindmap = {
-      ...base,
-      layoutMode: 'right' as const,
-      nodes,
-    }
-    const { container } = renderMindmapCanvas(mindmap)
-    const viewBox = screen.getByLabelText('思维导图画布').getAttribute('viewBox')
-    const [, , width, height] = viewBox?.split(' ').map(Number) ?? []
-
-    expect(width).toBeGreaterThan(960)
-    expect(height).toBeGreaterThan(540)
-    expect(container.querySelector('.mindmap-node-layer')).toHaveStyle({
-      width: `${width}px`,
-      height: `${height}px`,
-    })
-  })
-
-  it('renders parent child edges as curved svg paths', () => {
-    const mindmap = createMindmapWithChild()
-    const { container } = renderMindmapCanvas(mindmap)
-    const edge = container.querySelector('path.mindmap-edge')
-
-    expect(edge).toBeInTheDocument()
-    expect(edge).toHaveAttribute('d', expect.stringContaining(' C '))
-  })
-
-  it('suppresses Enter Tab and Delete shortcuts during composition', () => {
-    const mindmap = createMindmapWithChild()
-    const onAddChildNode = vi.fn()
-    const onAddSiblingNode = vi.fn()
-    const onDeleteNode = vi.fn()
-
-    renderMindmapCanvas(mindmap, {
-      onAddChildNode,
-      onAddSiblingNode,
-      onDeleteNode,
-    })
-
-    const childInput = screen.getByLabelText('节点 mindmap-node-child')
-
-    fireComposingKeyDown(childInput, 'Enter')
-    fireComposingKeyDown(childInput, 'Tab')
-    fireComposingKeyDown(childInput, 'Delete')
-
-    expect(onAddSiblingNode).not.toHaveBeenCalled()
-    expect(onAddChildNode).not.toHaveBeenCalled()
-    expect(onDeleteNode).not.toHaveBeenCalled()
   })
 })

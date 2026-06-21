@@ -1,242 +1,323 @@
-import type { MindmapLayoutMode, MindmapNode, MindmapRecord } from '../../domain/types'
-import { createId } from '../../utils/id'
+﻿export type MindmapShapeType = 'rect' | 'ellipse' | 'diamond' | 'triangle'
+export type MindmapLineMode = 'straight' | 'curve'
+export type MindmapConnectionSide = 'n' | 'e' | 's' | 'w'
+export type MindmapConnectionMarker = 'none' | 'arrow' | 'bar' | 'dot' | 'circle' | 'diamond'
 
-const DEFAULT_LAYOUT_MODE: MindmapLayoutMode = 'balanced'
-const MINDMAP_LAYOUT_MODES = new Set<MindmapLayoutMode>(['balanced', 'right', 'outline'])
-type LegacyMindmapRecord = Omit<MindmapRecord, 'layoutMode'> & { layoutMode?: unknown }
+export interface MindmapConnectionAnchor {
+  x: number
+  y: number
+}
 
-const UNTITLED_MINDMAP_TITLE = '未命名思维导图'
-const DEFAULT_ROOT_NODE_TEXT = '中心主题'
-const DEFAULT_CHILD_NODE_TEXT = '新节点'
+export interface MindmapCamera {
+  x: number
+  y: number
+  scale: number
+}
 
-export function createEmptyMindmapRecord(now = new Date().toISOString()): MindmapRecord {
-  const rootNodeId = createId('mindmap_node')
+export interface MindmapNote {
+  id: string
+  x: number
+  y: number
+  w: number
+  h: number
+  text: string
+  color: string
+  z: number
+}
 
-  return {
-    id: createId('mindmap'),
-    title: UNTITLED_MINDMAP_TITLE,
-    rootNodeId,
-    layoutMode: DEFAULT_LAYOUT_MODE,
-    nodes: {
-      [rootNodeId]: {
-        id: rootNodeId,
-        parentId: null,
-        text: DEFAULT_ROOT_NODE_TEXT,
-        order: 0,
-      },
-    },
-    viewport: {
-      x: 0,
-      y: 0,
-      zoom: 1,
-    },
-    createdAt: now,
-    updatedAt: now,
+export interface MindmapShape {
+  id: string
+  type: MindmapShapeType
+  x: number
+  y: number
+  w: number
+  h: number
+  color: string
+  size: number
+  text: string
+  z: number
+}
+
+export interface MindmapStrokePoint {
+  x: number
+  y: number
+}
+
+export interface MindmapStroke {
+  id: string
+  color: string
+  size: number
+  points: MindmapStrokePoint[]
+}
+
+export interface MindmapConnection {
+  id: string
+  from: string
+  to: string
+  fromSide: MindmapConnectionSide | null
+  toSide?: MindmapConnectionSide | null
+  fromAnchor?: MindmapConnectionAnchor | null
+  toAnchor?: MindmapConnectionAnchor | null
+  fromMarker?: MindmapConnectionMarker | null
+  toMarker?: MindmapConnectionMarker | null
+  mode: MindmapLineMode
+  color: string
+  size: number
+}
+
+export interface MindmapText {
+  id: string
+  x: number
+  y: number
+  w: number
+  h: number
+  text: string
+  color: string
+  fontFamily: string
+  fontSize: number
+  fontWeight: string
+  fontStyle: 'normal' | 'italic'
+  autoSize: boolean
+  z: number
+}
+
+export interface MindmapImage {
+  id: string
+  x: number
+  y: number
+  w: number
+  h: number
+  src: string
+  name: string
+  z: number
+}
+
+export interface MindmapSnapshot {
+  camera: MindmapCamera
+  color: string
+  strokeSize: number
+  textFontFamily: string
+  textFontSize: number
+  lineMode: MindmapLineMode
+  lineStartMarker?: MindmapConnectionMarker
+  lineEndMarker?: MindmapConnectionMarker
+  shapeType: MindmapShapeType
+  shapes: MindmapShape[]
+  strokes: MindmapStroke[]
+  connections: MindmapConnection[]
+  notes: MindmapNote[]
+  texts: MindmapText[]
+  images: MindmapImage[]
+}
+
+interface SimplifiedMindmapShapeElement {
+  id: string
+  type: 'rect' | 'ellipse'
+  x: number
+  y: number
+  width: number
+  height: number
+  stroke: string
+  fill: string
+}
+
+interface SimplifiedMindmapTextElement {
+  id: string
+  type: 'text'
+  x: number
+  y: number
+  width: number
+  height: number
+  text: string
+  color: string
+  fontSize: number
+}
+
+interface SimplifiedMindmapArrowElement {
+  id: string
+  type: 'arrow'
+  x: number
+  y: number
+  width: number
+  height: number
+  stroke: string
+}
+
+type SimplifiedMindmapElement =
+  | SimplifiedMindmapShapeElement
+  | SimplifiedMindmapTextElement
+  | SimplifiedMindmapArrowElement
+
+interface SimplifiedMindmapSnapshot {
+  version: 1
+  elements: SimplifiedMindmapElement[]
+  viewport: {
+    x: number
+    y: number
+    zoom: number
   }
 }
 
-function isMindmapLayoutMode(value: unknown): value is MindmapLayoutMode {
-  return typeof value === 'string' && MINDMAP_LAYOUT_MODES.has(value as MindmapLayoutMode)
+const defaultSnapshot: MindmapSnapshot = {
+  camera: {
+    x: 0,
+    y: 0,
+    scale: 1,
+  },
+  color: '#17202a',
+  strokeSize: 6,
+  textFontFamily: 'Inter, Segoe UI, sans-serif',
+  textFontSize: 24,
+  lineMode: 'straight',
+  lineStartMarker: 'dot',
+  lineEndMarker: 'arrow',
+  shapeType: 'rect',
+  shapes: [],
+  strokes: [],
+  connections: [],
+  notes: [],
+  texts: [],
+  images: [],
 }
 
-export function normalizeMindmapRecord(mindmap: LegacyMindmapRecord): MindmapRecord {
-  if (isMindmapLayoutMode(mindmap.layoutMode)) {
-    return mindmap as MindmapRecord
-  }
-
-  return {
-    ...mindmap,
-    layoutMode: DEFAULT_LAYOUT_MODE,
-  }
+export function createEmptyMindmapSnapshot(): MindmapSnapshot {
+  return structuredClone(defaultSnapshot)
 }
 
-export function setMindmapLayoutMode(
-  mindmap: MindmapRecord,
-  layoutMode: MindmapLayoutMode,
-  now = new Date().toISOString(),
-): MindmapRecord {
-  if (mindmap.layoutMode === layoutMode) {
-    return mindmap
+export function normalizeMindmapSnapshot(value: unknown): MindmapSnapshot {
+  if (isLegacyMindmapSnapshot(value)) {
+    return structuredClone(value)
   }
 
-  return {
-    ...mindmap,
-    layoutMode,
-    updatedAt: now,
+  if (isSimplifiedMindmapSnapshot(value)) {
+    return convertSimplifiedSnapshot(value)
   }
+
+  return createEmptyMindmapSnapshot()
 }
 
-export function addMindmapChildNode(
-  mindmap: MindmapRecord,
-  parentId: string,
-  now = new Date().toISOString(),
-): MindmapRecord {
-  if (!mindmap.nodes[parentId]) {
-    return mindmap
-  }
-
-  const siblingCount = Object.values(mindmap.nodes).filter((node) => node.parentId === parentId).length
-  const nodeId = createId('mindmap_node')
-
-  return {
-    ...mindmap,
-    nodes: {
-      ...mindmap.nodes,
-      [nodeId]: {
-        id: nodeId,
-        parentId,
-        text: DEFAULT_CHILD_NODE_TEXT,
-        order: siblingCount,
-      },
-    },
-    updatedAt: now,
-  }
+export function isMindmapSnapshot(
+  value: unknown,
+): value is MindmapSnapshot | SimplifiedMindmapSnapshot {
+  return isLegacyMindmapSnapshot(value) || isSimplifiedMindmapSnapshot(value)
 }
 
-export function renameMindmap(
-  mindmap: MindmapRecord,
-  title: string,
-  now = new Date().toISOString(),
-): MindmapRecord {
-  const nextTitle = title.trim() || UNTITLED_MINDMAP_TITLE
-
-  if (mindmap.title === nextTitle) {
-    return mindmap
+function isLegacyMindmapSnapshot(value: unknown): value is MindmapSnapshot {
+  if (!value || typeof value !== 'object') {
+    return false
   }
 
-  return {
-    ...mindmap,
-    title: nextTitle,
-    updatedAt: now,
-  }
-}
-
-export function renameMindmapNode(
-  mindmap: MindmapRecord,
-  nodeId: string,
-  text: string,
-  now = new Date().toISOString(),
-): MindmapRecord {
-  const node = mindmap.nodes[nodeId]
-
-  if (!node || node.text === text) {
-    return mindmap
-  }
-
-  return {
-    ...mindmap,
-    nodes: {
-      ...mindmap.nodes,
-      [nodeId]: {
-        ...node,
-        text,
-      },
-    },
-    updatedAt: now,
-  }
-}
-
-export function addMindmapSiblingNode(
-  mindmap: MindmapRecord,
-  nodeId: string,
-  now = new Date().toISOString(),
-): MindmapRecord {
-  const node = mindmap.nodes[nodeId]
-
-  if (!node || node.parentId === null) {
-    return mindmap
-  }
-
-  return addMindmapChildNode(mindmap, node.parentId, now)
-}
-
-export function deleteMindmapNode(
-  mindmap: MindmapRecord,
-  nodeId: string,
-  now = new Date().toISOString(),
-): MindmapRecord {
-  if (nodeId === mindmap.rootNodeId || !mindmap.nodes[nodeId]) {
-    return mindmap
-  }
-
-  const removedNodeIds = collectDescendantNodeIds(mindmap.nodes, nodeId)
-  const nextNodes = Object.fromEntries(
-    Object.entries(mindmap.nodes).filter(([id]) => !removedNodeIds.has(id)),
+  const snapshot = value as Partial<MindmapSnapshot>
+  return (
+    isCamera(snapshot.camera) &&
+    typeof snapshot.color === 'string' &&
+    typeof snapshot.strokeSize === 'number' &&
+    typeof snapshot.textFontFamily === 'string' &&
+    typeof snapshot.textFontSize === 'number' &&
+    isLineMode(snapshot.lineMode) &&
+    isShapeType(snapshot.shapeType) &&
+    Array.isArray(snapshot.shapes) &&
+    Array.isArray(snapshot.strokes) &&
+    Array.isArray(snapshot.connections) &&
+    Array.isArray(snapshot.notes) &&
+    Array.isArray(snapshot.texts) &&
+    Array.isArray(snapshot.images)
   )
-
-  reindexMindmapSiblings(nextNodes)
-
-  return {
-    ...mindmap,
-    nodes: nextNodes,
-    updatedAt: now,
-  }
 }
 
-export function toggleMindmapNodeCollapsed(
-  mindmap: MindmapRecord,
-  nodeId: string,
-  now = new Date().toISOString(),
-): MindmapRecord {
-  const node = mindmap.nodes[nodeId]
-
-  if (!node || nodeId === mindmap.rootNodeId) {
-    return mindmap
+function isSimplifiedMindmapSnapshot(value: unknown): value is SimplifiedMindmapSnapshot {
+  if (!value || typeof value !== 'object') {
+    return false
   }
 
-  return {
-    ...mindmap,
-    nodes: {
-      ...mindmap.nodes,
-      [nodeId]: {
-        ...node,
-        collapsed: !node.collapsed,
-      },
-    },
-    updatedAt: now,
-  }
-}
-
-function collectDescendantNodeIds(nodes: Record<string, MindmapNode>, rootId: string) {
-  const removedNodeIds = new Set<string>()
-  const queue = [rootId]
-
-  while (queue.length > 0) {
-    const currentId = queue.shift()
-
-    if (!currentId || removedNodeIds.has(currentId)) {
-      continue
-    }
-
-    removedNodeIds.add(currentId)
-
-    Object.values(nodes).forEach((node) => {
-      if (node.parentId === currentId) {
-        queue.push(node.id)
-      }
-    })
-  }
-
-  return removedNodeIds
-}
-
-function reindexMindmapSiblings(nodes: Record<string, MindmapNode>) {
-  const parentIds = new Set(
-    Object.values(nodes)
-      .map((node) => node.parentId)
-      .filter((parentId): parentId is string => parentId !== null),
+  const snapshot = value as Partial<SimplifiedMindmapSnapshot>
+  return (
+    snapshot.version === 1 &&
+    Array.isArray(snapshot.elements) &&
+    !!snapshot.viewport &&
+    typeof snapshot.viewport.x === 'number' &&
+    typeof snapshot.viewport.y === 'number' &&
+    typeof snapshot.viewport.zoom === 'number'
   )
+}
 
-  parentIds.forEach((parentId) => {
-    const siblings = Object.values(nodes)
-      .filter((node) => node.parentId === parentId)
-      .sort((left, right) => left.order - right.order)
+function isCamera(value: unknown): value is MindmapCamera {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
 
-    siblings.forEach((node, index) => {
-      nodes[node.id] = {
-        ...nodes[node.id],
-        order: index,
-      }
-    })
-  })
+  const camera = value as Partial<MindmapCamera>
+  return (
+    typeof camera.x === 'number' &&
+    typeof camera.y === 'number' &&
+    typeof camera.scale === 'number'
+  )
+}
+
+function isLineMode(value: unknown): value is MindmapLineMode {
+  return value === 'straight' || value === 'curve'
+}
+
+function isShapeType(value: unknown): value is MindmapShapeType {
+  return value === 'rect' || value === 'ellipse' || value === 'diamond' || value === 'triangle'
+}
+
+function convertSimplifiedSnapshot(snapshot: SimplifiedMindmapSnapshot): MindmapSnapshot {
+  const nextSnapshot = createEmptyMindmapSnapshot()
+  nextSnapshot.camera = {
+    x: snapshot.viewport.x,
+    y: snapshot.viewport.y,
+    scale: snapshot.viewport.zoom,
+  }
+  nextSnapshot.shapes = snapshot.elements
+    .filter(
+      (element): element is SimplifiedMindmapShapeElement =>
+        element.type === 'rect' || element.type === 'ellipse',
+    )
+    .map((element, index) => ({
+      id: element.id,
+      type: element.type,
+      x: element.x,
+      y: element.y,
+      w: element.width,
+      h: element.height,
+      color: element.stroke,
+      size: 3,
+      text: '',
+      z: index + 1,
+    }))
+  nextSnapshot.texts = snapshot.elements
+    .filter(
+      (element): element is SimplifiedMindmapTextElement => element.type === 'text',
+    )
+    .map((element, index) => ({
+      id: element.id,
+      x: element.x,
+      y: element.y,
+      w: element.width,
+      h: element.height,
+      text: element.text,
+      color: element.color,
+      fontFamily: nextSnapshot.textFontFamily,
+      fontSize: element.fontSize,
+      fontWeight: '400',
+      fontStyle: 'normal',
+      autoSize: false,
+      z: nextSnapshot.shapes.length + index + 1,
+    }))
+  nextSnapshot.strokes = snapshot.elements
+    .filter(
+      (element): element is SimplifiedMindmapArrowElement => element.type === 'arrow',
+    )
+    .map((element) => ({
+      id: element.id,
+      color: element.stroke,
+      size: 3,
+      points: [
+        { x: element.x, y: element.y },
+        { x: element.x + element.width, y: element.y + element.height },
+      ],
+    }))
+
+  return nextSnapshot
 }
