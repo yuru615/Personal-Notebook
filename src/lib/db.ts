@@ -31,6 +31,20 @@ class WorkspaceDatabase extends Dexie {
       pages: 'id, parentId, updatedAt',
       settings: 'id',
     })
+
+    this.version(4).stores({
+      boards: 'id',
+      mindmaps: null,
+      pages: 'id, parentId, updatedAt',
+      settings: 'id',
+    })
+
+    this.version(5).stores({
+      boards: 'id',
+      mindmaps: 'id',
+      pages: 'id, parentId, updatedAt',
+      settings: 'id',
+    })
   }
 }
 

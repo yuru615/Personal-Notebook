@@ -24,20 +24,23 @@ function createSnapshot(): WorkspaceSnapshot {
     mindmaps: [
       {
         id: 'mindmap_1',
-        title: '产品调研',
-        rootNodeId: 'mindmap_node_1',
-        nodes: {
-          mindmap_node_1: {
-            id: 'mindmap_node_1',
-            parentId: null,
-            text: '中心主题',
-            order: 0,
-          },
-        },
-        viewport: {
-          x: 0,
-          y: 0,
-          zoom: 1,
+        title: 'Mindmap 1',
+        snapshot: {
+          camera: { x: 0, y: 0, scale: 1 },
+          color: '#17202a',
+          strokeSize: 6,
+          textFontFamily: 'Inter, Segoe UI, sans-serif',
+          textFontSize: 24,
+          lineMode: 'straight',
+          lineStartMarker: 'dot',
+          lineEndMarker: 'arrow',
+          shapeType: 'rect',
+          shapes: [],
+          strokes: [],
+          connections: [],
+          notes: [],
+          texts: [],
+          images: [],
         },
         createdAt: now,
         updatedAt: now,
@@ -107,13 +110,45 @@ describe('createDexieWorkspaceRepository', () => {
     expect(await repository.load()).toEqual(emptySnapshot)
   })
 
-  it('round-trips save and load with lastOpenedPageId', async () => {
+  it('round-trips save and load with mindmaps', async () => {
     const repository = createDexieWorkspaceRepository()
-    const snapshot = createSnapshot()
+    const now = '2026-06-21T00:00:00.000Z'
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      mindmaps: [
+        {
+          id: 'mindmap_1',
+          title: 'Mindmap 1',
+          snapshot: {
+            camera: { x: 0, y: 0, scale: 1 },
+            color: '#17202a',
+            strokeSize: 6,
+            textFontFamily: 'Inter, Segoe UI, sans-serif',
+            textFontSize: 24,
+            lineMode: 'straight',
+            lineStartMarker: 'dot',
+            lineEndMarker: 'arrow',
+            shapeType: 'rect',
+            shapes: [],
+            strokes: [],
+            connections: [],
+            notes: [],
+            texts: [],
+            images: [],
+          },
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+      pages: [],
+      settings: {
+        lastOpenedPageId: null,
+      },
+    }
 
     await repository.save(snapshot)
 
-    expect(await repository.load()).toEqual(snapshot)
+    await expect(repository.load()).resolves.toEqual(snapshot)
   })
 
   it('replaces stored data', async () => {
@@ -178,28 +213,43 @@ describe('createDexieWorkspaceRepository', () => {
     })
   })
 
-  it('loads legacy persisted data without mindmaps as an empty mindmaps array', async () => {
+  it('loads legacy persisted data without mindmaps as an empty array', async () => {
     const repository = createDexieWorkspaceRepository()
-    const now = '2026-06-18T00:00:00.000Z'
+    const now = '2026-06-21T00:00:00.000Z'
 
     await db.pages.put({
-      id: 'page_legacy_mindmap',
+      id: 'page_legacy',
       parentId: null,
-      title: 'Legacy mindmap page',
+      title: 'Legacy',
       icon: null,
       cover: null,
-      blocks: [{ id: 'block_legacy_mindmap', type: 'paragraph', text: 'legacy mindmap' }],
+      blocks: [{ id: 'block_legacy', type: 'paragraph', text: 'legacy' }],
       createdAt: now,
       updatedAt: now,
     })
     await db.settings.put({
       id: 'workspace',
-      lastOpenedPageId: 'page_legacy_mindmap',
+      lastOpenedPageId: 'page_legacy',
     })
 
-    const snapshot = await repository.load()
-
-    expect(snapshot).not.toBeNull()
-    expect(snapshot?.mindmaps).toEqual([])
+    await expect(repository.load()).resolves.toEqual({
+      boards: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: 'page_legacy',
+          parentId: null,
+          title: 'Legacy',
+          icon: null,
+          cover: null,
+          blocks: [{ id: 'block_legacy', type: 'paragraph', text: 'legacy' }],
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+      settings: {
+        lastOpenedPageId: 'page_legacy',
+      },
+    })
   })
 })

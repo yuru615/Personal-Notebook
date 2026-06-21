@@ -125,17 +125,6 @@ export interface WhiteboardBlock extends BlockBase {
   boardId: BoardId
 }
 
-export interface MindmapNode {
-  id: string
-  parentId: string | null
-  text: string
-  order: number
-  side?: 'left' | 'right'
-  collapsed?: boolean
-}
-
-export type MindmapLayoutMode = 'balanced' | 'right' | 'outline'
-
 export interface MindmapBlock extends BlockBase {
   type: 'mindmap'
   mindmapId: MindmapId
@@ -168,14 +157,7 @@ export interface BoardRecord {
 export interface MindmapRecord {
   id: MindmapId
   title: string
-  rootNodeId: string
-  layoutMode: MindmapLayoutMode
-  nodes: Record<string, MindmapNode>
-  viewport: {
-    x: number
-    y: number
-    zoom: number
-  }
+  snapshot: unknown
   createdAt: string
   updatedAt: string
 }
