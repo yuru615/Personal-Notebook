@@ -1,4 +1,5 @@
-import { createEvent, fireEvent, render, screen } from '@testing-library/react'
+import { act, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useState } from 'react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { BlockEditor } from './BlockEditor'
@@ -54,6 +55,14 @@ function placeCaretAtStart(element: HTMLElement) {
   const range = document.createRange()
   range.selectNodeContents(element)
   range.collapse(true)
+  window.getSelection()?.removeAllRanges()
+  window.getSelection()?.addRange(range)
+}
+
+function placeCaretAtEnd(element: HTMLElement) {
+  const range = document.createRange()
+  range.selectNodeContents(element)
+  range.collapse(false)
   window.getSelection()?.removeAllRanges()
   window.getSelection()?.addRange(range)
 }
@@ -177,6 +186,41 @@ describe('BlockEditor', () => {
     })
   })
 
+  it('focuses a block after turning it into a list from the block handle menu', async () => {
+    const user = userEvent.setup()
+
+    function TurnIntoFocusHarness() {
+      const [currentPage, setCurrentPage] = useState({
+        ...page,
+        blocks: [{ id: 'b1', type: 'paragraph' as const, text: '风格化' }],
+      })
+
+      return (
+        <BlockEditor
+          page={currentPage as never}
+          allPages={[currentPage as never]}
+          onUpdateBlock={vi.fn()}
+          onTurnInto={async (blockId, type) => {
+            setCurrentPage((previousPage) => ({
+              ...previousPage,
+              blocks: previousPage.blocks.map((block) =>
+                block.id === blockId ? { id: block.id, type, items: ['风格化'] } : block,
+              ),
+            }))
+          }}
+        />
+      )
+    }
+
+    render(<TurnIntoFocusHarness />)
+
+    await user.click(screen.getByRole('button', { name: '拖动块' }))
+    await user.click(screen.getByRole('button', { name: '转为无序列表' }))
+
+    const listEditor = await screen.findByRole('textbox', { name: '每行一个列表项' })
+    await waitFor(() => expect(listEditor).toHaveFocus())
+  })
+
   it('updates rich text from the floating format toolbar', async () => {
     const user = userEvent.setup()
     const onUpdateBlock = vi.fn()
@@ -253,6 +297,43 @@ describe('BlockEditor', () => {
     expect(onInsert).toHaveBeenCalledWith('heading_1')
   })
 
+  it('focuses a block inserted from the blank row slash menu', async () => {
+    const user = userEvent.setup()
+
+    function InsertFocusHarness() {
+      const [currentPage, setCurrentPage] = useState({
+        ...page,
+        blocks: [],
+      })
+
+      return (
+        <BlockEditor
+          page={currentPage as never}
+          allPages={[currentPage as never]}
+          onUpdateBlock={vi.fn()}
+          onInsert={(type) => {
+            setCurrentPage((previousPage) => ({
+              ...previousPage,
+              blocks: [{ id: 'new-heading', type, text: '' }],
+            }))
+
+            return 'new-heading'
+          }}
+        />
+      )
+    }
+
+    render(<InsertFocusHarness />)
+
+    const input = screen.getByPlaceholderText('输入 / 打开命令菜单')
+    await user.type(input, '/')
+    await user.keyboard('{ArrowDown}{Enter}')
+
+    await waitFor(() => {
+      expect(screen.getByRole('textbox', { name: '输入正文' })).toHaveFocus()
+    })
+  })
+
   it('renders a whiteboard card block', () => {
     const whiteboardPage = {
       ...page,
@@ -283,39 +364,41 @@ describe('BlockEditor', () => {
     expect(screen.getByRole('button', { name: '打开白板 流程草图' })).toBeInTheDocument()
   })
 
-  it('renders a mindmap card block', () => {
-    const mindmapPage = {
-      ...page,
-      blocks: [{ id: 'b6', type: 'mindmap', mindmapId: 'mindmap-1' }],
-    }
+  it('renders a whiteboard card with its real updated label', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-18T12:30:00.000Z'))
 
-    render(
-      <BlockEditor
-        page={mindmapPage as never}
-        allPages={[mindmapPage as never]}
-        mindmaps={[
-          {
-            id: 'mindmap-1',
-            title: '浜у搧璋冪爺瀵煎浘',
-            rootNodeId: 'node-1',
-            nodes: {
-              'node-1': {
-                id: 'node-1',
-                parentId: null,
-                text: '涓績涓婚',
-                order: 0,
+    try {
+      const whiteboardPage = {
+        ...page,
+        blocks: [{ id: 'b5', type: 'whiteboard', boardId: 'board-1' }],
+      }
+
+      render(
+        <BlockEditor
+          page={whiteboardPage as never}
+          allPages={[whiteboardPage as never]}
+          boards={[
+            {
+              id: 'board-1',
+              title: '娴佺▼鑽夊浘',
+              snapshot: {
+                version: 1,
+                elements: [],
+                viewport: { x: 0, y: 0, zoom: 1 },
               },
+              createdAt: '2026-06-17T00:00:00.000Z',
+              updatedAt: '2026-06-18T10:00:00.000Z',
             },
-            viewport: { x: 0, y: 0, zoom: 1 },
-            createdAt: '2026-06-18T00:00:00.000Z',
-            updatedAt: '2026-06-18T00:00:00.000Z',
-          },
-        ] as never}
-        onUpdateBlock={vi.fn()}
-      />,
-    )
+          ] as never}
+          onUpdateBlock={vi.fn()}
+        />,
+      )
 
-    expect(screen.getByRole('button', { name: /打开思维导图/ })).toBeInTheDocument()
+      expect(screen.getByText('2 小时前更新')).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('commits plain text from the blank row when pressing enter', async () => {
@@ -428,6 +511,192 @@ describe('BlockEditor', () => {
     expect(onInsertBlockAfter).not.toHaveBeenCalled()
   })
 
+  it('focuses the blank row when pressing ArrowDown at the end of the final text block', () => {
+    const textPage = {
+      ...page,
+      blocks: [{ id: 'b1', type: 'paragraph' as const, text: '最后一段' }],
+    }
+
+    render(
+      <BlockEditor
+        page={textPage as never}
+        allPages={[textPage as never]}
+        onUpdateBlock={vi.fn()}
+      />,
+    )
+
+    const editor = screen.getByRole('textbox', { name: '输入正文' })
+    placeCaretAtEnd(editor)
+    fireEvent.keyDown(editor, { key: 'ArrowDown' })
+
+    expect(screen.getByPlaceholderText('输入 / 打开命令菜单')).toHaveFocus()
+  })
+
+  it('focuses the blank row when pressing ArrowDown at the end of the final list block', () => {
+    const listPage = {
+      ...page,
+      blocks: [{ id: 'b1', type: 'bulleted_list' as const, items: ['最后一项'] }],
+    }
+
+    render(
+      <BlockEditor
+        page={listPage as never}
+        allPages={[listPage as never]}
+        onUpdateBlock={vi.fn()}
+      />,
+    )
+
+    const editor = screen.getByRole('textbox', { name: '每行一个列表项' })
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+    fireEvent.keyDown(editor, { key: 'ArrowDown' })
+
+    expect(screen.getByPlaceholderText('输入 / 打开命令菜单')).toHaveFocus()
+  })
+
+  it('scrolls the page when the active text block grows below the viewport while typing', async () => {
+    const originalScrollBy = window.scrollBy
+    const originalInnerHeight = window.innerHeight
+    const scrollBy = vi.fn()
+    window.scrollBy = scrollBy
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 500 })
+
+    try {
+      render(
+        <BlockEditor
+          page={page as never}
+          allPages={[page as never]}
+          onUpdateBlock={vi.fn()}
+        />,
+      )
+
+      const editor = getParagraphEditorByText('第一段')
+      vi.spyOn(editor, 'getBoundingClientRect').mockReturnValue({
+        bottom: 620,
+        height: 220,
+        left: 0,
+        right: 760,
+        top: 400,
+        width: 760,
+        x: 0,
+        y: 400,
+        toJSON: () => ({}),
+      })
+
+      fireEvent.input(editor, {
+        target: { textContent: '第一段\n第二行' },
+      })
+
+      await waitFor(() => {
+        expect(scrollBy).toHaveBeenCalledWith({ top: 420, behavior: 'auto' })
+      })
+    } finally {
+      window.scrollBy = originalScrollBy
+      Object.defineProperty(window, 'innerHeight', {
+        configurable: true,
+        value: originalInnerHeight,
+      })
+    }
+  })
+
+  it('keeps the focused text block visible after its rendered height changes', async () => {
+    const originalScrollBy = window.scrollBy
+    const originalInnerHeight = window.innerHeight
+    const scrollBy = vi.fn()
+    window.scrollBy = scrollBy
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 500 })
+
+    try {
+      const { rerender } = render(
+        <BlockEditor
+          page={page as never}
+          allPages={[page as never]}
+          onUpdateBlock={vi.fn()}
+        />,
+      )
+      const editor = getParagraphEditorByText((page.blocks[0] as { text: string }).text)
+      vi.spyOn(editor, 'getBoundingClientRect').mockReturnValue({
+        bottom: 620,
+        height: 220,
+        left: 0,
+        right: 760,
+        top: 400,
+        width: 760,
+        x: 0,
+        y: 400,
+        toJSON: () => ({}),
+      })
+
+      editor.focus()
+      rerender(
+        <BlockEditor
+          page={{
+            ...page,
+            blocks: page.blocks.map((block) =>
+              block.id === 'b1'
+                ? { ...block, text: `${(block as { text: string }).text} ${'line '.repeat(80)}` }
+                : block,
+            ),
+          } as never}
+          allPages={[page as never]}
+          onUpdateBlock={vi.fn()}
+        />,
+      )
+
+      await waitFor(() => {
+        expect(scrollBy).toHaveBeenCalledWith({ top: 420, behavior: 'auto' })
+      })
+    } finally {
+      window.scrollBy = originalScrollBy
+      Object.defineProperty(window, 'innerHeight', {
+        configurable: true,
+        value: originalInnerHeight,
+      })
+    }
+  })
+
+  it('scrolls the page while typing in the blank row input near the viewport bottom', async () => {
+    const originalScrollBy = window.scrollBy
+    const originalInnerHeight = window.innerHeight
+    const scrollBy = vi.fn()
+    window.scrollBy = scrollBy
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 500 })
+
+    try {
+      render(
+        <BlockEditor
+          page={page as never}
+          allPages={[page as never]}
+          onUpdateBlock={vi.fn()}
+        />,
+      )
+
+      const input = screen.getByPlaceholderText('输入 / 打开命令菜单')
+      vi.spyOn(input, 'getBoundingClientRect').mockReturnValue({
+        bottom: 800,
+        height: 30,
+        left: 0,
+        right: 760,
+        top: 770,
+        width: 760,
+        x: 0,
+        y: 770,
+        toJSON: () => ({}),
+      })
+
+      fireEvent.input(input, { target: { value: '继续输入' } })
+
+      await waitFor(() => {
+        expect(scrollBy).toHaveBeenCalledWith({ top: 600, behavior: 'auto' })
+      })
+    } finally {
+      window.scrollBy = originalScrollBy
+      Object.defineProperty(window, 'innerHeight', {
+        configurable: true,
+        value: originalInnerHeight,
+      })
+    }
+  })
+
   it('creates another list block when pressing Enter in a non-empty list item', () => {
     const onInsertBlockAfter = vi.fn(() => 'new-list-block')
     const listPage = {
@@ -449,6 +718,58 @@ describe('BlockEditor', () => {
     expect(onInsertBlockAfter).toHaveBeenCalledWith('b1', 'bulleted_list')
   })
 
+  it('uses the live list text when Enter is pressed before block state refreshes', () => {
+    const onInsertBlockAfter = vi.fn(() => 'new-list-block')
+    const onTurnInto = vi.fn()
+    const listPage = {
+      ...page,
+      blocks: [{ id: 'b1', type: 'bulleted_list', items: [''] }],
+    }
+
+    render(
+      <BlockEditor
+        page={listPage as never}
+        allPages={[listPage as never]}
+        onUpdateBlock={vi.fn()}
+        onInsertBlockAfter={onInsertBlockAfter}
+        onTurnInto={onTurnInto}
+      />,
+    )
+
+    const editor = screen.getByRole('textbox', { name: '每行一个列表项' })
+    fireEvent.change(editor, { target: { value: '风格化' } })
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(onInsertBlockAfter).toHaveBeenCalledWith('b1', 'bulleted_list')
+    expect(onTurnInto).not.toHaveBeenCalled()
+  })
+
+  it('normalizes line breaks while editing a list item', () => {
+    const onUpdateBlock = vi.fn()
+    const listBlock = { id: 'b1', type: 'bulleted_list' as const, items: ['第一项'] }
+    const listPage = {
+      ...page,
+      blocks: [listBlock],
+    }
+
+    render(
+      <BlockEditor
+        page={listPage as never}
+        allPages={[listPage as never]}
+        onUpdateBlock={onUpdateBlock}
+      />,
+    )
+
+    fireEvent.change(screen.getByRole('textbox', { name: '每行一个列表项' }), {
+      target: { value: '第一行\n第二行' },
+    })
+
+    expect(onUpdateBlock).toHaveBeenCalledWith('b1', {
+      ...listBlock,
+      items: ['第一行 第二行'],
+    })
+  })
+
   it('turns an empty list item back into a paragraph when pressing Enter', () => {
     const onTurnInto = vi.fn()
     const listPage = {
@@ -468,6 +789,46 @@ describe('BlockEditor', () => {
     fireEvent.keyDown(screen.getByRole('textbox', { name: '每行一个列表项' }), { key: 'Enter' })
 
     expect(onTurnInto).toHaveBeenCalledWith('b1', 'paragraph')
+  })
+
+  it('focuses the new paragraph editor after exiting an empty list item', async () => {
+    vi.useFakeTimers()
+
+    function DelayedTurnIntoHarness() {
+      const [currentPage, setCurrentPage] = useState({
+        ...page,
+        blocks: [{ id: 'b1', type: 'numbered_list' as const, items: [''] }],
+      })
+
+      return (
+        <BlockEditor
+          page={currentPage as never}
+          allPages={[currentPage as never]}
+          onUpdateBlock={vi.fn()}
+          onTurnInto={() => {
+            setTimeout(() => {
+              setCurrentPage((previousPage) => ({
+                ...previousPage,
+                blocks: [{ id: 'b1', type: 'paragraph' as const, text: '' }],
+              }))
+            }, 0)
+          }}
+        />
+      )
+    }
+
+    render(<DelayedTurnIntoHarness />)
+
+    fireEvent.keyDown(screen.getByRole('textbox', { name: '每行一个列表项' }), {
+      key: 'Enter',
+    })
+
+    await act(async () => {
+      vi.runAllTimers()
+    })
+
+    expect(screen.getByRole('textbox', { name: '输入正文' })).toHaveFocus()
+    vi.useRealTimers()
   })
 
   it('deletes an empty text block when pressing Backspace at the start', () => {

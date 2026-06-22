@@ -1,11 +1,24 @@
 import JSZip from 'jszip'
-import type { BlockRecord, PageId, PageRecord } from './types'
+import type { BlockRecord, BoardRecord, PageId, PageRecord } from './types'
+import { richTextToMarkdown } from './richText'
 import { uiCopy } from '../ui/copy'
+import { sanitizeFileNameSegment } from '../utils/fileName'
+import { createId } from '../utils/id'
+
+const WHITEBOARD_LABEL = '\u767d\u677f'
+const WHITEBOARD_LINK_PREFIX = `${WHITEBOARD_LABEL}\uff1a`
 
 interface BuildMarkdownZipOptions {
   rootPage: PageRecord
   allPages: PageRecord[]
+  boards?: BoardRecord[]
   reversible: boolean
+}
+
+export interface ImportedMarkdownPackage {
+  rootPageId: string | null
+  pages: PageRecord[]
+  boards: BoardRecord[]
 }
 
 interface ChildPageLink {
@@ -13,15 +26,37 @@ interface ChildPageLink {
   title: string
 }
 
-function sanitizePathSegment(value: string): string {
-  const cleaned = value
-    .trim()
-    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .replace(/\.+$/g, '')
-    .trim()
+interface PageFrontmatter {
+  pageId: string
+  parentId: string | null
+  title: string
+  icon: string | null
+  cover: string | null
+  createdAt: string
+  updatedAt: string
+}
 
-  return cleaned || uiCopy.page.untitled
+type ImportedBlockDraft =
+  | { type: 'paragraph'; text: string }
+  | { type: 'heading_1'; text: string }
+  | { type: 'heading_2'; text: string }
+  | { type: 'heading_3'; text: string }
+  | { type: 'todo'; text: string; checked: boolean }
+  | { type: 'bulleted_list'; text: string }
+  | { type: 'numbered_list'; text: string }
+  | { type: 'code'; language: string; text: string }
+  | { type: 'table'; rows: string[][] }
+  | { type: 'child_page'; targetPath: string }
+  | { type: 'whiteboard'; assetPath: string }
+
+interface ImportedPageDraft {
+  filePath: string
+  frontmatter: PageFrontmatter
+  blocks: ImportedBlockDraft[]
+}
+
+function sanitizePathSegment(value: string): string {
+  return sanitizeFileNameSegment(value, uiCopy.page.untitled)
 }
 
 function escapeYamlValue(value: string | null): string {
@@ -62,12 +97,25 @@ function buildSiblingFolderNames(children: PageRecord[]): Map<PageId, string> {
   return names
 }
 
-function blockToMarkdown(block: BlockRecord, childLinks: Map<PageId, ChildPageLink>): string {
+function blockToMarkdown(
+  block: BlockRecord,
+  childLinks: Map<PageId, ChildPageLink>,
+  boardTitles: Map<string, string>,
+  boardLinks: Map<string, string>,
+): string {
   switch (block.type) {
     case 'paragraph':
-      return block.text
+      return block.richText ? richTextToMarkdown(block.richText) : block.text
+    case 'heading_1':
+      return `# ${block.richText ? richTextToMarkdown(block.richText) : block.text}`
+    case 'heading_2':
+      return `## ${block.richText ? richTextToMarkdown(block.richText) : block.text}`
+    case 'heading_3':
+      return `### ${block.richText ? richTextToMarkdown(block.richText) : block.text}`
     case 'todo':
-      return `- [${block.checked ? 'x' : ' '}] ${block.text}`
+      return `- [${block.checked ? 'x' : ' '}] ${
+        block.richText ? richTextToMarkdown(block.richText) : block.text
+      }`
     case 'bulleted_list':
       return block.items.map((item) => `- ${item}`).join('\n')
     case 'numbered_list':
@@ -87,21 +135,34 @@ function blockToMarkdown(block: BlockRecord, childLinks: Map<PageId, ChildPageLi
       const childLink = childLinks.get(block.pageId)
 
       if (!childLink) {
-        return childLinks.get(block.pageId)?.title ?? uiCopy.editor.childPage
+        return uiCopy.editor.childPage
       }
 
       return `[${childLink.title}](./${childLink.folderName}/index.md)`
     }
+    case 'whiteboard':
+      return `[${WHITEBOARD_LINK_PREFIX}${boardTitles.get(block.boardId) ?? WHITEBOARD_LABEL}](${
+        boardLinks.get(block.boardId) ?? '#'
+      })`
   }
 }
 
 function pageToMarkdown(
   page: PageRecord,
   childLinks: Map<PageId, ChildPageLink>,
+  boardTitles: Map<string, string>,
+  boardLinks: Map<string, string>,
   reversible: boolean,
 ): string {
   const blocks = page.blocks
-    .map((block) => blockToMarkdown(block, childLinks))
+    .map((block) =>
+      blockToMarkdown(
+        block,
+        childLinks,
+        boardTitles,
+        boardLinks,
+      ),
+    )
     .filter((block) => block.trim().length > 0)
   const body = blocks.join('\n\n')
   const title = `# ${page.title}`
@@ -125,13 +186,75 @@ function pageToMarkdown(
   return [frontmatter, title, body].filter(Boolean).join('\n\n').trim()
 }
 
+function buildWhiteboardAssets(
+  page: PageRecord,
+  currentFolder: JSZip,
+  boardsById: Map<string, BoardRecord>,
+  reversible: boolean,
+) {
+  const boardTitles = new Map<string, string>()
+  const boardLinks = new Map<string, string>()
+
+  for (const block of page.blocks) {
+    if (block.type !== 'whiteboard') {
+      continue
+    }
+
+    const board = boardsById.get(block.boardId)
+
+    if (!board) {
+      continue
+    }
+
+    boardTitles.set(board.id, board.title)
+  }
+
+  if (!reversible || boardTitles.size === 0) {
+    return { boardTitles, boardLinks }
+  }
+
+  const whiteboardFolder = currentFolder.folder('_assets')?.folder('whiteboards')
+
+  if (!whiteboardFolder) {
+    return { boardTitles, boardLinks }
+  }
+
+  for (const [boardId, title] of boardTitles) {
+    const board = boardsById.get(boardId)
+
+    if (!board) {
+      continue
+    }
+
+    const fileName = `${sanitizeFileNameSegment(title, WHITEBOARD_LABEL)}-${board.id}.whiteboard.json`
+
+    whiteboardFolder.file(
+      fileName,
+      JSON.stringify(
+        {
+          boardId: board.id,
+          title: board.title,
+          snapshot: board.snapshot,
+        },
+        null,
+        2,
+      ),
+    )
+    boardLinks.set(board.id, `./_assets/whiteboards/${fileName}`)
+  }
+
+  return { boardTitles, boardLinks }
+}
+
 export async function buildMarkdownZip({
   rootPage,
   allPages,
+  boards = [],
   reversible,
 }: BuildMarkdownZipOptions): Promise<Blob> {
   const zip = new JSZip()
   const childrenByParentId = buildChildrenMap(allPages)
+  const boardsById = new Map(boards.map((board) => [board.id, board]))
 
   function visit(page: PageRecord, parentFolder: JSZip, folderName: string) {
     const currentFolder = parentFolder.folder(folderName)
@@ -151,8 +274,23 @@ export async function buildMarkdownZip({
         },
       ]),
     )
+    const { boardTitles, boardLinks } = buildWhiteboardAssets(
+      page,
+      currentFolder,
+      boardsById,
+      reversible,
+    )
 
-    currentFolder.file('index.md', pageToMarkdown(page, childLinks, reversible))
+    currentFolder.file(
+      'index.md',
+      pageToMarkdown(
+        page,
+        childLinks,
+        boardTitles,
+        boardLinks,
+        reversible,
+      ),
+    )
 
     for (const child of children) {
       visit(
@@ -166,4 +304,449 @@ export async function buildMarkdownZip({
   visit(rootPage, zip, sanitizePathSegment(rootPage.title))
 
   return zip.generateAsync({ type: 'blob' })
+}
+
+function normalizeZipPath(value: string): string {
+  return value.replace(/\\/g, '/').replace(/^\.\/+/, '').replace(/\/+/g, '/')
+}
+
+function getZipDirname(path: string): string {
+  const normalized = normalizeZipPath(path)
+  const lastSlash = normalized.lastIndexOf('/')
+  return lastSlash === -1 ? '' : normalized.slice(0, lastSlash)
+}
+
+function resolveZipPath(fromFilePath: string, relativePath: string): string {
+  const baseParts = getZipDirname(fromFilePath)
+    .split('/')
+    .filter(Boolean)
+  const relativeParts = normalizeZipPath(relativePath)
+    .split('/')
+    .filter(Boolean)
+
+  for (const part of relativeParts) {
+    if (part === '.') {
+      continue
+    }
+
+    if (part === '..') {
+      baseParts.pop()
+      continue
+    }
+
+    baseParts.push(part)
+  }
+
+  return baseParts.join('/')
+}
+
+function parseFrontmatterValue(value: string): string | null {
+  if (value === 'null') {
+    return null
+  }
+
+  return JSON.parse(value) as string
+}
+
+function parseFrontmatter(source: string): { frontmatter: PageFrontmatter; body: string } {
+  const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/)
+
+  if (!match) {
+    throw new Error('Unsupported markdown page package')
+  }
+
+  const values = new Map<string, string>()
+
+  for (const line of match[1].split(/\r?\n/)) {
+    const separatorIndex = line.indexOf(':')
+
+    if (separatorIndex === -1) {
+      continue
+    }
+
+    values.set(line.slice(0, separatorIndex).trim(), line.slice(separatorIndex + 1).trim())
+  }
+
+  const pageId = parseFrontmatterValue(values.get('pageId') ?? '')
+  const title = parseFrontmatterValue(values.get('title') ?? '')
+  const createdAt = parseFrontmatterValue(values.get('createdAt') ?? '')
+  const updatedAt = parseFrontmatterValue(values.get('updatedAt') ?? '')
+
+  if (!pageId || !title || !createdAt || !updatedAt) {
+    throw new Error('Unsupported markdown page package')
+  }
+
+  return {
+    frontmatter: {
+      pageId,
+      parentId: parseFrontmatterValue(values.get('parentId') ?? 'null'),
+      title,
+      icon: parseFrontmatterValue(values.get('icon') ?? 'null'),
+      cover: parseFrontmatterValue(values.get('cover') ?? 'null'),
+      createdAt,
+      updatedAt,
+    },
+    body: match[2],
+  }
+}
+
+function markdownToPlainText(value: string): string {
+  return value
+    .replace(/<span[^>]*>(.*?)<\/span>/g, '$1')
+    .replace(/<u>(.*?)<\/u>/g, '$1')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/~~(.*?)~~/g, '$1')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+    .replace(/\\\|/g, '|')
+}
+
+function parseStandaloneLink(line: string, pageFilePath: string): ImportedBlockDraft | null {
+  const match = line.trim().match(/^\[([^\]]+)\]\((.+)\)$/)
+
+  if (!match) {
+    return null
+  }
+
+  const [, , href] = match
+
+  if (href.endsWith('.whiteboard.json')) {
+    return {
+      type: 'whiteboard',
+      assetPath: resolveZipPath(pageFilePath, href),
+    }
+  }
+
+  if (href.endsWith('/index.md')) {
+    return {
+      type: 'child_page',
+      targetPath: resolveZipPath(pageFilePath, href),
+    }
+  }
+
+  return null
+}
+
+function splitTableRow(line: string): string[] {
+  const marker = '\u0000'
+  const normalized = line.trim().replace(/^\|/, '').replace(/\|$/, '').replace(/\\\|/g, marker)
+
+  return normalized.split('|').map((cell) => markdownToPlainText(cell.replaceAll(marker, '|').trim()))
+}
+
+function isTableSeparatorLine(line: string): boolean {
+  return /^\|\s*:?-{3,}:?(?:\s*\|\s*:?-{3,}:?)*\s*\|$/.test(line.trim())
+}
+
+function trimPageTitle(body: string, title: string): string[] {
+  const lines = body.split(/\r?\n/)
+  let index = 0
+
+  while (index < lines.length && lines[index].trim() === '') {
+    index += 1
+  }
+
+  if (lines[index] === `# ${title}`) {
+    index += 1
+  }
+
+  while (index < lines.length && lines[index].trim() === '') {
+    index += 1
+  }
+
+  return lines.slice(index)
+}
+
+function isStructuredLine(lines: string[], index: number): boolean {
+  const line = lines[index]?.trim() ?? ''
+  const nextLine = lines[index + 1]?.trim() ?? ''
+
+  return (
+    line.startsWith('# ') ||
+    line.startsWith('## ') ||
+    line.startsWith('### ') ||
+    line.startsWith('- [') ||
+    line.startsWith('- ') ||
+    /^\d+\.\s/.test(line) ||
+    line.startsWith('```') ||
+    (line.startsWith('|') && isTableSeparatorLine(nextLine)) ||
+    /^\[[^\]]+\]\((.+)\)$/.test(line)
+  )
+}
+
+function parseMarkdownBlocks(body: string, frontmatter: PageFrontmatter, pageFilePath: string): ImportedBlockDraft[] {
+  const lines = trimPageTitle(body, frontmatter.title)
+  const blocks: ImportedBlockDraft[] = []
+
+  for (let index = 0; index < lines.length; ) {
+    const currentLine = lines[index]
+    const trimmedLine = currentLine?.trim() ?? ''
+
+    if (!trimmedLine) {
+      index += 1
+      continue
+    }
+
+    if (trimmedLine.startsWith('```')) {
+      const language = trimmedLine.slice(3).trim() || 'text'
+      const content: string[] = []
+      index += 1
+
+      while (index < lines.length && !lines[index].trim().startsWith('```')) {
+        content.push(lines[index])
+        index += 1
+      }
+
+      if (index < lines.length) {
+        index += 1
+      }
+
+      blocks.push({
+        type: 'code',
+        language,
+        text: content.join('\n'),
+      })
+      continue
+    }
+
+    if (trimmedLine.startsWith('|') && isTableSeparatorLine(lines[index + 1] ?? '')) {
+      const tableLines = [lines[index], lines[index + 1]]
+      index += 2
+
+      while (index < lines.length && lines[index].trim().startsWith('|')) {
+        tableLines.push(lines[index])
+        index += 1
+      }
+
+      blocks.push({
+        type: 'table',
+        rows: [splitTableRow(tableLines[0]), ...tableLines.slice(2).map(splitTableRow)],
+      })
+      continue
+    }
+
+    if (trimmedLine.startsWith('### ')) {
+      blocks.push({ type: 'heading_3', text: markdownToPlainText(trimmedLine.slice(4)) })
+      index += 1
+      continue
+    }
+
+    if (trimmedLine.startsWith('## ')) {
+      blocks.push({ type: 'heading_2', text: markdownToPlainText(trimmedLine.slice(3)) })
+      index += 1
+      continue
+    }
+
+    if (trimmedLine.startsWith('# ')) {
+      blocks.push({ type: 'heading_1', text: markdownToPlainText(trimmedLine.slice(2)) })
+      index += 1
+      continue
+    }
+
+    const todoMatch = trimmedLine.match(/^- \[([ xX])\] (.*)$/)
+
+    if (todoMatch) {
+      blocks.push({
+        type: 'todo',
+        checked: todoMatch[1].toLowerCase() === 'x',
+        text: markdownToPlainText(todoMatch[2]),
+      })
+      index += 1
+      continue
+    }
+
+    if (trimmedLine.startsWith('- ')) {
+      blocks.push({
+        type: 'bulleted_list',
+        text: markdownToPlainText(trimmedLine.slice(2)),
+      })
+      index += 1
+      continue
+    }
+
+    const numberedMatch = trimmedLine.match(/^\d+\.\s+(.*)$/)
+
+    if (numberedMatch) {
+      blocks.push({
+        type: 'numbered_list',
+        text: markdownToPlainText(numberedMatch[1]),
+      })
+      index += 1
+      continue
+    }
+
+    const linkBlock = parseStandaloneLink(trimmedLine, pageFilePath)
+
+    if (linkBlock) {
+      blocks.push(linkBlock)
+      index += 1
+      continue
+    }
+
+    const paragraphLines = [currentLine]
+    index += 1
+
+    while (
+      index < lines.length &&
+      lines[index].trim() !== '' &&
+      !isStructuredLine(lines, index)
+    ) {
+      paragraphLines.push(lines[index])
+      index += 1
+    }
+
+    blocks.push({
+      type: 'paragraph',
+      text: markdownToPlainText(paragraphLines.join('\n').trim()),
+    })
+  }
+
+  return blocks.filter((block) => {
+    if ('text' in block) {
+      return block.text.trim().length > 0
+    }
+
+    return true
+  })
+}
+
+function createBlockFromDraft(
+  draft: ImportedBlockDraft,
+  pageIdByFilePath: Map<string, string>,
+  boardIdByAssetPath: Map<string, string>,
+): BlockRecord | null {
+  switch (draft.type) {
+    case 'paragraph':
+      return { id: createId('block'), type: 'paragraph', text: draft.text }
+    case 'heading_1':
+      return { id: createId('block'), type: 'heading_1', text: draft.text }
+    case 'heading_2':
+      return { id: createId('block'), type: 'heading_2', text: draft.text }
+    case 'heading_3':
+      return { id: createId('block'), type: 'heading_3', text: draft.text }
+    case 'todo':
+      return { id: createId('block'), type: 'todo', text: draft.text, checked: draft.checked }
+    case 'bulleted_list':
+      return { id: createId('block'), type: 'bulleted_list', items: [draft.text] }
+    case 'numbered_list':
+      return { id: createId('block'), type: 'numbered_list', items: [draft.text] }
+    case 'code':
+      return { id: createId('block'), type: 'code', language: draft.language, text: draft.text }
+    case 'table':
+      return { id: createId('block'), type: 'table', rows: draft.rows }
+    case 'child_page': {
+      const pageId = pageIdByFilePath.get(draft.targetPath)
+      return pageId ? { id: createId('block'), type: 'child_page', pageId } : null
+    }
+    case 'whiteboard': {
+      const boardId = boardIdByAssetPath.get(draft.assetPath)
+      return boardId ? { id: createId('block'), type: 'whiteboard', boardId } : null
+    }
+  }
+}
+
+export async function importMarkdownZip(blob: Blob): Promise<ImportedMarkdownPackage> {
+  const zip = await JSZip.loadAsync(await blob.arrayBuffer())
+  const pageFiles = Object.values(zip.files)
+    .filter((file) => !file.dir && file.name.endsWith('/index.md'))
+    .sort((left, right) => left.name.localeCompare(right.name))
+
+  if (pageFiles.length === 0) {
+    throw new Error('Unsupported markdown page package')
+  }
+
+  const importedPageDrafts: ImportedPageDraft[] = []
+
+  for (const file of pageFiles) {
+    const markdown = await file.async('string')
+    const { frontmatter, body } = parseFrontmatter(markdown)
+
+    importedPageDrafts.push({
+      filePath: normalizeZipPath(file.name),
+      frontmatter,
+      blocks: parseMarkdownBlocks(body, frontmatter, file.name),
+    })
+  }
+
+  const pageIdByOriginalId = new Map<string, string>()
+  const pageIdByFilePath = new Map<string, string>()
+
+  for (const page of importedPageDrafts) {
+    const nextId = createId('page')
+    pageIdByOriginalId.set(page.frontmatter.pageId, nextId)
+    pageIdByFilePath.set(page.filePath, nextId)
+  }
+
+  const assetPaths = Array.from(
+    new Set(
+      importedPageDrafts.flatMap((page) =>
+        page.blocks
+          .filter((block): block is Extract<ImportedBlockDraft, { type: 'whiteboard' }> => block.type === 'whiteboard')
+          .map((block) => block.assetPath),
+      ),
+    ),
+  )
+
+  const boardIdByOriginalId = new Map<string, string>()
+  const boardIdByAssetPath = new Map<string, string>()
+  const boards: BoardRecord[] = []
+  const now = new Date().toISOString()
+
+  for (const assetPath of assetPaths) {
+    const assetFile = zip.file(assetPath)
+
+    if (!assetFile) {
+      continue
+    }
+
+    const payload = JSON.parse(await assetFile.async('string')) as {
+      boardId?: unknown
+      title?: unknown
+      snapshot?: unknown
+    }
+    const originalBoardId =
+      typeof payload.boardId === 'string' && payload.boardId ? payload.boardId : assetPath
+    let nextBoardId = boardIdByOriginalId.get(originalBoardId)
+
+    if (!nextBoardId) {
+      nextBoardId = createId('board')
+      boardIdByOriginalId.set(originalBoardId, nextBoardId)
+      boards.push({
+        id: nextBoardId,
+        title:
+          typeof payload.title === 'string' && payload.title.trim()
+            ? payload.title
+            : WHITEBOARD_LABEL,
+        snapshot: payload.snapshot ?? null,
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+
+    boardIdByAssetPath.set(assetPath, nextBoardId)
+  }
+
+  const pages: PageRecord[] = importedPageDrafts.map((draft) => ({
+    id: pageIdByOriginalId.get(draft.frontmatter.pageId) ?? createId('page'),
+    parentId: draft.frontmatter.parentId
+      ? (pageIdByOriginalId.get(draft.frontmatter.parentId) ?? null)
+      : null,
+    title: draft.frontmatter.title,
+    icon: draft.frontmatter.icon,
+    cover: draft.frontmatter.cover,
+    blocks: draft.blocks
+      .map((block) => createBlockFromDraft(block, pageIdByFilePath, boardIdByAssetPath))
+      .filter((block): block is BlockRecord => block !== null),
+    createdAt: draft.frontmatter.createdAt,
+    updatedAt: draft.frontmatter.updatedAt,
+  }))
+
+  const rootDraft =
+    importedPageDrafts.find((draft) => draft.frontmatter.parentId === null) ?? importedPageDrafts[0]
+
+  return {
+    rootPageId: pageIdByOriginalId.get(rootDraft.frontmatter.pageId) ?? null,
+    pages,
+    boards,
+  }
 }

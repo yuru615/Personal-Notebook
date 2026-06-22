@@ -1,57 +1,218 @@
+import { useEffect, useRef, useState } from 'react'
+import type { PageFontFamily, SaveStatus } from '../../domain/types'
 import { uiCopy } from '../../ui/copy'
+import { SaveStatusBadge } from '../shared/SaveStatusBadge'
+
+const CLEANUP_ORPHAN_WHITEBOARDS_LABEL = '\u6e05\u7406\u5b64\u7acb\u767d\u677f'
+const IMPORT_MARKDOWN_LABEL = '\u5bfc\u5165 Markdown \u9875\u9762\u5305'
 
 interface ExportImportPanelProps {
+  status: SaveStatus
   reversible: boolean
+  adaptiveWidth: boolean
+  smallText: boolean
+  fontFamily: PageFontFamily
+  outlineVisible: boolean
   onToggleReversible: (value: boolean) => void
+  onToggleAdaptiveWidth: (value: boolean) => void
+  onToggleSmallText: (value: boolean) => void
+  onToggleFontFamily: (value: PageFontFamily) => void
+  onToggleOutlineVisible: (value: boolean) => void
   onExportJson: () => void | Promise<void>
   onExportMarkdown: () => void | Promise<void>
   onImportJson: (file: File) => void | Promise<void>
+  onImportMarkdown: (file: File) => void | Promise<void>
+  onCleanupOrphanBoards: () => void | Promise<void>
 }
 
 export function ExportImportPanel({
+  status,
   reversible,
+  adaptiveWidth,
+  smallText,
+  fontFamily,
+  outlineVisible,
   onToggleReversible,
+  onToggleAdaptiveWidth,
+  onToggleSmallText,
+  onToggleFontFamily,
+  onToggleOutlineVisible,
   onExportJson,
   onExportMarkdown,
   onImportJson,
+  onImportMarkdown,
+  onCleanupOrphanBoards,
 }: ExportImportPanelProps) {
+  const [open, setOpen] = useState(false)
+  const panelRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    function handlePointerDown(event: MouseEvent) {
+      if (!panelRef.current?.contains(event.target as Node)) {
+        setOpen(false)
+      }
+    }
+
+    window.addEventListener('mousedown', handlePointerDown)
+    return () => {
+      window.removeEventListener('mousedown', handlePointerDown)
+    }
+  }, [])
+
+  function closeMenu() {
+    setOpen(false)
+  }
+
+  function handleExportJson() {
+    closeMenu()
+    void onExportJson()
+  }
+
+  function handleExportMarkdown() {
+    closeMenu()
+    void onExportMarkdown()
+  }
+
+  function handleCleanupOrphanBoards() {
+    closeMenu()
+    void onCleanupOrphanBoards()
+  }
+
+  const fontOptions: Array<{ value: PageFontFamily; label: string }> = [
+    { value: 'default', label: uiCopy.page.fontDefault },
+    { value: 'serif', label: uiCopy.page.fontSerif },
+    { value: 'mono', label: uiCopy.page.fontMono },
+  ]
+
   return (
-    <div className="export-panel">
-      <label className="reversible-toggle">
-        <input
-          type="checkbox"
-          checked={reversible}
-          onChange={(event) => onToggleReversible(event.target.checked)}
-        />
-        {uiCopy.export.reversible}
-      </label>
-      <button type="button" className="export-action" onClick={() => void onExportJson()}>
-        {uiCopy.export.json}
+    <div className="page-menu" ref={panelRef}>
+      <button
+        type="button"
+        className="page-menu-button"
+        aria-label={uiCopy.page.menu}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span aria-hidden="true">⋯</span>
       </button>
-      <button type="button" className="export-action" onClick={() => void onExportMarkdown()}>
-        {uiCopy.export.markdown}
-      </button>
-      <label className="export-action import-action">
-        {uiCopy.export.import}
-        <input
-          type="file"
-          accept=".json,application/json"
-          className="import-input"
-          onChange={(event) => {
-            const file = event.target.files?.[0]
+      {open ? (
+        <div className="page-menu-popover">
+          <div className="page-menu-meta">
+            <SaveStatusBadge status={status} />
+          </div>
+          <div className="page-menu-divider" />
+          <div className="page-menu-section">
+            <div className="page-menu-section-title">{uiCopy.page.viewSection}</div>
+            <label className="page-menu-toggle">
+              <span className="page-menu-item-label">{uiCopy.page.smallText}</span>
+              <input
+                type="checkbox"
+                checked={smallText}
+                onChange={(event) => onToggleSmallText(event.target.checked)}
+              />
+            </label>
+            <div className="page-menu-field">
+              <span className="page-menu-item-label">{uiCopy.page.fontFamily}</span>
+              <div className="page-menu-choice-group" role="group" aria-label={uiCopy.page.fontFamily}>
+                {fontOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={
+                      option.value === fontFamily
+                        ? 'page-menu-choice page-menu-choice-active'
+                        : 'page-menu-choice'
+                    }
+                    aria-pressed={option.value === fontFamily}
+                    onClick={() => onToggleFontFamily(option.value)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <label className="page-menu-toggle">
+              <span className="page-menu-item-label">{uiCopy.page.outlineVisible}</span>
+              <input
+                type="checkbox"
+                checked={outlineVisible}
+                onChange={(event) => onToggleOutlineVisible(event.target.checked)}
+              />
+            </label>
+            <label className="page-menu-toggle">
+              <span className="page-menu-item-label">{uiCopy.page.adaptiveWidth}</span>
+              <input
+                type="checkbox"
+                checked={adaptiveWidth}
+                onChange={(event) => onToggleAdaptiveWidth(event.target.checked)}
+              />
+            </label>
+          </div>
+          <div className="page-menu-divider" />
+          <div className="page-menu-section">
+            <div className="page-menu-section-title">{uiCopy.export.section}</div>
+            <button type="button" className="page-menu-action" onClick={handleExportJson}>
+              <span className="page-menu-item-label">{uiCopy.export.json}</span>
+            </button>
+            <button type="button" className="page-menu-action" onClick={handleExportMarkdown}>
+              <span className="page-menu-item-label">{uiCopy.export.markdown}</span>
+            </button>
+            <label className="page-menu-action page-menu-file">
+              <span className="page-menu-item-label">{uiCopy.export.import}</span>
+              <input
+                type="file"
+                accept=".json,application/json"
+                className="import-input"
+                onChange={(event) => {
+                  const file = event.target.files?.[0]
 
-            if (!file) {
-              return
-            }
+                  if (!file) {
+                    return
+                  }
 
-            if (window.confirm(uiCopy.export.importConfirm)) {
-              void onImportJson(file)
-            }
+                  if (window.confirm(uiCopy.export.importConfirm)) {
+                    closeMenu()
+                    void onImportJson(file)
+                  }
 
-            event.target.value = ''
-          }}
-        />
-      </label>
+                  event.target.value = ''
+                }}
+              />
+            </label>
+            <label className="page-menu-action page-menu-file">
+              <span className="page-menu-item-label">{IMPORT_MARKDOWN_LABEL}</span>
+              <input
+                type="file"
+                accept=".zip,application/zip"
+                className="import-input"
+                onChange={(event) => {
+                  const file = event.target.files?.[0]
+
+                  if (!file) {
+                    return
+                  }
+
+                  closeMenu()
+                  void onImportMarkdown(file)
+                  event.target.value = ''
+                }}
+              />
+            </label>
+            <button type="button" className="page-menu-action" onClick={handleCleanupOrphanBoards}>
+              <span className="page-menu-item-label">{CLEANUP_ORPHAN_WHITEBOARDS_LABEL}</span>
+            </button>
+            <label className="page-menu-toggle">
+              <span className="page-menu-item-label">{uiCopy.export.reversible}</span>
+              <input
+                type="checkbox"
+                checked={reversible}
+                onChange={(event) => onToggleReversible(event.target.checked)}
+              />
+            </label>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

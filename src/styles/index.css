@@ -391,6 +391,7 @@ a {
 }
 
 .page-header {
+  width: min(100%, var(--page-content-available-width));
   margin-bottom: 28px;
 }
 
@@ -444,7 +445,7 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .page-header-top-spacer {
@@ -454,11 +455,15 @@ a {
 .page-header-icon {
   font-size: 72px;
   line-height: 1;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
+}
+
+.page-header-body {
+  width: 100%;
 }
 
 .page-header-icon-with-cover {
-  margin-top: -44px;
+  margin-top: -40px;
 }
 
 .page-title-input {
@@ -477,8 +482,9 @@ a {
 
 .page-header-actions {
   display: flex;
-  gap: 8px;
+  gap: 4px;
   align-items: center;
+  justify-content: flex-end;
   margin-left: auto;
   flex-wrap: wrap;
 }
@@ -487,9 +493,15 @@ a {
   border: 0;
   background: transparent;
   color: #5f5e59;
-  padding: 6px 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 8px;
   border-radius: 8px;
   cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
 }
 
 .page-header-action:hover,
@@ -699,12 +711,16 @@ a {
   border: 0;
   background: transparent;
   color: #5f5e59;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 32px;
   height: 32px;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 22px;
+  font-size: 18px;
   line-height: 1;
+  padding: 0;
 }
 
 .page-menu-popover {
@@ -836,6 +852,7 @@ a {
 .editor-surface {
   display: grid;
   gap: 4px;
+  padding-bottom: 300px;
 }
 
 .editor-row {
@@ -1234,6 +1251,14 @@ a {
   content: attr(data-placeholder);
   color: #9b9a97;
   pointer-events: none;
+}
+
+.editor-row .block-input::placeholder {
+  color: transparent;
+}
+
+.editor-row .block-input[contenteditable='true'][data-empty='true']::before {
+  content: '';
 }
 
 .block-input a {
@@ -1922,22 +1947,6 @@ a {
   border-radius: 6px;
 }
 
-.mindmap-card-preview {
-  background:
-    radial-gradient(circle at 82% 22%, rgba(136, 175, 219, 0.12), transparent 28px),
-    linear-gradient(180deg, #fcfcfb 0%, #f8f8f6 100%);
-}
-
-.canvas-entry-card-preview-empty {
-  color: #9b9a97;
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.mindmap-card-preview-empty,
-.mindmap-card-preview-label {
-  color: #9b9a97;
-}
 
 .canvas-entry-preview-image {
   width: 100%;
@@ -2057,296 +2066,19 @@ a {
   font-size: 14px;
 }
 
-.mindmap-page {
-  gap: 18px;
-}
-
-.mindmap-page-header {
-  align-items: flex-start;
-}
-
-.mindmap-page-header-main {
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.mindmap-page-back {
-  min-height: 34px;
-  padding: 0 12px;
-  border: 1px solid #e8e5e0;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow:
-    0 10px 24px rgba(15, 23, 42, 0.04),
-    0 1px 2px rgba(15, 23, 42, 0.03);
-}
-
-.mindmap-page-back:hover {
-  background: #f7f6f3;
-  color: #37352f;
-}
-
-.mindmap-page-heading {
-  gap: 4px;
-}
-
-.mindmap-page-title-input,
-.mindmap-page-title-text {
-  font-size: 26px;
-  font-weight: 700;
-  line-height: 1.18;
-}
-
-.mindmap-page-title-input {
-  width: min(640px, 58vw);
-}
-
-.mindmap-page-meta {
-  color: #9b9a97;
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.mindmap-page-surface {
-  padding-bottom: 32px;
-}
-
-.mindmap-page-empty {
-  border-style: solid;
-  border-color: #ece9e4;
-  border-radius: 16px;
-  background:
-    radial-gradient(circle at top right, rgba(166, 193, 224, 0.09), transparent 26%),
-    linear-gradient(180deg, #fcfcfb 0%, #f8f8f6 100%);
-}
-
-.mindmap-workspace {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 14px;
-  min-height: 0;
-}
-
-.mindmap-layout-toolbar {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  justify-self: start;
-  max-width: 100%;
-  padding: 4px;
-  border: 1px solid #e6e3de;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow:
-    0 10px 26px rgba(15, 23, 42, 0.05),
-    0 1px 2px rgba(15, 23, 42, 0.03);
-  backdrop-filter: blur(14px);
-}
-
-.mindmap-layout-toolbar > button {
-  min-height: 30px;
-  padding: 0 12px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: #787774;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.mindmap-layout-toolbar > button:hover {
-  background: #f4f3f1;
-  color: #37352f;
-}
-
-.mindmap-layout-toolbar > .mindmap-layout-button-active {
-  background: #ffffff;
-  color: #37352f;
-  box-shadow:
-    inset 0 0 0 1px rgba(217, 214, 208, 0.9),
-    0 1px 2px rgba(15, 23, 42, 0.06);
-}
-
-.mindmap-canvas {
-  position: relative;
-  min-height: calc(100vh - 188px);
-  overflow: auto;
-  border: 1px solid #ece9e4;
-  border-radius: 16px;
-  background:
-    radial-gradient(circle at top right, rgba(166, 193, 224, 0.12), transparent 28%),
-    linear-gradient(180deg, #fcfcfb 0%, #f8f8f6 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    0 16px 36px rgba(15, 23, 42, 0.04);
-}
-
-.mindmap-canvas-svg,
-.mindmap-node-layer {
-  width: 960px;
-  height: 540px;
-}
-
-.mindmap-canvas-svg {
-  display: block;
-}
-
-.mindmap-node-layer {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.mindmap-edge,
-path.mindmap-edge {
-  fill: none;
-  stroke: #c4ceda;
-  stroke-width: 2.5;
-  stroke-linecap: round;
-  transition:
-    stroke 140ms ease,
-    stroke-width 140ms ease,
-    opacity 140ms ease;
-}
-
-.mindmap-edge-active,
-path.mindmap-edge-active {
-  stroke: #93afd2;
-  stroke-width: 3;
-}
-
-.mindmap-node {
-  position: absolute;
-  min-width: 118px;
-  max-width: 220px;
-  padding: 9px 14px 10px;
-  border: 1px solid rgba(225, 222, 216, 0.96);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow:
-    0 12px 28px rgba(15, 23, 42, 0.06),
-    0 1px 2px rgba(15, 23, 42, 0.04);
-  transform: translate(-50%, -50%);
-  pointer-events: auto;
-  transition:
-    border-color 120ms ease,
-    box-shadow 120ms ease,
-    background-color 120ms ease,
-    transform 120ms ease;
-}
-
-.mindmap-node:hover {
-  border-color: rgba(212, 208, 201, 0.98);
-  box-shadow:
-    0 14px 30px rgba(15, 23, 42, 0.07),
-    0 1px 2px rgba(15, 23, 42, 0.04);
-}
-
-.mindmap-node-root {
-  min-width: 132px;
-  padding-inline: 16px;
-  background: rgba(255, 255, 255, 0.98);
-  box-shadow:
-    0 16px 32px rgba(15, 23, 42, 0.08),
-    0 1px 2px rgba(15, 23, 42, 0.05);
-}
-
-.mindmap-node-selected {
-  border-color: rgba(153, 179, 211, 0.92);
-  background: #ffffff;
-  box-shadow:
-    0 0 0 4px rgba(147, 175, 210, 0.14),
-    0 18px 36px rgba(15, 23, 42, 0.1),
-    0 1px 2px rgba(15, 23, 42, 0.05);
-}
-
-.mindmap-node-input {
-  border: 0;
-  outline: 0;
-  display: block;
-  width: 100%;
-  min-width: 0;
-  padding: 0;
-  background: transparent;
-  color: #37352f;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.45;
-  letter-spacing: 0;
-  text-align: center;
-}
-
-.mindmap-node-root .mindmap-node-input {
-  font-size: 15px;
-  font-weight: 700;
-}
-
-.mindmap-node-toolbar {
-  position: absolute;
-  top: calc(100% + 10px);
-  left: 50%;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px;
-  border: 1px solid #e7e4df;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.96);
-  transform: translateX(-50%);
-  box-shadow:
-    0 18px 34px rgba(15, 23, 42, 0.1),
-    0 2px 8px rgba(15, 23, 42, 0.05);
-  backdrop-filter: blur(16px);
-  z-index: 2;
-}
-
-.mindmap-node-tool {
-  border: 0;
-  background: transparent;
-  color: #6b6a67;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  border-radius: 8px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition:
-    background-color 120ms ease,
-    color 120ms ease;
-}
-
-.mindmap-node-tool:hover {
-  background: #f3f2ef;
-  color: #37352f;
-}
-
-.mindmap-node-tool svg {
-  width: 16px;
-  height: 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.7;
-}
-
-.mindmap-node-tool-danger:hover {
-  background: #fbefed;
-  color: #c24130;
-}
 
 .whiteboard-card-preview {
+  height: auto;
+  aspect-ratio: 8 / 5;
   background:
     linear-gradient(#f7f6f3 1px, transparent 1px),
     linear-gradient(90deg, #f7f6f3 1px, transparent 1px),
     #ffffff;
   background-size: 16px 16px;
+}
+
+.whiteboard-card-preview .canvas-entry-preview-image {
+  object-fit: contain;
 }
 
 .whiteboard-card-preview-empty {
@@ -2422,10 +2154,28 @@ path.mindmap-edge-active {
   pointer-events: auto;
 }
 
-.whiteboard-page-status,
-.whiteboard-page-actions-wrap {
+.whiteboard-page-status {
   position: fixed;
   z-index: 7;
+  pointer-events: none;
+}
+
+.whiteboard-page-actions-wrap {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 7;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border: 1px solid rgba(219, 226, 231, 0.92);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow:
+    0 10px 24px rgba(19, 33, 45, 0.08),
+    0 1px 2px rgba(19, 33, 45, 0.04);
+  backdrop-filter: blur(16px);
   pointer-events: none;
 }
 
@@ -2461,11 +2211,6 @@ path.mindmap-edge-active {
     0 10px 24px rgba(19, 33, 45, 0.08),
     0 1px 2px rgba(19, 33, 45, 0.04);
   backdrop-filter: blur(16px);
-}
-
-.whiteboard-page-actions-wrap {
-  right: 12px;
-  bottom: 20px;
 }
 
 .whiteboard-page-actions-wrap > * {
@@ -2549,6 +2294,42 @@ path.mindmap-edge-active {
   min-height: 32px;
   padding: 0 10px;
   border-radius: 8px;
+}
+
+.whiteboard-page .page-menu-button {
+  width: 36px;
+  height: 36px;
+  border-radius: 7px;
+  color: #5f5e59;
+  font-size: 20px;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+
+.whiteboard-page .page-menu-button:hover,
+.whiteboard-page .page-menu-button[aria-expanded='true'] {
+  background: #eef3f5;
+  color: #0f766e;
+}
+
+.whiteboard-route-menu {
+  position: relative;
+  z-index: 1;
+}
+
+.whiteboard-route-menu-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: transparent;
+}
+
+.whiteboard-route-menu-popover {
+  top: calc(100% + 10px);
+  right: 0;
+  min-width: 188px;
+  z-index: 8;
 }
 
 .whiteboard-page-surface {
@@ -2939,7 +2720,8 @@ path.mindmap-edge-active {
   cursor: pointer;
 }
 
-.slash-option:hover {
+.slash-option:hover,
+.slash-option-active {
   background: #f3f2ef;
 }
 

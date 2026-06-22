@@ -1,3 +1,5 @@
+import { AutoGrowTextarea } from '../AutoGrowTextarea'
+
 interface CodeBlockProps {
   language: string
   text: string
@@ -12,8 +14,9 @@ export function CodeBlock({ language, text, onChange }: CodeBlockProps) {
         value={language}
         onChange={(event) => onChange({ language: event.target.value, text })}
       />
-      <textarea
+      <AutoGrowTextarea
         className="block-input code-text"
+        minRows={4}
         value={text}
         onChange={(event) => onChange({ language, text: event.target.value })}
       />

@@ -1,7 +1,6 @@
 export type PageId = string
 export type BlockId = string
 export type BoardId = string
-export type MindmapId = string
 
 export type BlockType =
   | 'paragraph'
@@ -15,7 +14,6 @@ export type BlockType =
   | 'code'
   | 'table'
   | 'whiteboard'
-  | 'mindmap'
 
 export type TextColor = 'gray' | 'brown' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'pink' | 'red'
 export type BlockBackgroundColor =
@@ -125,11 +123,6 @@ export interface WhiteboardBlock extends BlockBase {
   boardId: BoardId
 }
 
-export interface MindmapBlock extends BlockBase {
-  type: 'mindmap'
-  mindmapId: MindmapId
-}
-
 export type PageFontFamily = 'default' | 'serif' | 'mono'
 
 export type BlockRecord =
@@ -144,18 +137,9 @@ export type BlockRecord =
   | CodeBlock
   | TableBlock
   | WhiteboardBlock
-  | MindmapBlock
 
 export interface BoardRecord {
   id: BoardId
-  title: string
-  snapshot: unknown
-  createdAt: string
-  updatedAt: string
-}
-
-export interface MindmapRecord {
-  id: MindmapId
   title: string
   snapshot: unknown
   createdAt: string
@@ -183,7 +167,6 @@ export interface WorkspaceSettings {
 
 export interface WorkspaceSnapshot {
   boards: BoardRecord[]
-  mindmaps: MindmapRecord[]
   pages: PageRecord[]
   settings: WorkspaceSettings
 }

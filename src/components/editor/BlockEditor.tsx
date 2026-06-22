@@ -1,16 +1,14 @@
-import type { KeyboardEvent, ReactNode } from 'react'
+﻿import type { KeyboardEvent, ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { getTextBlockStyle, isTextStyleableBlock } from '../../domain/blockTextStyle'
 import type {
   BlockRecord,
   BlockType,
   BoardRecord,
-  MindmapRecord,
   PageRecord,
   TextBlockStyle,
 } from '../../domain/types'
 import { uiCopy } from '../../ui/copy'
-import { buildMindmapPreviewSvgDataUrl } from '../mindmap/mindmapPreview'
 import { buildWhiteboardPreviewSvgDataUrl } from '../whiteboard/whiteboardPreview'
 import { EmptyBlockRow } from './EmptyBlockRow'
 import { BlockFrame } from './BlockFrame'
@@ -19,7 +17,6 @@ import { getTextBackgroundStyle, getTextInputStyle } from './blockTextStyle'
 import { ChildPageBlock } from './blocks/ChildPageBlock'
 import { CodeBlock } from './blocks/CodeBlock'
 import { ListBlock } from './blocks/ListBlock'
-import { MindmapBlock } from './blocks/MindmapBlock'
 import { ParagraphBlock } from './blocks/ParagraphBlock'
 import { TableBlock } from './blocks/TableBlock'
 import { TodoBlock } from './blocks/TodoBlock'
@@ -30,14 +27,17 @@ interface DropTarget {
   blockId: string
   position: ReorderPosition
 }
+interface FocusRequest {
+  blockId: string
+  mode: 'any' | 'rich_text' | 'textarea'
+}
 
 interface BlockEditorProps {
   page: PageRecord
   allPages: PageRecord[]
   boards?: BoardRecord[]
-  mindmaps?: MindmapRecord[]
   onUpdateBlock: (blockId: string, nextBlock: BlockRecord) => void
-  onInsert?: (type: BlockType) => void
+  onInsert?: (type: BlockType) => Promise<string | null> | string | null | void
   onInsertParagraph?: (text: string) => void
   onInsertBlockAfter?: (blockId: string, type: BlockType) => Promise<string | null> | string | null
   onDeleteBlock?: (blockId: string) => void
@@ -51,14 +51,13 @@ interface BlockEditorProps {
   ) => void
   onOpenChildPage?: (pageId: string) => void
   onOpenWhiteboard?: (boardId: string) => void
-  onOpenMindmap?: (mindmapId: string) => void
+  onRestoreWhiteboard?: (boardId: string) => void
 }
 
 export function BlockEditor({
   page,
   allPages,
   boards = [],
-  mindmaps = [],
   onUpdateBlock,
   onInsert,
   onInsertParagraph,
@@ -70,30 +69,28 @@ export function BlockEditor({
   onReorderBlock,
   onOpenChildPage,
   onOpenWhiteboard,
-  onOpenMindmap,
+  onRestoreWhiteboard,
 }: BlockEditorProps) {
   const childPageTitleMap = Object.fromEntries(allPages.map((item) => [item.id, item.title]))
   const boardMap = new Map(boards.map((board) => [board.id, board]))
-  const mindmapMap = new Map(mindmaps.map((mindmap) => [mindmap.id, mindmap]))
   const draggingBlockId = useRef<string | null>(null)
-  const pendingFocusBlockId = useRef<string | null>(null)
+  const pendingFocusBlockId = useRef<FocusRequest | null>(null)
+  const scrollFrameId = useRef<number | null>(null)
   const [draggingVisualBlockId, setDraggingVisualBlockId] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
   const [focusRequestVersion, setFocusRequestVersion] = useState(0)
 
   useEffect(() => {
-    const blockId = pendingFocusBlockId.current
+    const focusRequest = pendingFocusBlockId.current
 
-    if (!blockId) {
+    if (!focusRequest) {
       return
     }
 
     const targetRow = Array.from(document.querySelectorAll<HTMLElement>('.editor-row')).find(
-      (row) => row.dataset.blockId === blockId,
+      (row) => row.dataset.blockId === focusRequest.blockId,
     )
-    const targetInput = targetRow?.querySelector<HTMLElement>(
-      '.block-frame-content [contenteditable="true"], .block-frame-content textarea, .block-frame-content input:not([type="checkbox"])',
-    )
+    const targetInput = targetRow ? getFocusTargetForMode(targetRow, focusRequest.mode) : null
 
     if (!targetInput) {
       return
@@ -113,6 +110,15 @@ export function BlockEditor({
 
     pendingFocusBlockId.current = null
   }, [page.blocks, focusRequestVersion])
+
+  useEffect(
+    () => () => {
+      if (scrollFrameId.current !== null) {
+        cancelEditorFrame(scrollFrameId.current)
+      }
+    },
+    [],
+  )
 
   function clearDragState() {
     draggingBlockId.current = null
@@ -223,7 +229,9 @@ export function BlockEditor({
               ? (nextStyle) => handleChangeTextStyle(textStyleableBlock, nextStyle)
               : undefined
           }
-          onTurnInto={(type) => onTurnInto?.(blockId, type)}
+          onTurnInto={(type) => {
+            void turnBlockInto(blockId, type)
+          }}
           onDuplicate={() => onDuplicateBlock?.(blockId)}
           onDelete={() => onDeleteBlock?.(blockId)}
         >
@@ -254,8 +262,8 @@ export function BlockEditor({
     return listIndex - 1
   }
 
-  function requestBlockFocus(blockId: string) {
-    pendingFocusBlockId.current = blockId
+  function requestBlockFocus(blockId: string, mode: FocusRequest['mode'] = 'any') {
+    pendingFocusBlockId.current = { blockId, mode }
     setFocusRequestVersion((version) => version + 1)
   }
 
@@ -264,6 +272,14 @@ export function BlockEditor({
 
     if (nextBlockId) {
       requestBlockFocus(nextBlockId)
+    }
+  }
+
+  async function insertBlock(type: BlockType) {
+    const nextBlockId = await onInsert?.(type)
+
+    if (nextBlockId) {
+      requestBlockFocus(nextBlockId, getFocusModeForBlockType(type))
     }
   }
 
@@ -277,7 +293,7 @@ export function BlockEditor({
 
   async function turnBlockInto(blockId: string, type: BlockType) {
     await onTurnInto?.(blockId, type)
-    requestBlockFocus(blockId)
+    requestBlockFocus(blockId, getFocusModeForBlockType(type))
   }
 
   function focusPreviousBlockAfterDelete(blockId: string) {
@@ -312,6 +328,87 @@ export function BlockEditor({
     return beforeSelection.toString().length === 0
   }
 
+  function isAtInputEnd(target: HTMLElement) {
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+      return (
+        target.selectionStart === target.value.length && target.selectionEnd === target.value.length
+      )
+    }
+
+    const selection = window.getSelection()
+
+    if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) {
+      return false
+    }
+
+    const range = selection.getRangeAt(0)
+    if (!target.contains(range.commonAncestorContainer)) {
+      return false
+    }
+
+    const afterSelection = range.cloneRange()
+    afterSelection.selectNodeContents(target)
+    afterSelection.setStart(range.endContainer, range.endOffset)
+
+    return afterSelection.toString().length === 0
+  }
+
+  function focusEmptyBlockRow() {
+    const input = document.querySelector<HTMLInputElement>('.empty-block-input')
+    input?.focus()
+
+    if (input) {
+      scheduleInputScroll(input)
+    }
+  }
+
+  function isFinalBlock(blockId: string) {
+    return page.blocks[page.blocks.length - 1]?.id === blockId
+  }
+
+  function keepInputInView(event: { target: EventTarget | null }) {
+    if (!(event.target instanceof HTMLElement)) {
+      return
+    }
+
+    const input = event.target.closest<HTMLElement>('.block-input, .empty-block-input')
+
+    if (!input) {
+      return
+    }
+
+    scheduleInputScroll(input)
+  }
+
+  function scheduleInputScroll(input: HTMLElement) {
+    if (scrollFrameId.current !== null) {
+      cancelEditorFrame(scrollFrameId.current)
+    }
+
+    scrollFrameId.current = requestEditorFrame(() => {
+      const bottomPadding = 300
+      const overflowBottom = input.getBoundingClientRect().bottom - window.innerHeight + bottomPadding
+
+      if (overflowBottom > 0) {
+        window.scrollBy({ top: overflowBottom, behavior: 'auto' })
+      }
+
+      scrollFrameId.current = null
+    })
+  }
+
+  useEffect(() => {
+    if (!(document.activeElement instanceof HTMLElement)) {
+      return
+    }
+
+    const input = document.activeElement.closest<HTMLElement>('.block-input, .empty-block-input')
+
+    if (input) {
+      scheduleInputScroll(input)
+    }
+  }, [page.blocks])
+
   function getEditableBlockText(block: Extract<
     BlockRecord,
     {
@@ -326,8 +423,33 @@ export function BlockEditor({
     }
   >) {
     return block.type === 'bulleted_list' || block.type === 'numbered_list'
-      ? block.items[0] ?? ''
+      ? normalizeListItemText(block.items[0] ?? '')
       : block.text
+  }
+
+  function getLiveEditableBlockText(
+    target: HTMLElement,
+    block: Extract<
+      BlockRecord,
+      {
+        type:
+          | 'paragraph'
+          | 'heading_1'
+          | 'heading_2'
+          | 'heading_3'
+          | 'todo'
+          | 'bulleted_list'
+          | 'numbered_list'
+      }
+    >,
+  ) {
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+      return block.type === 'bulleted_list' || block.type === 'numbered_list'
+        ? normalizeListItemText(target.value)
+        : target.value
+    }
+
+    return target.isContentEditable ? target.textContent ?? '' : getEditableBlockText(block)
   }
 
   function handleEditableBlockKeyDown(
@@ -347,6 +469,21 @@ export function BlockEditor({
     >,
   ) {
     if (
+      event.key === 'ArrowDown' &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.nativeEvent.isComposing &&
+      isFinalBlock(block.id) &&
+      isAtInputEnd(event.currentTarget)
+    ) {
+      event.preventDefault()
+      focusEmptyBlockRow()
+      return
+    }
+
+    if (
       event.key === 'Enter' &&
       !event.shiftKey &&
       !event.altKey &&
@@ -356,7 +493,7 @@ export function BlockEditor({
     ) {
       event.preventDefault()
       if (block.type === 'bulleted_list' || block.type === 'numbered_list') {
-        if (getEditableBlockText(block).trim().length === 0) {
+        if (getLiveEditableBlockText(event.currentTarget, block).trim().length === 0) {
           void turnBlockInto(block.id, 'paragraph')
         } else {
           void insertBlockAfter(block.id, block.type)
@@ -380,7 +517,7 @@ export function BlockEditor({
 
     event.preventDefault()
 
-    if (getEditableBlockText(block).trim().length === 0) {
+    if (getLiveEditableBlockText(target, block).trim().length === 0) {
       focusPreviousBlockAfterDelete(block.id)
       onDeleteBlock?.(block.id)
       return
@@ -390,7 +527,7 @@ export function BlockEditor({
   }
 
   return (
-    <section className="editor-surface">
+    <section className="editor-surface" onInput={keepInputInView}>
       {page.blocks.map((block) => {
         switch (block.type) {
           case 'paragraph':
@@ -433,10 +570,15 @@ export function BlockEditor({
               block,
               <ListBlock
                 type={block.type}
-                value={block.items[0] ?? ''}
+                value={normalizeListItemText(block.items[0] ?? '')}
                 index={getListBlockIndex(block.id, block.type)}
                 style={getTextInputStyle(textStyle)}
-                onChange={(value) => onUpdateBlock(block.id, { ...block, items: [value] })}
+                onChange={(value) =>
+                  onUpdateBlock(block.id, {
+                    ...block,
+                    items: [normalizeListItemText(value)],
+                  })
+                }
                 onKeyDown={(event) => handleEditableBlockKeyDown(event, block)}
               />,
             )
@@ -484,34 +626,22 @@ export function BlockEditor({
               block,
               <WhiteboardBlock
                 title={board?.title ?? '白板不存在'}
-                updatedLabel={board ? '刚刚更新' : '引用已丢失'}
+                updatedLabel={board ? formatCanvasUpdatedLabel(board.updatedAt) : '\u5f15\u7528\u5df2\u4e22\u5931'}
                 previewUrl={board ? buildWhiteboardPreviewSvgDataUrl(board.snapshot) : null}
                 isMissing={!board}
                 onOpen={() => onOpenWhiteboard?.(block.boardId)}
+                onRecover={!board ? () => onRestoreWhiteboard?.(block.boardId) : undefined}
               />,
             )
           }
-          case 'mindmap': {
-            const mindmap = mindmapMap.get(block.mindmapId)
 
-            return renderBlockRow(
-              block,
-              <MindmapBlock
-                title={mindmap?.title ?? '思维导图不存在'}
-                updatedLabel={mindmap ? '刚刚更新' : '引用已丢失'}
-                previewUrl={mindmap ? buildMindmapPreviewSvgDataUrl(mindmap) : null}
-                isMissing={!mindmap}
-                onOpen={() => onOpenMindmap?.(block.mindmapId)}
-              />,
-            )
-          }
           default:
             return null
         }
       })}
       <EmptyBlockRow
         onInsert={(type) => {
-          onInsert?.(type)
+          void insertBlock(type)
         }}
         onInsertParagraph={(text) => {
           onInsertParagraph?.(text)
@@ -519,4 +649,82 @@ export function BlockEditor({
       />
     </section>
   )
+}
+
+function getFocusTargetForMode(row: HTMLElement, mode: FocusRequest['mode']) {
+  switch (mode) {
+    case 'rich_text':
+      return row.querySelector<HTMLElement>('.block-frame-content [contenteditable="true"]')
+    case 'textarea':
+      return row.querySelector<HTMLElement>('.block-frame-content textarea')
+    case 'any':
+      return row.querySelector<HTMLElement>(
+        '.block-frame-content [contenteditable="true"], .block-frame-content textarea, .block-frame-content input:not([type="checkbox"])',
+      )
+  }
+}
+
+function getFocusModeForBlockType(type: BlockType): FocusRequest['mode'] {
+  switch (type) {
+    case 'paragraph':
+    case 'heading_1':
+    case 'heading_2':
+    case 'heading_3':
+    case 'todo':
+      return 'rich_text'
+    case 'bulleted_list':
+    case 'numbered_list':
+    case 'code':
+      return 'textarea'
+    default:
+      return 'any'
+  }
+}
+
+function normalizeListItemText(value: string) {
+  return value.replace(/\r\n?/g, '\n').replace(/\n+/g, ' ')
+}
+
+function requestEditorFrame(callback: () => void) {
+  if (typeof window.requestAnimationFrame === 'function') {
+    return window.requestAnimationFrame(callback)
+  }
+
+  return window.setTimeout(callback, 0)
+}
+
+function cancelEditorFrame(frameId: number) {
+  if (typeof window.cancelAnimationFrame === 'function') {
+    window.cancelAnimationFrame(frameId)
+    return
+  }
+
+  window.clearTimeout(frameId)
+}
+
+function formatCanvasUpdatedLabel(updatedAt: string) {
+  const timestamp = Date.parse(updatedAt)
+
+  if (Number.isNaN(timestamp)) {
+    return '\u5df2\u66f4\u65b0'
+  }
+
+  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60000))
+
+  if (elapsedMinutes < 1) {
+    return '\u521a\u521a\u66f4\u65b0'
+  }
+
+  if (elapsedMinutes < 60) {
+    return `${elapsedMinutes} \u5206\u949f\u524d\u66f4\u65b0`
+  }
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60)
+
+  if (elapsedHours < 24) {
+    return `${elapsedHours} \u5c0f\u65f6\u524d\u66f4\u65b0`
+  }
+
+  const date = new Date(timestamp)
+  return `${date.getMonth() + 1}\u6708${date.getDate()}\u65e5\u66f4\u65b0`
 }

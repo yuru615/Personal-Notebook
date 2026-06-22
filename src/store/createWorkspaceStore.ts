@@ -1,23 +1,13 @@
-import { createStore } from 'zustand/vanilla'
-import {
-  addMindmapChildNode as appendMindmapChildNode,
-  addMindmapSiblingNode as appendMindmapSiblingNode,
-  deleteMindmapNode as removeMindmapNode,
-  normalizeMindmapRecord,
-  renameMindmap as updateMindmapTitle,
-  renameMindmapNode as updateMindmapNodeText,
-  setMindmapLayoutMode as updateMindmapLayoutMode,
-  toggleMindmapNodeCollapsed as updateMindmapNodeCollapsed,
-} from '../components/mindmap/mindmapModel'
+﻿import { createStore } from 'zustand/vanilla'
+import { normalizeWhiteboardSnapshot } from '../components/whiteboard/whiteboardModel'
 import { getTextBlockStyle, isTextStyleableBlock } from '../domain/blockTextStyle'
+import type { ImportedMarkdownPackage } from '../domain/markdown'
 import { normalizeRichText, richTextFromPlainText } from '../domain/richText'
 import { createSeedWorkspace } from '../domain/seed'
 import type {
   BlockRecord,
   BlockType,
   BoardRecord,
-  MindmapLayoutMode,
-  MindmapRecord,
   PageFontFamily,
   PageId,
   PageRecord,
@@ -31,8 +21,6 @@ import { ensureSnapshot, type WorkspaceRepository } from '../lib/workspaceReposi
 import {
   createBlock,
   createBoardRecord,
-  createMindmapBlock,
-  createMindmapRecord,
   createWhiteboardBlock,
 } from '../utils/blockFactory'
 import { createId } from '../utils/id'
@@ -41,10 +29,10 @@ import { reorderItems, type ReorderPosition } from '../utils/reorder'
 
 const UNTITLED_PAGE_TITLE = '未命名'
 const BACKUP_VERSION = 1
+const COPY_SUFFIX = ' \u526f\u672c'
 
 export interface WorkspaceState {
   boards: BoardRecord[]
-  mindmaps: MindmapRecord[]
   pages: PageRecord[]
   settings: WorkspaceSettings
   currentPageId: PageId | null
@@ -60,17 +48,14 @@ export interface WorkspaceState {
   setPageOutlineVisible: (pageId: PageId, showOutline: boolean) => Promise<void>
   renameBoard: (boardId: string, title: string) => Promise<void>
   updateBoardSnapshot: (boardId: string, snapshot: unknown) => Promise<void>
-  renameMindmap: (mindmapId: string, title: string) => Promise<void>
-  setMindmapLayoutMode: (mindmapId: string, layoutMode: MindmapLayoutMode) => Promise<void>
-  addMindmapChildNode: (mindmapId: string, parentNodeId: string) => Promise<void>
-  renameMindmapNode: (mindmapId: string, nodeId: string, text: string) => Promise<void>
-  toggleMindmapNodeCollapsed: (mindmapId: string, nodeId: string) => Promise<void>
-  addMindmapSiblingNode: (mindmapId: string, nodeId: string) => Promise<void>
-  deleteMindmapNode: (mindmapId: string, nodeId: string) => Promise<void>
+  importBoard: (boardId: string, payload: { title: string | null; snapshot: unknown }) => Promise<void>
+  duplicateBoardToPage: (pageId: PageId, boardId: string) => Promise<BoardRecord | null>
+  restoreMissingBoardReference: (pageId: PageId, boardId: string) => Promise<BoardRecord | null>
+  cleanupOrphanBoards: () => Promise<void>
   renamePage: (pageId: PageId, title: string) => Promise<void>
   deletePage: (pageId: PageId) => Promise<void>
   updateBlock: (pageId: PageId, blockId: string, nextBlock: BlockRecord) => Promise<void>
-  insertBlock: (pageId: PageId, type: BlockType) => Promise<void>
+  insertBlock: (pageId: PageId, type: BlockType) => Promise<BlockRecord | null>
   insertParagraphBlock: (pageId: PageId, text: string) => Promise<void>
   insertBlockAfter: (
     pageId: PageId,
@@ -93,14 +78,15 @@ export interface WorkspaceState {
   duplicateBlock: (pageId: PageId, blockId: string) => Promise<void>
   turnBlockInto: (pageId: PageId, blockId: string, type: BlockType) => Promise<void>
   undo: () => Promise<void>
+  redo: () => Promise<void>
   exportJson: () => Promise<string>
+  importPagePackage: (payload: ImportedMarkdownPackage) => Promise<PageId | null>
   importJson: (payload: unknown) => Promise<void>
 }
 
 function createEmptyState(): WorkspaceState {
   return {
     boards: [],
-    mindmaps: [],
     pages: [],
     settings: {
       lastOpenedPageId: null,
@@ -138,25 +124,16 @@ function createEmptyState(): WorkspaceState {
     updateBoardSnapshot: async () => {
       throw new Error('not implemented')
     },
-    renameMindmap: async () => {
+    importBoard: async () => {
       throw new Error('not implemented')
     },
-    setMindmapLayoutMode: async () => {
+    duplicateBoardToPage: async () => {
       throw new Error('not implemented')
     },
-    addMindmapChildNode: async () => {
+    restoreMissingBoardReference: async () => {
       throw new Error('not implemented')
     },
-    renameMindmapNode: async () => {
-      throw new Error('not implemented')
-    },
-    toggleMindmapNodeCollapsed: async () => {
-      throw new Error('not implemented')
-    },
-    addMindmapSiblingNode: async () => {
-      throw new Error('not implemented')
-    },
-    deleteMindmapNode: async () => {
+    cleanupOrphanBoards: async () => {
       throw new Error('not implemented')
     },
     renamePage: async () => {
@@ -198,7 +175,13 @@ function createEmptyState(): WorkspaceState {
     undo: async () => {
       throw new Error('not implemented')
     },
+    redo: async () => {
+      throw new Error('not implemented')
+    },
     exportJson: async () => {
+      throw new Error('not implemented')
+    },
+    importPagePackage: async () => {
       throw new Error('not implemented')
     },
     importJson: async () => {
@@ -257,6 +240,7 @@ function normalizeListBlocks(blocks: BlockRecord[]) {
         items: [item],
       })
     })
+
   }
 
   return {
@@ -265,42 +249,99 @@ function normalizeListBlocks(blocks: BlockRecord[]) {
   }
 }
 
+function isLegacyBoardSnapshotLike(value: unknown) {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+
+  const snapshot = value as {
+    camera?: unknown
+    shapes?: unknown
+    strokes?: unknown
+    connections?: unknown
+    notes?: unknown
+    texts?: unknown
+    images?: unknown
+  }
+
+  return (
+    !!snapshot.camera &&
+    Array.isArray(snapshot.shapes) &&
+    Array.isArray(snapshot.strokes) &&
+    Array.isArray(snapshot.connections) &&
+    Array.isArray(snapshot.notes) &&
+    Array.isArray(snapshot.texts) &&
+    Array.isArray(snapshot.images)
+  )
+}
+
+function normalizeBoards(boards: BoardRecord[]) {
+  let didChange = false
+
+  return {
+    boards: boards.map((board) => {
+      if (isLegacyBoardSnapshotLike(board.snapshot)) {
+        return board
+      }
+
+      didChange = true
+      return {
+        ...board,
+        snapshot: normalizeWhiteboardSnapshot(board.snapshot),
+      }
+    }),
+    didChange,
+  }
+}
+
 function normalizeWorkspaceSnapshot(snapshot: WorkspaceSnapshot) {
   let didChange = !Array.isArray((snapshot as WorkspaceSnapshot & { boards?: BoardRecord[] }).boards)
-  const boards = Array.isArray((snapshot as WorkspaceSnapshot & { boards?: BoardRecord[] }).boards)
+  const rawBoards = Array.isArray((snapshot as WorkspaceSnapshot & { boards?: BoardRecord[] }).boards)
     ? snapshot.boards
     : []
-  const rawMindmaps = Array.isArray((snapshot as WorkspaceSnapshot & { mindmaps?: MindmapRecord[] }).mindmaps)
-    ? snapshot.mindmaps
-    : []
-  const mindmaps = rawMindmaps.map((mindmap) => {
-    const normalized = normalizeMindmapRecord(mindmap)
+  const normalizedBoards = normalizeBoards(rawBoards)
+  const boards = normalizedBoards.boards
 
-    if (normalized !== mindmap) {
-      didChange = true
-    }
+  if (normalizedBoards.didChange) {
+    didChange = true
+  }
 
-    return normalized
-  })
+
+  const liveBlockTypes = new Set<BlockRecord['type']>([
+    'paragraph',
+    'heading_1',
+    'heading_2',
+    'heading_3',
+    'todo',
+    'bulleted_list',
+    'numbered_list',
+    'child_page',
+    'code',
+    'table',
+    'whiteboard',
+  ])
 
   const pages = snapshot.pages.map((page) => {
-    const normalized = normalizeListBlocks(page.blocks)
+    const supportedBlocks = page.blocks.filter((block) =>
+      liveBlockTypes.has((block as BlockRecord | { type: string }).type as BlockRecord['type']),
+    )
+    const normalized = normalizeListBlocks(supportedBlocks)
 
-    if (!normalized.didChange) {
-      return page
+    if (supportedBlocks.length !== page.blocks.length || normalized.didChange) {
+      didChange = true
+      return {
+        ...page,
+        blocks: normalized.blocks,
+      }
     }
 
-    didChange = true
-    return {
-      ...page,
-      blocks: normalized.blocks,
-    }
+    return page
   })
 
   return {
     snapshot: didChange
-      ? { boards, mindmaps, pages, settings: snapshot.settings }
-      : { ...snapshot, boards, mindmaps },
+      ? { boards, pages, settings: snapshot.settings }
+      : { ...snapshot, boards },
     didChange,
   }
 }
@@ -320,7 +361,6 @@ function createBackupPayload(snapshot: WorkspaceSnapshot): WorkspaceBackup {
     version: BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
     boards: snapshot.boards,
-    mindmaps: snapshot.mindmaps,
     pages: snapshot.pages,
     settings: snapshot.settings,
   }
@@ -333,7 +373,6 @@ function normalizeImportedSnapshot(payload: unknown): WorkspaceSnapshot {
 
   const candidate = payload as {
     boards?: unknown
-    mindmaps?: unknown
     pages?: unknown
     settings?: {
       lastOpenedPageId?: unknown
@@ -355,9 +394,6 @@ function normalizeImportedSnapshot(payload: unknown): WorkspaceSnapshot {
 
   return {
     boards: Array.isArray(candidate.boards) ? structuredClone(candidate.boards as BoardRecord[]) : [],
-    mindmaps: Array.isArray(candidate.mindmaps)
-      ? structuredClone(candidate.mindmaps as MindmapRecord[])
-      : [],
     pages: structuredClone(candidate.pages as PageRecord[]),
     settings: createSettings(lastOpenedPageId ?? null),
   }
@@ -379,7 +415,6 @@ function getPlainTextFromBlock(block: BlockRecord): string {
       return block.rows.flat().join(' ').trim()
     case 'child_page':
     case 'whiteboard':
-    case 'mindmap':
       return ''
   }
 }
@@ -405,7 +440,6 @@ function preserveBlockContent(nextBlock: BlockRecord, currentBlock: BlockRecord)
     case 'table':
     case 'child_page':
     case 'whiteboard':
-    case 'mindmap':
       return nextBlock
   }
 }
@@ -478,22 +512,41 @@ function mergeEditableBlockRichText(
   ])
 }
 
+function collectReferencedBoardIds(pages: PageRecord[]) {
+  const referencedBoardIds = new Set<string>()
+
+  for (const page of pages) {
+    for (const block of page.blocks) {
+      if (block.type === 'whiteboard') {
+        referencedBoardIds.add(block.boardId)
+      }
+    }
+  }
+
+  return referencedBoardIds
+}
+
 export function createWorkspaceStore(repository: WorkspaceRepository) {
   const undoStack: WorkspaceSnapshot[] = []
+  const redoStack: WorkspaceSnapshot[] = []
+  let nonPageAssetsPersistQueue: Promise<void> = Promise.resolve()
+  let nonPageAssetsPersistVersion = 0
 
   function createSnapshotFromState(
-    state: Pick<WorkspaceState, 'boards' | 'mindmaps' | 'pages' | 'settings'>,
+    state: Pick<WorkspaceState, 'boards' | 'pages' | 'settings'>,
   ): WorkspaceSnapshot {
     return structuredClone({
       boards: state.boards,
-      mindmaps: state.mindmaps,
       pages: state.pages,
       settings: state.settings,
     })
   }
 
-  function pushUndoSnapshot(state: Pick<WorkspaceState, 'boards' | 'mindmaps' | 'pages' | 'settings'>) {
+  function pushUndoSnapshot(
+    state: Pick<WorkspaceState, 'boards' | 'pages' | 'settings'>,
+  ) {
     undoStack.push(createSnapshotFromState(state))
+    redoStack.length = 0
 
     if (undoStack.length > 100) {
       undoStack.shift()
@@ -502,39 +555,40 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
   return createStore<WorkspaceState>()((set, get) => {
     async function persistNonPageAssets(
-      state: Pick<WorkspaceState, 'boards' | 'mindmaps' | 'pages' | 'settings'>,
-      nextAssets: Partial<Pick<WorkspaceState, 'boards' | 'mindmaps'>>,
+      state: Pick<WorkspaceState, 'boards' | 'pages' | 'settings'>,
+      nextAssets: Partial<Pick<WorkspaceState, 'boards'>>,
     ) {
       const nextBoards = nextAssets.boards ?? state.boards
-      const nextMindmaps = nextAssets.mindmaps ?? state.mindmaps
-
+      const persistVersion = ++nonPageAssetsPersistVersion
       set({
         boards: nextBoards,
-        mindmaps: nextMindmaps,
-        pages: state.pages,
         saveStatus: 'saving',
       })
 
+      const persistTask = nonPageAssetsPersistQueue.then(() => {
+        const latestState = get()
+        return repository.save({
+          boards: nextBoards,
+          pages: latestState.pages,
+          settings: latestState.settings,
+        })
+      })
+      nonPageAssetsPersistQueue = persistTask.catch(() => undefined)
+
       try {
-        await repository.save({
-          boards: nextBoards,
-          mindmaps: nextMindmaps,
-          pages: state.pages,
-          settings: state.settings,
-        })
-        set({
-          boards: nextBoards,
-          mindmaps: nextMindmaps,
-          pages: state.pages,
-          saveStatus: 'saved',
-        })
+        await persistTask
+        if (persistVersion === nonPageAssetsPersistVersion) {
+          set({ saveStatus: 'saved' })
+        }
       } catch {
-        set({ saveStatus: 'error' })
-        throw new Error('Failed to persist non-page asset changes')
+        if (persistVersion === nonPageAssetsPersistVersion) {
+          set({ saveStatus: 'error' })
+        }
+        throw new Error('Failed to persist canvas changes')
       }
     }
 
-    return ({
+    return {
     ...createEmptyState(),
 
     bootstrap: async () => {
@@ -543,6 +597,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       const snapshot = normalized.snapshot
       const currentPageId = resolveCurrentPageId(snapshot)
       undoStack.length = 0
+      redoStack.length = 0
 
       if (normalized.didChange) {
         await repository.replace(snapshot)
@@ -550,7 +605,6 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
       set({
         boards: snapshot.boards,
-        mindmaps: snapshot.mindmaps,
         pages: snapshot.pages,
         settings: createSettings(currentPageId),
         currentPageId,
@@ -564,7 +618,6 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       const nextSettings = createSettings(page.id)
       const nextSnapshot = {
         boards: state.boards,
-        mindmaps: state.mindmaps,
         pages: [...state.pages, page],
         settings: nextSettings,
       }
@@ -576,7 +629,6 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         await repository.save(nextSnapshot)
         set({
           boards: nextSnapshot.boards,
-          mindmaps: nextSnapshot.mindmaps,
           pages: nextSnapshot.pages,
           settings: nextSettings,
           currentPageId: page.id,
@@ -604,7 +656,6 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       const nextSettings = createSettings(pageId)
       const nextSnapshot = {
         boards: state.boards,
-        mindmaps: state.mindmaps,
         pages: state.pages,
         settings: nextSettings,
       }
@@ -615,7 +666,6 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         await repository.save(nextSnapshot)
         set({
           boards: nextSnapshot.boards,
-          mindmaps: nextSnapshot.mindmaps,
           currentPageId: pageId,
           settings: nextSettings,
           saveStatus: 'saved',
@@ -642,10 +692,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, mindmaps: state.mindmaps, pages: nextPages, settings: state.settings })
+        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
         set({
           boards: state.boards,
-          mindmaps: state.mindmaps,
           pages: nextPages,
           saveStatus: 'saved',
         })
@@ -671,10 +720,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, mindmaps: state.mindmaps, pages: nextPages, settings: state.settings })
+        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
         set({
           boards: state.boards,
-          mindmaps: state.mindmaps,
           pages: nextPages,
           saveStatus: 'saved',
         })
@@ -700,10 +748,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, mindmaps: state.mindmaps, pages: nextPages, settings: state.settings })
+        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
         set({
           boards: state.boards,
-          mindmaps: state.mindmaps,
           pages: nextPages,
           saveStatus: 'saved',
         })
@@ -729,10 +776,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, mindmaps: state.mindmaps, pages: nextPages, settings: state.settings })
+        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
         set({
           boards: state.boards,
-          mindmaps: state.mindmaps,
           pages: nextPages,
           saveStatus: 'saved',
         })
@@ -758,10 +804,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, mindmaps: state.mindmaps, pages: nextPages, settings: state.settings })
+        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
         set({
           boards: state.boards,
-          mindmaps: state.mindmaps,
           pages: nextPages,
           saveStatus: 'saved',
         })
@@ -787,10 +832,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, mindmaps: state.mindmaps, pages: nextPages, settings: state.settings })
+        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
         set({
           boards: state.boards,
-          mindmaps: state.mindmaps,
           pages: nextPages,
           saveStatus: 'saved',
         })
@@ -823,11 +867,25 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
     updateBoardSnapshot: async (boardId: string, snapshot: unknown) => {
       const state = get()
+      const currentBoard = state.boards.find((board) => board.id === boardId)
+      if (!currentBoard) {
+        return
+      }
+
+      const normalizedSnapshot = normalizeWhiteboardSnapshot(snapshot)
+      const currentSerializedSnapshot = JSON.stringify(normalizeWhiteboardSnapshot(currentBoard.snapshot))
+      const nextSerializedSnapshot = JSON.stringify(normalizedSnapshot)
+      const isSameSnapshot = currentSerializedSnapshot === nextSerializedSnapshot
+
+      if (isSameSnapshot) {
+        return
+      }
+
       const nextBoards = state.boards.map((board) =>
         board.id === boardId
           ? {
               ...board,
-              snapshot,
+              snapshot: normalizedSnapshot,
               updatedAt: new Date().toISOString(),
             }
           : board,
@@ -841,188 +899,167 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       }
     },
 
-    renameMindmap: async (mindmapId: string, title: string) => {
+    importBoard: async (boardId: string, payload: { title: string | null; snapshot: unknown }) => {
       const state = get()
-      let didChange = false
-      const nextMindmaps = state.mindmaps.map((mindmap) => {
-        if (mindmap.id !== mindmapId) {
-          return mindmap
+      const normalizedSnapshot = normalizeWhiteboardSnapshot(payload.snapshot)
+      const nextBoards = state.boards.map((board) =>
+        board.id === boardId
+          ? {
+              ...board,
+              title: payload.title?.trim() || board.title,
+              snapshot: normalizedSnapshot,
+              updatedAt: new Date().toISOString(),
+            }
+          : board,
+      )
+
+      pushUndoSnapshot(state)
+      try {
+        await persistNonPageAssets(state, { boards: nextBoards })
+      } catch {
+        throw new Error('Failed to import board')
+      }
+    },
+
+    duplicateBoardToPage: async (pageId: PageId, boardId: string) => {
+      const state = get()
+      const sourceBoard = state.boards.find((board) => board.id === boardId)
+
+      if (!sourceBoard || !state.pages.some((page) => page.id === pageId)) {
+        return null
+      }
+
+      const now = new Date().toISOString()
+      const nextBoard = {
+        ...createBoardRecord(now),
+        title: `${sourceBoard.title}${COPY_SUFFIX}`,
+        snapshot: structuredClone(sourceBoard.snapshot),
+      }
+      const nextBoards = [...state.boards, nextBoard]
+      let didInsert = false
+
+      const nextPages = state.pages.map((page) => {
+        if (page.id !== pageId) {
+          return page
         }
 
-        const nextMindmap = updateMindmapTitle(mindmap, title)
-        didChange ||= nextMindmap !== mindmap
+        const sourceBlockIndex = page.blocks.findIndex(
+          (block) => block.type === 'whiteboard' && block.boardId === boardId,
+        )
+        const blocks = [...page.blocks]
+        blocks.splice(
+          sourceBlockIndex >= 0 ? sourceBlockIndex + 1 : blocks.length,
+          0,
+          createWhiteboardBlock(nextBoard.id),
+        )
+        didInsert = true
 
-        return nextMindmap
+        return {
+          ...page,
+          updatedAt: now,
+          blocks,
+        }
       })
 
-      if (!didChange) {
+      if (!didInsert) {
+        return null
+      }
+
+      pushUndoSnapshot(state)
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save({
+          boards: nextBoards,
+          pages: nextPages,
+          settings: state.settings,
+        })
+        set({
+          boards: nextBoards,
+          pages: nextPages,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to duplicate board')
+      }
+
+      return nextBoard
+    },
+
+    restoreMissingBoardReference: async (pageId: PageId, boardId: string) => {
+      const state = get()
+
+      if (state.boards.some((board) => board.id === boardId)) {
+        return state.boards.find((board) => board.id === boardId) ?? null
+      }
+
+      const page = state.pages.find((item) => item.id === pageId)
+      const hasMissingReference = page?.blocks.some(
+        (block) => block.type === 'whiteboard' && block.boardId === boardId,
+      )
+
+      if (!hasMissingReference) {
+        return null
+      }
+
+      const now = new Date().toISOString()
+      const nextBoard = createBoardRecord(now)
+      const nextBoards = [...state.boards, nextBoard]
+      const nextPages = state.pages.map((currentPage) => {
+        if (currentPage.id !== pageId) {
+          return currentPage
+        }
+
+        return {
+          ...currentPage,
+          updatedAt: now,
+          blocks: currentPage.blocks.map((block) =>
+            block.type === 'whiteboard' && block.boardId === boardId
+              ? { ...block, boardId: nextBoard.id }
+              : block,
+          ),
+        }
+      })
+
+      pushUndoSnapshot(state)
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save({
+          boards: nextBoards,
+          pages: nextPages,
+          settings: state.settings,
+        })
+        set({
+          boards: nextBoards,
+          pages: nextPages,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to restore missing board reference')
+      }
+
+      return nextBoard
+    },
+
+    cleanupOrphanBoards: async () => {
+      const state = get()
+      const referencedBoardIds = collectReferencedBoardIds(state.pages)
+      const nextBoards = state.boards.filter((board) => referencedBoardIds.has(board.id))
+
+      if (nextBoards.length === state.boards.length) {
         return
       }
 
       pushUndoSnapshot(state)
       try {
-        await persistNonPageAssets(state, { mindmaps: nextMindmaps })
+        await persistNonPageAssets(state, { boards: nextBoards })
       } catch {
-        throw new Error('Failed to rename mindmap')
+        throw new Error('Failed to cleanup orphan boards')
       }
     },
-
-    setMindmapLayoutMode: async (mindmapId: string, layoutMode: MindmapLayoutMode) => {
-      const state = get()
-      let didChange = false
-      const nextMindmaps = state.mindmaps.map((mindmap) => {
-        if (mindmap.id !== mindmapId) {
-          return mindmap
-        }
-
-        const nextMindmap = updateMindmapLayoutMode(mindmap, layoutMode)
-        didChange ||= nextMindmap !== mindmap
-
-        return nextMindmap
-      })
-
-      if (!didChange) {
-        return
-      }
-
-      pushUndoSnapshot(state)
-      try {
-        await persistNonPageAssets(state, { mindmaps: nextMindmaps })
-      } catch {
-        throw new Error('Failed to set mindmap layout mode')
-      }
-    },
-
-    addMindmapChildNode: async (mindmapId: string, parentNodeId: string) => {
-      const state = get()
-      let didChange = false
-      const nextMindmaps = state.mindmaps.map((mindmap) => {
-        if (mindmap.id !== mindmapId) {
-          return mindmap
-        }
-
-        const nextMindmap = appendMindmapChildNode(mindmap, parentNodeId)
-        didChange ||= nextMindmap !== mindmap
-
-        return nextMindmap
-      })
-
-      if (!didChange) {
-        return
-      }
-
-      pushUndoSnapshot(state)
-      try {
-        await persistNonPageAssets(state, { mindmaps: nextMindmaps })
-      } catch {
-        throw new Error('Failed to add child node to mindmap')
-      }
-    },
-
-    renameMindmapNode: async (mindmapId: string, nodeId: string, text: string) => {
-      const state = get()
-      let didChange = false
-      const nextMindmaps = state.mindmaps.map((mindmap) => {
-        if (mindmap.id !== mindmapId) {
-          return mindmap
-        }
-
-        const nextMindmap = updateMindmapNodeText(mindmap, nodeId, text)
-        didChange ||= nextMindmap !== mindmap
-
-        return nextMindmap
-      })
-
-      if (!didChange) {
-        return
-      }
-
-      pushUndoSnapshot(state)
-      try {
-        await persistNonPageAssets(state, { mindmaps: nextMindmaps })
-      } catch {
-        throw new Error('Failed to rename mindmap node')
-      }
-    },
-
-    toggleMindmapNodeCollapsed: async (mindmapId: string, nodeId: string) => {
-      const state = get()
-      let didChange = false
-      const nextMindmaps = state.mindmaps.map((mindmap) => {
-        if (mindmap.id !== mindmapId) {
-          return mindmap
-        }
-
-        const nextMindmap = updateMindmapNodeCollapsed(mindmap, nodeId)
-        didChange ||= nextMindmap !== mindmap
-
-        return nextMindmap
-      })
-
-      if (!didChange) {
-        return
-      }
-
-      pushUndoSnapshot(state)
-      try {
-        await persistNonPageAssets(state, { mindmaps: nextMindmaps })
-      } catch {
-        throw new Error('Failed to toggle mindmap node collapsed state')
-      }
-    },
-
-    addMindmapSiblingNode: async (mindmapId: string, nodeId: string) => {
-      const state = get()
-      let didChange = false
-      const nextMindmaps = state.mindmaps.map((mindmap) => {
-        if (mindmap.id !== mindmapId) {
-          return mindmap
-        }
-
-        const nextMindmap = appendMindmapSiblingNode(mindmap, nodeId)
-        didChange ||= nextMindmap !== mindmap
-
-        return nextMindmap
-      })
-
-      if (!didChange) {
-        return
-      }
-
-      pushUndoSnapshot(state)
-      try {
-        await persistNonPageAssets(state, { mindmaps: nextMindmaps })
-      } catch {
-        throw new Error('Failed to add sibling node to mindmap')
-      }
-    },
-
-    deleteMindmapNode: async (mindmapId: string, nodeId: string) => {
-      const state = get()
-      let didChange = false
-      const nextMindmaps = state.mindmaps.map((mindmap) => {
-        if (mindmap.id !== mindmapId) {
-          return mindmap
-        }
-
-        const nextMindmap = removeMindmapNode(mindmap, nodeId)
-        didChange ||= nextMindmap !== mindmap
-
-        return nextMindmap
-      })
-
-      if (!didChange) {
-        return
-      }
-
-      pushUndoSnapshot(state)
-      try {
-        await persistNonPageAssets(state, { mindmaps: nextMindmaps })
-      } catch {
-        throw new Error('Failed to delete mindmap node')
-      }
-    },
-
     renamePage: async (pageId: PageId, title: string) => {
       const state = get()
       const nextTitle = title.trim() || UNTITLED_PAGE_TITLE
@@ -1040,10 +1077,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, mindmaps: state.mindmaps, pages: nextPages, settings: state.settings })
+        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
         set({
           boards: state.boards,
-          mindmaps: state.mindmaps,
           pages: nextPages,
           saveStatus: 'saved',
         })
@@ -1065,10 +1101,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, mindmaps: state.mindmaps, pages: nextPages, settings: nextSettings })
+        await repository.save({ boards: state.boards, pages: nextPages, settings: nextSettings })
         set({
           boards: state.boards,
-          mindmaps: state.mindmaps,
           pages: nextPages,
           currentPageId: nextCurrentPageId,
           settings: nextSettings,
@@ -1096,10 +1131,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, mindmaps: state.mindmaps, pages: nextPages, settings: state.settings })
+        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
         set({
           boards: state.boards,
-          mindmaps: state.mindmaps,
           pages: nextPages,
           saveStatus: 'saved',
         })
@@ -1113,8 +1147,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       const state = get()
       const now = new Date().toISOString()
       let childPage: PageRecord | null = null
+      let insertedBlock: BlockRecord | null = null
+      let didInsert = false
       let nextBoards = state.boards
-      let nextMindmaps = state.mindmaps
 
       const nextPages = state.pages.map((page) => {
         if (page.id !== pageId) {
@@ -1138,48 +1173,46 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
             updatedAt: now,
           }
 
+          insertedBlock = {
+            id: createId('block'),
+            type: 'child_page' as const,
+            pageId: childId,
+          }
+          didInsert = true
+
           return {
             ...page,
             updatedAt: now,
-            blocks: [
-              ...page.blocks,
-              {
-                id: createId('block'),
-                type: 'child_page' as const,
-                pageId: childId,
-              },
-            ],
+            blocks: [...page.blocks, insertedBlock],
           }
         }
 
         if (type === 'whiteboard') {
           const board = createBoardRecord(now)
           nextBoards = [...state.boards, board]
+          insertedBlock = createWhiteboardBlock(board.id)
+          didInsert = true
 
           return {
             ...page,
             updatedAt: now,
-            blocks: [...page.blocks, createWhiteboardBlock(board.id)],
+            blocks: [...page.blocks, insertedBlock],
           }
         }
 
-        if (type === 'mindmap') {
-          const mindmap = createMindmapRecord(now)
-          nextMindmaps = [...state.mindmaps, mindmap]
-
-          return {
-            ...page,
-            updatedAt: now,
-            blocks: [...page.blocks, createMindmapBlock(mindmap.id)],
-          }
-        }
+        insertedBlock = createBlock(type)
+        didInsert = true
 
         return {
           ...page,
           updatedAt: now,
-          blocks: [...page.blocks, createBlock(type)],
+          blocks: [...page.blocks, insertedBlock],
         }
       })
+
+      if (!didInsert || !insertedBlock) {
+        return null
+      }
 
       const snapshotPages = childPage ? [...nextPages, childPage] : nextPages
 
@@ -1187,10 +1220,13 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: nextBoards, mindmaps: nextMindmaps, pages: snapshotPages, settings: state.settings })
+        await repository.save({
+          boards: nextBoards,
+          pages: snapshotPages,
+          settings: state.settings,
+        })
         set({
           boards: nextBoards,
-          mindmaps: nextMindmaps,
           pages: snapshotPages,
           saveStatus: 'saved',
         })
@@ -1198,6 +1234,8 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         set({ saveStatus: 'error' })
         throw new Error('Failed to insert block')
       }
+
+      return insertedBlock
     },
 
     insertParagraphBlock: async (pageId: PageId, text: string) => {
@@ -1229,10 +1267,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, mindmaps: state.mindmaps, pages: nextPages, settings: state.settings })
+        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
         set({
           boards: state.boards,
-          mindmaps: state.mindmaps,
           pages: nextPages,
           saveStatus: 'saved',
         })
@@ -1249,7 +1286,6 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       let insertedBlock: BlockRecord | null = null
       let didInsert = false
       let nextBoards = state.boards
-      let nextMindmaps = state.mindmaps
 
       const nextPages = state.pages.map((page) => {
         if (page.id !== pageId) {
@@ -1287,10 +1323,6 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           const board = createBoardRecord(now)
           nextBoards = [...state.boards, board]
           insertedBlock = createWhiteboardBlock(board.id)
-        } else if (type === 'mindmap') {
-          const mindmap = createMindmapRecord(now)
-          nextMindmaps = [...state.mindmaps, mindmap]
-          insertedBlock = createMindmapBlock(mindmap.id)
         } else {
           insertedBlock = createBlock(type)
         }
@@ -1316,10 +1348,13 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: nextBoards, mindmaps: nextMindmaps, pages: snapshotPages, settings: state.settings })
+        await repository.save({
+          boards: nextBoards,
+          pages: snapshotPages,
+          settings: state.settings,
+        })
         set({
           boards: nextBoards,
-          mindmaps: nextMindmaps,
           pages: snapshotPages,
           saveStatus: 'saved',
         })
@@ -1355,8 +1390,8 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, mindmaps: state.mindmaps, pages: nextPages, settings: state.settings })
-        set({ boards: state.boards, mindmaps: state.mindmaps, pages: nextPages, saveStatus: 'saved' })
+        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
+        set({ boards: state.boards, pages: nextPages, saveStatus: 'saved' })
       } catch {
         set({ saveStatus: 'error' })
         throw new Error('Failed to reorder pages')
@@ -1384,8 +1419,8 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, mindmaps: state.mindmaps, pages: nextPages, settings: state.settings })
-        set({ boards: state.boards, mindmaps: state.mindmaps, pages: nextPages, saveStatus: 'saved' })
+        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
+        set({ boards: state.boards, pages: nextPages, saveStatus: 'saved' })
       } catch {
         set({ saveStatus: 'error' })
         throw new Error('Failed to reorder blocks')
@@ -1408,8 +1443,8 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, mindmaps: state.mindmaps, pages: nextPages, settings: state.settings })
-        set({ boards: state.boards, mindmaps: state.mindmaps, pages: nextPages, saveStatus: 'saved' })
+        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
+        set({ boards: state.boards, pages: nextPages, saveStatus: 'saved' })
       } catch {
         set({ saveStatus: 'error' })
         throw new Error('Failed to delete block')
@@ -1472,8 +1507,8 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, mindmaps: state.mindmaps, pages: nextPages, settings: state.settings })
-        set({ boards: state.boards, mindmaps: state.mindmaps, pages: nextPages, saveStatus: 'saved' })
+        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
+        set({ boards: state.boards, pages: nextPages, saveStatus: 'saved' })
       } catch {
         set({ saveStatus: 'error' })
         throw new Error('Failed to merge block with previous block')
@@ -1484,6 +1519,8 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
     duplicateBlock: async (pageId: PageId, blockId: string) => {
       const state = get()
+      const now = new Date().toISOString()
+      let nextBoards = state.boards
       const nextPages = state.pages.map((page) => {
         if (page.id !== pageId) {
           return page
@@ -1495,13 +1532,35 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           return page
         }
 
-        const clone = { ...structuredClone(source), id: createId('block') }
         const blocks = [...page.blocks]
+
+        if (source.type === 'whiteboard') {
+          const sourceBoard = state.boards.find((board) => board.id === source.boardId)
+
+          if (sourceBoard) {
+            const nextBoard = {
+              ...createBoardRecord(now),
+              title: `${sourceBoard.title}${COPY_SUFFIX}`,
+              snapshot: structuredClone(sourceBoard.snapshot),
+            }
+
+            nextBoards = [...state.boards, nextBoard]
+            blocks.splice(index + 1, 0, createWhiteboardBlock(nextBoard.id))
+
+            return {
+              ...page,
+              updatedAt: now,
+              blocks,
+            }
+          }
+        }
+
+        const clone = { ...structuredClone(source), id: createId('block') }
         blocks.splice(index + 1, 0, clone)
 
         return {
           ...page,
-          updatedAt: new Date().toISOString(),
+          updatedAt: now,
           blocks,
         }
       })
@@ -1510,8 +1569,12 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, mindmaps: state.mindmaps, pages: nextPages, settings: state.settings })
-        set({ boards: state.boards, mindmaps: state.mindmaps, pages: nextPages, saveStatus: 'saved' })
+        await repository.save({
+          boards: nextBoards,
+          pages: nextPages,
+          settings: state.settings,
+        })
+        set({ boards: nextBoards, pages: nextPages, saveStatus: 'saved' })
       } catch {
         set({ saveStatus: 'error' })
         throw new Error('Failed to duplicate block')
@@ -1522,7 +1585,6 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       const state = get()
       const now = new Date().toISOString()
       let nextBoards = state.boards
-      let nextMindmaps = state.mindmaps
       const nextPages = state.pages.map((page) => {
         if (page.id !== pageId) {
           return page
@@ -1547,12 +1609,6 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
                     nextBoards = [...state.boards, board]
                     return createWhiteboardBlock(board.id)
                   })()
-                : type === 'mindmap'
-                  ? (() => {
-                      const mindmap = createMindmapRecord(now)
-                      nextMindmaps = [...state.mindmaps, mindmap]
-                      return createMindmapBlock(mindmap.id)
-                    })()
                 : createBlock(type)
             return { ...preserveBlockContent(fresh, block), id: block.id }
           }),
@@ -1563,8 +1619,12 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: nextBoards, mindmaps: nextMindmaps, pages: nextPages, settings: state.settings })
-        set({ boards: nextBoards, mindmaps: nextMindmaps, pages: nextPages, saveStatus: 'saved' })
+        await repository.save({
+          boards: nextBoards,
+          pages: nextPages,
+          settings: state.settings,
+        })
+        set({ boards: nextBoards, pages: nextPages, saveStatus: 'saved' })
       } catch {
         set({ saveStatus: 'error' })
         throw new Error('Failed to turn block into another type')
@@ -1578,7 +1638,12 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         return
       }
 
+      const currentSnapshot = createSnapshotFromState(get())
       const currentPageId = resolveCurrentPageId(snapshot)
+      redoStack.push(currentSnapshot)
+      if (redoStack.length > 100) {
+        redoStack.shift()
+      }
 
       set({ saveStatus: 'saving' })
 
@@ -1586,15 +1651,49 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         await repository.replace(snapshot)
         set({
           boards: snapshot.boards,
-          mindmaps: snapshot.mindmaps,
-          pages: snapshot.pages,
+                pages: snapshot.pages,
           settings: snapshot.settings,
           currentPageId,
           saveStatus: 'saved',
         })
       } catch {
+        redoStack.pop()
+        undoStack.push(snapshot)
         set({ saveStatus: 'error' })
         throw new Error('Failed to undo last action')
+      }
+    },
+
+    redo: async () => {
+      const snapshot = redoStack.pop()
+
+      if (!snapshot) {
+        return
+      }
+
+      const currentSnapshot = createSnapshotFromState(get())
+      const currentPageId = resolveCurrentPageId(snapshot)
+      undoStack.push(currentSnapshot)
+      if (undoStack.length > 100) {
+        undoStack.shift()
+      }
+
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.replace(snapshot)
+        set({
+          boards: snapshot.boards,
+                pages: snapshot.pages,
+          settings: snapshot.settings,
+          currentPageId,
+          saveStatus: 'saved',
+        })
+      } catch {
+        undoStack.pop()
+        redoStack.push(snapshot)
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to redo last action')
       }
     },
 
@@ -1604,7 +1703,6 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       return JSON.stringify(
         createBackupPayload({
           boards: state.boards,
-          mindmaps: state.mindmaps,
           pages: state.pages,
           settings: state.settings,
         }),
@@ -1613,12 +1711,43 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       )
     },
 
+    importPagePackage: async ({ rootPageId, pages, boards }) => {
+      if (!rootPageId || pages.length === 0 || !pages.some((page) => page.id === rootPageId)) {
+        return null
+      }
+
+      const state = get()
+      const nextSnapshot = normalizeWorkspaceSnapshot({
+        boards: [...state.boards, ...boards],
+        pages: [...state.pages, ...pages],
+        settings: createSettings(rootPageId),
+      }).snapshot
+
+      pushUndoSnapshot(state)
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save(nextSnapshot)
+        set({
+          boards: nextSnapshot.boards,
+          pages: nextSnapshot.pages,
+          settings: nextSnapshot.settings,
+          currentPageId: rootPageId,
+          saveStatus: 'saved',
+        })
+
+        return rootPageId
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to import markdown page package')
+      }
+    },
+
     importJson: async (payload: unknown) => {
       const snapshot = normalizeWorkspaceSnapshot(normalizeImportedSnapshot(payload)).snapshot
       const currentPageId = resolveCurrentPageId(snapshot)
       const nextSnapshot = {
         boards: snapshot.boards,
-        mindmaps: snapshot.mindmaps,
         pages: snapshot.pages,
         settings: createSettings(currentPageId),
       }
@@ -1630,7 +1759,6 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         await repository.replace(nextSnapshot)
         set({
           boards: nextSnapshot.boards,
-          mindmaps: nextSnapshot.mindmaps,
           pages: nextSnapshot.pages,
           settings: nextSnapshot.settings,
           currentPageId,
@@ -1641,5 +1769,6 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         throw new Error('Failed to import workspace')
       }
     },
-  })})
+    }
+  })
 }

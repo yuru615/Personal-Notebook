@@ -1,14 +1,16 @@
-import type { RefObject } from 'react'
+﻿import type { RefObject } from 'react'
 import type { BlockType } from '../../domain/types'
 import type { FloatingMenuPlacement } from './floatingMenu'
 
-const options: Array<{
+interface SlashMenuOption {
   type: BlockType
   label: string
   description: string
   icon: string
   group: 'text' | 'list' | 'page_data'
-}> = [
+}
+
+const options: SlashMenuOption[] = [
   {
     type: 'heading_1',
     label: '标题 1',
@@ -83,14 +85,7 @@ const options: Array<{
     type: 'whiteboard',
     label: '白板',
     description: '插入一个可点击进入的白板卡片',
-    icon: '◫',
-    group: 'page_data',
-  },
-  {
-    type: 'mindmap',
-    label: '思维导图',
-    description: '插入一个可点击进入的思维导图入口',
-    icon: '◎',
+    icon: '◌',
     group: 'page_data',
   },
 ]
@@ -106,30 +101,38 @@ const groups: Array<{
 
 interface SlashMenuProps {
   query: string
+  activeType?: BlockType | null
   menuRef?: RefObject<HTMLDivElement | null>
   placement?: FloatingMenuPlacement
   maxHeight?: number
   onPick: (type: BlockType) => void
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
+export function getSlashMenuOptions(query: string) {
+  const keyword = query.replace('/', '').trim()
+
+  return options.filter(
+    (option) =>
+      keyword.length === 0 ||
+      option.label.includes(keyword) ||
+      option.description.includes(keyword),
+  )
+}
+
 export function SlashMenu({
   query,
+  activeType = null,
   menuRef,
   placement = 'bottom',
   maxHeight,
   onPick,
 }: SlashMenuProps) {
-  const keyword = query.replace('/', '').trim()
+  const filteredOptions = getSlashMenuOptions(query)
   const filteredGroups = groups
     .map((group) => ({
       ...group,
-      options: options.filter(
-        (option) =>
-          option.group === group.id &&
-          (keyword.length === 0 ||
-            option.label.includes(keyword) ||
-            option.description.includes(keyword)),
-      ),
+      options: filteredOptions.filter((option) => option.group === group.id),
     }))
     .filter((group) => group.options.length > 0)
 
@@ -153,8 +156,9 @@ export function SlashMenu({
                   <button
                     key={option.type}
                     type="button"
-                    className="slash-option"
+                    className={`slash-option${activeType === option.type ? ' slash-option-active' : ''}`}
                     aria-label={option.label}
+                    aria-selected={activeType === option.type ? 'true' : undefined}
                     onClick={() => onPick(option.type)}
                   >
                     <span className="slash-option-icon" aria-hidden="true">

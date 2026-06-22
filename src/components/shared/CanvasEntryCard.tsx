@@ -47,7 +47,8 @@ export function CanvasEntryCard({
       className={joinClassNames('canvas-entry-card', className, isMissing && 'canvas-entry-card-missing')}
       data-missing={isMissing ? 'true' : undefined}
       aria-label={`${openLabel}${kindLabel} ${title}`}
-      onClick={onOpen}
+      onClick={isMissing ? undefined : onOpen}
+      disabled={isMissing}
     >
       <span className={joinClassNames('canvas-entry-card-preview', previewClassName)} aria-hidden="true">
         {previewContent ??
@@ -65,9 +66,11 @@ export function CanvasEntryCard({
         <span className={joinClassNames('canvas-entry-card-title', titleClassName)}>{title}</span>
         <span className={joinClassNames('canvas-entry-card-meta', metaClassName)}>{meta}</span>
       </span>
-      <span className={joinClassNames('canvas-entry-card-arrow', arrowClassName)} aria-hidden="true">
-        {openLabel}
-      </span>
+      {isMissing ? null : (
+        <span className={joinClassNames('canvas-entry-card-arrow', arrowClassName)} aria-hidden="true">
+          {openLabel}
+        </span>
+      )}
     </button>
   )
 }

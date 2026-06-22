@@ -8,6 +8,14 @@ export const uiCopy = {
     expandPage: '展开页面',
     collapsePage: '收起页面',
   },
+  search: {
+    title: '全局搜索',
+    placeholder: '搜索页面或内容',
+    emptyQuery: '输入关键词搜索页面和内容',
+    noResults: '没有找到匹配内容',
+    openPage: '打开页面',
+    close: '关闭搜索',
+  },
   app: {
     loading: '正在加载...',
     pageNotFound: '页面不存在',
@@ -15,11 +23,24 @@ export const uiCopy = {
   },
   page: {
     untitled: '未命名',
+    addCover: '添加封面',
+    changeCover: '更换封面',
+    removeCover: '移除封面',
     addIcon: '添加图标',
-    addComment: '添加评论',
+    removeIcon: '移除图标',
+    menu: '页面菜单',
+    viewSection: '视图',
+    smallText: '小字号正文',
+    fontFamily: '页面字体',
+    fontDefault: '默认',
+    fontSerif: '衬线',
+    fontMono: '等宽',
+    outlineVisible: '显示页面目录',
+    adaptiveWidth: '自适应正文宽度',
     typeSlash: '输入 / 打开命令菜单',
   },
   editor: {
+    addBlock: '添加块',
     childPage: '子页面',
   },
   saveStatus: {
@@ -29,6 +50,7 @@ export const uiCopy = {
     error: '保存失败',
   },
   export: {
+    section: '导入与导出',
     json: '导出 JSON 备份',
     markdown: '导出 Markdown 页面包',
     import: '导入 JSON 备份',

@@ -1,23 +1,35 @@
+import type { CSSProperties, KeyboardEventHandler } from 'react'
+import type { RichTextSegment } from '../../../domain/types'
+import { RichTextEditable, type RichTextEditableChange } from '../RichTextEditable'
+
 interface TodoBlockProps {
   text: string
+  richText?: RichTextSegment[]
   checked: boolean
-  onChange: (next: { text: string; checked: boolean }) => void
+  style?: CSSProperties
+  onChange: (next: RichTextEditableChange & { checked: boolean }) => void
+  onKeyDown?: KeyboardEventHandler<HTMLDivElement>
 }
 
-export function TodoBlock({ text, checked, onChange }: TodoBlockProps) {
+export function TodoBlock({ text, richText, checked, style, onChange, onKeyDown }: TodoBlockProps) {
   return (
-    <label className="todo-row">
+    <div className="todo-row">
       <input
         type="checkbox"
+        aria-label={text || '待办事项'}
         checked={checked}
-        onChange={(event) => onChange({ text, checked: event.target.checked })}
+        onChange={(event) => onChange({ text, richText, checked: event.target.checked })}
       />
-      <input
+      <RichTextEditable
+        ariaLabel="待办事项"
         className="block-input todo-input"
         value={text}
-        onChange={(event) => onChange({ text: event.target.value, checked })}
+        richText={richText}
+        style={style}
+        onChange={(next) => onChange({ ...next, checked })}
+        onKeyDown={onKeyDown}
         placeholder="待办事项"
       />
-    </label>
+    </div>
   )
 }

@@ -1,26 +1,32 @@
-import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react'
+﻿import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   BrowserRouter,
   MemoryRouter,
   Navigate,
   Route,
   Routes,
+  useMatch,
   useNavigate,
   useParams,
 } from 'react-router-dom'
 import { BlockEditor } from '../components/editor/BlockEditor'
 import { PageHeader } from '../components/editor/PageHeader'
 import { PageOutline } from '../components/editor/PageOutline'
+import { useDismissableLayer } from '../components/editor/useDismissableLayer'
 import { ExportImportPanel } from '../components/export/ExportImportPanel'
-import { MindmapCanvas } from '../components/mindmap/MindmapCanvas'
 import { AppShell } from '../components/layout/AppShell'
-import { MindmapPage } from '../components/mindmap/MindmapPage'
 import { SearchDialog } from '../components/search/SearchDialog'
 import { SidebarTree } from '../components/sidebar/SidebarTree'
 import { AppErrorBoundary } from '../components/shared/AppErrorBoundary'
 import { WhiteboardCanvas } from '../components/whiteboard/WhiteboardCanvas'
+import { isWhiteboardSnapshot } from '../components/whiteboard/whiteboardModel'
 import { WhiteboardPage } from '../components/whiteboard/WhiteboardPage'
-import type { BoardRecord, MindmapLayoutMode, MindmapRecord, PageFontFamily, PageRecord, SaveStatus } from '../domain/types'
+import type {
+  BoardRecord,
+  PageFontFamily,
+  PageRecord,
+  SaveStatus,
+} from '../domain/types'
 import {
   createDexieWorkspaceRepository,
   type WorkspaceRepository,
@@ -32,6 +38,21 @@ import type { ReorderPosition } from '../utils/reorder'
 
 type WorkspaceStore = ReturnType<typeof createWorkspaceStore>
 type AppState = ReturnType<WorkspaceStore['getState']>
+
+const DUPLICATE_BOARD_LABEL = '创建副本'
+const WHITEBOARD_MENU_LABEL = '白板菜单'
+
+function isEditableShortcutTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return false
+  }
+
+  return Boolean(
+    target.closest("input:not([readonly]):not([type='checkbox'])") ||
+      target.closest('textarea:not([readonly])') ||
+      target.closest("[contenteditable='true']"),
+  )
+}
 
 interface AppProps {
   repository?: WorkspaceRepository
@@ -64,18 +85,31 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
 
   useLayoutEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (
-        event.isComposing ||
-        event.altKey ||
-        event.shiftKey ||
-        !(event.ctrlKey || event.metaKey) ||
-        event.key.toLowerCase() !== 'z'
-      ) {
+      if (event.isComposing || event.altKey || !(event.ctrlKey || event.metaKey)) {
         return
       }
 
-      event.preventDefault()
-      void store.getState().undo()
+      if (isEditableShortcutTarget(event.target)) {
+        return
+      }
+
+      const key = event.key.toLowerCase()
+
+      if (key === 'z') {
+        event.preventDefault()
+        if (event.shiftKey) {
+          void store.getState().redo()
+          return
+        }
+
+        void store.getState().undo()
+        return
+      }
+
+      if (!event.shiftKey && key === 'y') {
+        event.preventDefault()
+        void store.getState().redo()
+      }
     }
 
     window.addEventListener('keydown', handleKeyDown)
@@ -91,7 +125,6 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
   const router = (
     <AppRoutes
       boards={state.boards}
-      mindmaps={state.mindmaps}
       pages={state.pages}
       currentPageId={state.currentPageId}
       onCreatePage={() => store.getState().createPage()}
@@ -101,25 +134,15 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onUpdateBoardSnapshot={(boardId, snapshot) =>
         store.getState().updateBoardSnapshot(boardId, snapshot)
       }
-      onRenameMindmap={(mindmapId, title) => store.getState().renameMindmap(mindmapId, title)}
-      onSetMindmapLayoutMode={(mindmapId, layoutMode) =>
-        store.getState().setMindmapLayoutMode(mindmapId, layoutMode)
+      onImportBoard={(boardId, payload) => store.getState().importBoard(boardId, payload)}
+      onDuplicateBoard={async (pageId, boardId) => {
+        const board = await store.getState().duplicateBoardToPage(pageId, boardId)
+        return board?.id ?? null
+      }}
+      onRestoreMissingBoard={(pageId, boardId) =>
+        store.getState().restoreMissingBoardReference(pageId, boardId)
       }
-      onAddMindmapChildNode={(mindmapId, parentNodeId) =>
-        store.getState().addMindmapChildNode(mindmapId, parentNodeId)
-      }
-      onRenameMindmapNode={(mindmapId, nodeId, text) =>
-        store.getState().renameMindmapNode(mindmapId, nodeId, text)
-      }
-      onToggleMindmapNodeCollapsed={(mindmapId, nodeId) =>
-        store.getState().toggleMindmapNodeCollapsed(mindmapId, nodeId)
-      }
-      onAddMindmapSiblingNode={(mindmapId, nodeId) =>
-        store.getState().addMindmapSiblingNode(mindmapId, nodeId)
-      }
-      onDeleteMindmapNode={(mindmapId, nodeId) =>
-        store.getState().deleteMindmapNode(mindmapId, nodeId)
-      }
+
       onTogglePageFullWidth={(pageId, isFullWidth) =>
         store.getState().setPageFullWidth(pageId, isFullWidth)
       }
@@ -137,7 +160,10 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onUpdateBlock={(pageId, blockId, nextBlock) =>
         store.getState().updateBlock(pageId, blockId, nextBlock)
       }
-      onInsertBlock={(pageId, type) => store.getState().insertBlock(pageId, type)}
+      onInsertBlock={async (pageId, type) => {
+        const block = await store.getState().insertBlock(pageId, type)
+        return block?.id ?? null
+      }}
       onInsertParagraphBlock={(pageId, text) => store.getState().insertParagraphBlock(pageId, text)}
       onInsertBlockAfter={async (pageId, blockId, type) => {
         const block = await store.getState().insertBlockAfter(pageId, blockId, type)
@@ -164,7 +190,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
         const payload = await store.getState().exportJson()
         downloadBlob(
           new Blob([payload], { type: 'application/json;charset=utf-8' }),
-          '知识库备份.json',
+          '鐭ヨ瘑搴撳浠?json',
         )
       }}
       onExportMarkdown={async (page) => {
@@ -172,6 +198,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
         const blob = await buildMarkdownZip({
           rootPage: page,
           allPages: store.getState().pages,
+          boards: store.getState().boards,
           reversible: reversibleExport,
         })
 
@@ -187,6 +214,17 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
           return store.getState().currentPageId
         }
       }}
+      onImportMarkdown={async (file) => {
+        try {
+          const { importMarkdownZip } = await import('../domain/markdown')
+          const payload = await importMarkdownZip(file)
+          return await store.getState().importPagePackage(payload)
+        } catch {
+          window.alert('导入失败，请检查页面包格式。')
+          return store.getState().currentPageId
+        }
+      }}
+      onCleanupOrphanBoards={() => store.getState().cleanupOrphanBoards()}
     />
   )
 
@@ -199,7 +237,6 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
 
 interface AppRoutesProps {
   boards: BoardRecord[]
-  mindmaps: MindmapRecord[]
   pages: AppState['pages']
   currentPageId: AppState['currentPageId']
   onCreatePage: () => Promise<PageRecord>
@@ -207,13 +244,13 @@ interface AppRoutesProps {
   onRenamePage: (pageId: string, title: string) => Promise<void>
   onRenameBoard: (boardId: string, title: string) => Promise<void>
   onUpdateBoardSnapshot: (boardId: string, snapshot: unknown) => Promise<void>
-  onRenameMindmap: (mindmapId: string, title: string) => Promise<void>
-  onSetMindmapLayoutMode: (mindmapId: string, layoutMode: MindmapLayoutMode) => Promise<void>
-  onAddMindmapChildNode: (mindmapId: string, parentNodeId: string) => Promise<void>
-  onRenameMindmapNode: (mindmapId: string, nodeId: string, text: string) => Promise<void>
-  onToggleMindmapNodeCollapsed: (mindmapId: string, nodeId: string) => Promise<void>
-  onAddMindmapSiblingNode: (mindmapId: string, nodeId: string) => Promise<void>
-  onDeleteMindmapNode: (mindmapId: string, nodeId: string) => Promise<void>
+  onImportBoard: (
+    boardId: string,
+    payload: { title: string | null; snapshot: unknown },
+  ) => Promise<void>
+  onDuplicateBoard: (pageId: string, boardId: string) => Promise<string | null>
+  onRestoreMissingBoard: (pageId: string, boardId: string) => Promise<BoardRecord | null>
+
   onTogglePageFullWidth: (pageId: string, isFullWidth: boolean) => Promise<void>
   onTogglePageSmallText: (pageId: string, isSmallText: boolean) => Promise<void>
   onTogglePageFontFamily: (pageId: string, fontFamily: PageFontFamily) => Promise<void>
@@ -225,7 +262,10 @@ interface AppRoutesProps {
     blockId: string,
     nextBlock: PageRecord['blocks'][number],
   ) => Promise<void>
-  onInsertBlock: (pageId: string, type: PageRecord['blocks'][number]['type']) => Promise<void>
+  onInsertBlock: (
+    pageId: string,
+    type: PageRecord['blocks'][number]['type'],
+  ) => Promise<string | null>
   onInsertParagraphBlock: (pageId: string, text: string) => Promise<void>
   onInsertBlockAfter: (
     pageId: string,
@@ -253,11 +293,12 @@ interface AppRoutesProps {
   onExportJson: () => Promise<void>
   onExportMarkdown: (page: PageRecord) => Promise<void>
   onImportJson: (file: File) => Promise<string | null>
+  onImportMarkdown: (file: File) => Promise<string | null>
+  onCleanupOrphanBoards: () => Promise<void>
 }
 
 function AppRoutes({
   boards,
-  mindmaps,
   pages,
   currentPageId,
   onCreatePage,
@@ -265,13 +306,10 @@ function AppRoutes({
   onRenamePage,
   onRenameBoard,
   onUpdateBoardSnapshot,
-  onRenameMindmap,
-  onSetMindmapLayoutMode,
-  onAddMindmapChildNode,
-  onRenameMindmapNode,
-  onToggleMindmapNodeCollapsed,
-  onAddMindmapSiblingNode,
-  onDeleteMindmapNode,
+  onImportBoard,
+  onDuplicateBoard,
+  onRestoreMissingBoard,
+
   onTogglePageFullWidth,
   onTogglePageSmallText,
   onTogglePageFontFamily,
@@ -294,8 +332,11 @@ function AppRoutes({
   onExportJson,
   onExportMarkdown,
   onImportJson,
+  onImportMarkdown,
+  onCleanupOrphanBoards,
 }: AppRoutesProps) {
   const navigate = useNavigate()
+  const isWhiteboardRoute = useMatch('/pages/:pageId/boards/:boardId') !== null
   const [isSearchOpen, setIsSearchOpen] = useState(false)
 
   async function handleCreatePage() {
@@ -331,9 +372,11 @@ function AppRoutes({
 
   return (
     <AppShell
+      hideSidebar={isWhiteboardRoute}
       sidebar={
         <SidebarTree
           pages={pages}
+          boards={boards}
           currentPageId={currentPageId}
           onCreatePage={() => {
             void handleCreatePage()
@@ -348,8 +391,10 @@ function AppRoutes({
       <SearchDialog
         open={isSearchOpen}
         pages={pages}
+        boards={boards}
         onClose={() => setIsSearchOpen(false)}
         onOpenPage={(pageId) => navigate(`/pages/${pageId}`)}
+        onOpenBoard={(pageId, boardId) => navigate(`/pages/${pageId}/boards/${boardId}`)}
       />
       <AppErrorBoundary resetKey={currentPageId}>
         <Routes>
@@ -368,7 +413,6 @@ function AppRoutes({
             element={
               <PageRoute
                 boards={boards}
-                mindmaps={mindmaps}
                 pages={pages}
                 currentPageId={currentPageId}
                 onRoutePageChange={onRoutePageChange}
@@ -394,6 +438,9 @@ function AppRoutes({
                 onExportJson={onExportJson}
                 onExportMarkdown={onExportMarkdown}
                 onImportJson={onImportJson}
+                onImportMarkdown={onImportMarkdown}
+                onCleanupOrphanBoards={onCleanupOrphanBoards}
+                onRestoreMissingBoard={onRestoreMissingBoard}
               />
             }
           />
@@ -407,24 +454,9 @@ function AppRoutes({
                 onRoutePageChange={onRoutePageChange}
                 onRenameBoard={onRenameBoard}
                 onUpdateBoardSnapshot={onUpdateBoardSnapshot}
-              />
-            }
-          />
-          <Route
-            path="/pages/:pageId/mindmaps/:mindmapId"
-            element={
-              <MindmapRoute
-                pages={pages}
-                mindmaps={mindmaps}
-                currentPageId={currentPageId}
-                onRoutePageChange={onRoutePageChange}
-                onRenameMindmap={onRenameMindmap}
-                onSetMindmapLayoutMode={onSetMindmapLayoutMode}
-                onAddMindmapChildNode={onAddMindmapChildNode}
-                onRenameMindmapNode={onRenameMindmapNode}
-                onToggleMindmapNodeCollapsed={onToggleMindmapNodeCollapsed}
-                onAddMindmapSiblingNode={onAddMindmapSiblingNode}
-                onDeleteMindmapNode={onDeleteMindmapNode}
+                onImportBoard={onImportBoard}
+                onDuplicateBoard={onDuplicateBoard}
+                onRestoreMissingBoard={onRestoreMissingBoard}
               />
             }
           />
@@ -436,7 +468,6 @@ function AppRoutes({
 
 interface PageRouteProps {
   boards: BoardRecord[]
-  mindmaps: MindmapRecord[]
   pages: PageRecord[]
   currentPageId: string | null
   onRoutePageChange: (pageId: string) => Promise<void>
@@ -452,7 +483,10 @@ interface PageRouteProps {
     blockId: string,
     nextBlock: PageRecord['blocks'][number],
   ) => Promise<void>
-  onInsertBlock: (pageId: string, type: PageRecord['blocks'][number]['type']) => Promise<void>
+  onInsertBlock: (
+    pageId: string,
+    type: PageRecord['blocks'][number]['type'],
+  ) => Promise<string | null>
   onInsertParagraphBlock: (pageId: string, text: string) => Promise<void>
   onInsertBlockAfter: (
     pageId: string,
@@ -479,11 +513,13 @@ interface PageRouteProps {
   onExportJson: () => Promise<void>
   onExportMarkdown: (page: PageRecord) => Promise<void>
   onImportJson: (file: File) => Promise<string | null>
+  onImportMarkdown: (file: File) => Promise<string | null>
+  onCleanupOrphanBoards: () => Promise<void>
+  onRestoreMissingBoard: (pageId: string, boardId: string) => Promise<BoardRecord | null>
 }
 
 function PageRoute({
   boards,
-  mindmaps,
   pages,
   currentPageId,
   onRoutePageChange,
@@ -509,6 +545,9 @@ function PageRoute({
   onExportJson,
   onExportMarkdown,
   onImportJson,
+  onImportMarkdown,
+  onCleanupOrphanBoards,
+  onRestoreMissingBoard,
 }: PageRouteProps) {
   const { pageId } = useParams()
   const navigate = useNavigate()
@@ -527,69 +566,78 @@ function PageRoute({
     return <div className="page-empty">{uiCopy.app.pageNotFound}</div>
   }
 
+  const pageContentClassName = [
+    'page-content',
+    `page-content-font-${page.fontFamily ?? 'default'}`,
+    page.isFullWidth ? 'page-content-adaptive' : '',
+    page.isSmallText ? 'page-content-small-text' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+
   return (
-    <div className={outlineVisible ? 'page-with-outline' : 'page-with-outline page-with-outline-hidden'}>
-      <div
-        className={[
-          'page-content',
-          `page-content-font-${page.fontFamily ?? 'default'}`,
-          page.isFullWidth ? 'page-content-adaptive' : '',
-          page.isSmallText ? 'page-content-small-text' : '',
-        ]
-          .filter(Boolean)
-          .join(' ')}
-      >
-        <PageHeader
-          page={page}
-          onRename={(title) => {
-            void onRenamePage(page.id, title)
-          }}
-          onChangeIcon={(icon) => {
-            void onChangePageIcon(page.id, icon)
-          }}
-          onChangeCover={(cover) => {
-            void onChangePageCover(page.id, cover)
-          }}
-          actions={
-            <ExportImportPanel
-              status={saveStatus}
-              reversible={reversibleExport}
-              adaptiveWidth={page.isFullWidth === true}
-              smallText={page.isSmallText === true}
-              fontFamily={page.fontFamily ?? 'default'}
-              outlineVisible={outlineVisible}
-              onToggleReversible={onToggleReversibleExport}
-              onToggleAdaptiveWidth={(value) => {
-                void onTogglePageFullWidth(page.id, value)
-              }}
-              onToggleSmallText={(value) => {
-                void onTogglePageSmallText(page.id, value)
-              }}
-              onToggleFontFamily={(value) => {
-                void onTogglePageFontFamily(page.id, value)
-              }}
-              onToggleOutlineVisible={(value) => {
-                void onTogglePageOutlineVisible(page.id, value)
-              }}
-              onExportJson={() => void onExportJson()}
-              onExportMarkdown={() => void onExportMarkdown(page)}
-              onImportJson={async (file) => {
-                const nextPageId = await onImportJson(file)
-                navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
-              }}
-            />
-          }
-        />
+    <div
+      className={
+        outlineVisible ? 'page-with-outline' : 'page-with-outline page-with-outline-hidden'
+      }
+    >
+      <PageHeader
+        page={page}
+        bodyClassName={pageContentClassName}
+        onRename={(title) => {
+          void onRenamePage(page.id, title)
+        }}
+        onChangeIcon={(icon) => {
+          void onChangePageIcon(page.id, icon)
+        }}
+        onChangeCover={(cover) => {
+          void onChangePageCover(page.id, cover)
+        }}
+        actions={
+          <ExportImportPanel
+            status={saveStatus}
+            reversible={reversibleExport}
+            adaptiveWidth={page.isFullWidth === true}
+            smallText={page.isSmallText === true}
+            fontFamily={page.fontFamily ?? 'default'}
+            outlineVisible={outlineVisible}
+            onToggleReversible={onToggleReversibleExport}
+            onToggleAdaptiveWidth={(value) => {
+              void onTogglePageFullWidth(page.id, value)
+            }}
+            onToggleSmallText={(value) => {
+              void onTogglePageSmallText(page.id, value)
+            }}
+            onToggleFontFamily={(value) => {
+              void onTogglePageFontFamily(page.id, value)
+            }}
+            onToggleOutlineVisible={(value) => {
+              void onTogglePageOutlineVisible(page.id, value)
+            }}
+            onExportJson={() => void onExportJson()}
+            onExportMarkdown={() => void onExportMarkdown(page)}
+            onImportJson={async (file) => {
+              const nextPageId = await onImportJson(file)
+              navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
+            }}
+            onImportMarkdown={async (file) => {
+              const nextPageId = await onImportMarkdown(file)
+              navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
+            }}
+            onCleanupOrphanBoards={() => void onCleanupOrphanBoards()}
+          />
+        }
+      />
+      <div className={pageContentClassName}>
         <BlockEditor
           page={page}
           allPages={pages}
           boards={boards}
-          mindmaps={mindmaps}
           onUpdateBlock={(blockId, nextBlock) => {
             void onUpdateBlock(page.id, blockId, nextBlock)
           }}
           onInsert={(type) => {
-            void onInsertBlock(page.id, type)
+            return onInsertBlock(page.id, type)
           }}
           onInsertParagraph={(text) => {
             void onInsertParagraphBlock(page.id, text)
@@ -605,18 +653,21 @@ function PageRoute({
           onDuplicateBlock={(blockId) => {
             void onDuplicateBlock(page.id, blockId)
           }}
-          onTurnInto={(blockId, type) => {
-            void onTurnBlockInto(page.id, blockId, type)
-          }}
+          onTurnInto={(blockId, type) => onTurnBlockInto(page.id, blockId, type)}
           onOpenChildPage={(childPageId) => {
             navigate(`/pages/${childPageId}`)
           }}
           onOpenWhiteboard={(boardId) => {
             navigate(`/pages/${page.id}/boards/${boardId}`)
           }}
-          onOpenMindmap={(mindmapId) => {
-            navigate(`/pages/${page.id}/mindmaps/${mindmapId}`)
+          onRestoreWhiteboard={async (boardId) => {
+            const board = await onRestoreMissingBoard(page.id, boardId)
+            if (board) {
+              navigate(`/pages/${page.id}/boards/${board.id}`)
+            }
           }}
+
+
         />
       </div>
       {outlineVisible ? <PageOutline blocks={page.blocks} /> : null}
@@ -631,6 +682,96 @@ interface BoardRouteProps {
   onRoutePageChange: (pageId: string) => Promise<void>
   onRenameBoard: (boardId: string, title: string) => Promise<void>
   onUpdateBoardSnapshot: (boardId: string, snapshot: unknown) => Promise<void>
+  onImportBoard: (boardId: string, payload: { title: string | null; snapshot: unknown }) => Promise<void>
+  onDuplicateBoard: (pageId: string, boardId: string) => Promise<string | null>
+  onRestoreMissingBoard: (pageId: string, boardId: string) => Promise<BoardRecord | null>
+}
+
+interface WhiteboardRouteMenuProps {
+  onDuplicate: () => void
+  onExport: () => void
+  onImport: (file: File) => void
+}
+
+function WhiteboardRouteMenu({ onDuplicate, onExport, onImport }: WhiteboardRouteMenuProps) {
+  const [open, setOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+
+  useDismissableLayer({
+    open,
+    refs: [menuRef],
+    onDismiss: () => setOpen(false),
+  })
+
+  return (
+    <>
+      {open ? (
+        <div
+          className="whiteboard-route-menu-scrim"
+          aria-hidden="true"
+          onPointerDown={() => setOpen(false)}
+        />
+      ) : null}
+      <div className="page-menu whiteboard-route-menu" ref={menuRef}>
+        <button
+          type="button"
+          className="page-menu-button"
+          aria-label={WHITEBOARD_MENU_LABEL}
+          aria-expanded={open}
+          aria-haspopup="menu"
+          onClick={() => setOpen((value) => !value)}
+        >
+          <span aria-hidden="true">⋯</span>
+        </button>
+        {open ? (
+          <div className="page-menu-popover whiteboard-route-menu-popover">
+            <div className="page-menu-section">
+              <button
+                type="button"
+                className="page-menu-action"
+                onClick={() => {
+                  setOpen(false)
+                  onDuplicate()
+                }}
+              >
+                <span className="page-menu-item-label">{DUPLICATE_BOARD_LABEL}</span>
+              </button>
+              <button
+                type="button"
+                className="page-menu-action"
+                onClick={() => {
+                  setOpen(false)
+                  onExport()
+                }}
+              >
+                <span className="page-menu-item-label">导出白板</span>
+              </button>
+              <label className="page-menu-action page-menu-file">
+                <span className="page-menu-item-label">导入白板</span>
+                <input
+                  className="import-input"
+                  type="file"
+                  accept=".json,application/json"
+                  aria-label="导入白板文件"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0]
+                    event.target.value = ''
+
+                    if (!file) {
+                      return
+                    }
+
+                    setOpen(false)
+                    onImport(file)
+                  }}
+                />
+              </label>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </>
+  )
 }
 
 function BoardRoute({
@@ -640,6 +781,9 @@ function BoardRoute({
   onRoutePageChange,
   onRenameBoard,
   onUpdateBoardSnapshot,
+  onImportBoard,
+  onDuplicateBoard,
+  onRestoreMissingBoard,
 }: BoardRouteProps) {
   const { pageId, boardId } = useParams()
   const navigate = useNavigate()
@@ -658,19 +802,101 @@ function BoardRoute({
     return <div className="page-empty">{uiCopy.app.pageNotFound}</div>
   }
 
+  const routePageId = page.id
+
+  async function handleImportBoard(file: File) {
+    if (!board) {
+      return
+    }
+
+    try {
+      const payload = normalizeBoardImportPayload(JSON.parse(await file.text()) as unknown)
+      await onImportBoard(board.id, payload)
+    } catch {
+      window.alert('导入失败，请检查白板文件格式。')
+    }
+  }
+
+  async function handleDuplicateBoard() {
+    if (!board) {
+      return
+    }
+
+    const nextBoardId = await onDuplicateBoard(routePageId, board.id)
+    if (nextBoardId) {
+      window.setTimeout(() => {
+        navigate(`/pages/${routePageId}/boards/${nextBoardId}`)
+      }, 0)
+    }
+  }
+
+  async function handleRestoreMissingBoard() {
+    if (!boardId) {
+      return
+    }
+
+    const nextBoard = await onRestoreMissingBoard(routePageId, boardId)
+    if (nextBoard) {
+      navigate(`/pages/${routePageId}/boards/${nextBoard.id}`, { replace: true })
+    }
+  }
+
   return (
     <WhiteboardPage
       page={page}
       board={board}
-      onBack={() => navigate(`/pages/${page.id}`)}
+      onBack={() => navigate(`/pages/${routePageId}`)}
       onRename={(title) => {
         if (board) {
           void onRenameBoard(board.id, title)
         }
       }}
+      actions={
+        board ? (
+          <WhiteboardRouteMenu
+            onDuplicate={() => {
+              void handleDuplicateBoard()
+            }}
+            onExport={() => {
+              downloadBlob(
+                new Blob(
+                  [
+                    JSON.stringify(
+                      {
+                        title: board.title,
+                        snapshot: board.snapshot,
+                      },
+                      null,
+                      2,
+                    ),
+                  ],
+                  { type: 'application/json;charset=utf-8' },
+                ),
+                `${sanitizeFileName(board.title)}.whiteboard.json`,
+              )
+            }}
+            onImport={(file) => {
+              void handleImportBoard(file)
+            }}
+          />
+        ) : (
+          <div className="page-header-actions">
+            <button
+              type="button"
+              className="page-header-action"
+              onClick={() => {
+                void handleRestoreMissingBoard()
+              }}
+            >
+              重新创建白板
+            </button>
+          </div>
+        )
+      }
     >
       {board ? (
         <WhiteboardCanvas
+          key={board.id}
           board={board}
           onChange={(snapshot) => {
             void onUpdateBoardSnapshot(board.id, snapshot)
@@ -681,89 +907,7 @@ function BoardRoute({
   )
 }
 
-interface MindmapRouteProps {
-  pages: PageRecord[]
-  mindmaps: MindmapRecord[]
-  currentPageId: string | null
-  onRoutePageChange: (pageId: string) => Promise<void>
-  onRenameMindmap: (mindmapId: string, title: string) => Promise<void>
-  onSetMindmapLayoutMode: (mindmapId: string, layoutMode: MindmapLayoutMode) => Promise<void>
-  onAddMindmapChildNode: (mindmapId: string, parentNodeId: string) => Promise<void>
-  onRenameMindmapNode: (mindmapId: string, nodeId: string, text: string) => Promise<void>
-  onToggleMindmapNodeCollapsed: (mindmapId: string, nodeId: string) => Promise<void>
-  onAddMindmapSiblingNode: (mindmapId: string, nodeId: string) => Promise<void>
-  onDeleteMindmapNode: (mindmapId: string, nodeId: string) => Promise<void>
-}
 
-function MindmapRoute({
-  pages,
-  mindmaps,
-  currentPageId,
-  onRoutePageChange,
-  onRenameMindmap,
-  onSetMindmapLayoutMode,
-  onAddMindmapChildNode,
-  onRenameMindmapNode,
-  onToggleMindmapNodeCollapsed,
-  onAddMindmapSiblingNode,
-  onDeleteMindmapNode,
-}: MindmapRouteProps) {
-  const { pageId, mindmapId } = useParams()
-  const navigate = useNavigate()
-  const page = pages.find((item) => item.id === pageId)
-  const mindmap = mindmaps.find((item) => item.id === mindmapId) ?? null
-
-  useEffect(() => {
-    if (!page || currentPageId === page.id) {
-      return
-    }
-
-    void onRoutePageChange(page.id)
-  }, [currentPageId, onRoutePageChange, page])
-
-  if (!page) {
-    return <div className="page-empty">{uiCopy.app.pageNotFound}</div>
-  }
-
-  return (
-    <MindmapPage
-      page={page}
-      mindmap={mindmap}
-      onBack={() => navigate(`/pages/${page.id}`)}
-      onRename={(title) => {
-        if (mindmap) {
-          void onRenameMindmap(mindmap.id, title)
-        }
-      }}
-    >
-      {mindmap ? (
-        <MindmapCanvas
-          mindmap={mindmap}
-          onRenameNode={(nodeId, text) => {
-            void onRenameMindmapNode(mindmap.id, nodeId, text)
-          }}
-          onAddChildNode={(nodeId) => {
-            void onAddMindmapChildNode(mindmap.id, nodeId)
-          }}
-          onAddSiblingNode={(nodeId) => {
-            void onAddMindmapSiblingNode(mindmap.id, nodeId)
-          }}
-          onDeleteNode={(nodeId) => {
-            void onDeleteMindmapNode(mindmap.id, nodeId)
-          }}
-          onToggleNodeCollapsed={(nodeId) => {
-            void onToggleMindmapNodeCollapsed(mindmap.id, nodeId)
-          }}
-          onChangeLayoutMode={(layoutMode) => {
-            void onSetMindmapLayoutMode(mindmap.id, layoutMode)
-          }}
-        />
-      ) : (
-        <div className="mindmap-page-empty">思维导图编辑器即将接入</div>
-      )}
-    </MindmapPage>
-  )
-}
 
 export default App
 
@@ -780,4 +924,31 @@ function downloadBlob(blob: Blob, fileName: string) {
 
 function sanitizeFileName(value: string) {
   return sanitizeFileNameSegment(value, uiCopy.page.untitled)
+}
+
+function normalizeBoardImportPayload(payload: unknown): { title: string | null; snapshot: unknown } {
+  if (isWhiteboardSnapshot(payload)) {
+    return {
+      title: null,
+      snapshot: structuredClone(payload),
+    }
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Invalid board payload')
+  }
+
+  const candidate = payload as {
+    title?: unknown
+    snapshot?: unknown
+  }
+
+  if (!isWhiteboardSnapshot(candidate.snapshot)) {
+    throw new Error('Invalid board snapshot')
+  }
+
+  return {
+    title: typeof candidate.title === 'string' ? candidate.title : null,
+    snapshot: structuredClone(candidate.snapshot),
+  }
 }

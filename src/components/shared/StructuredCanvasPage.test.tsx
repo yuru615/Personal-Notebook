@@ -84,8 +84,8 @@ describe('StructuredCanvasPage', () => {
         missingMessage="当前内容已不存在"
         onBack={() => undefined}
         onRename={() => undefined}
-        rootClassName="mindmap-page"
-        headerClassName="mindmap-page-header"
+        rootClassName="canvas-page"
+        headerClassName="canvas-page-header"
       >
         <div>画布区域</div>
       </StructuredCanvasPage>,
@@ -95,7 +95,7 @@ describe('StructuredCanvasPage', () => {
     const root = input.closest('section')
     const header = input.closest('header')
 
-    expect(root).toHaveClass('structured-canvas-page', 'mindmap-page')
-    expect(header).toHaveClass('structured-canvas-page-header', 'mindmap-page-header')
+    expect(root).toHaveClass('structured-canvas-page', 'canvas-page')
+    expect(header).toHaveClass('structured-canvas-page-header', 'canvas-page-header')
   })
 })

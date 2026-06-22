@@ -6,6 +6,7 @@ interface WhiteboardBlockProps {
   previewUrl: string | null
   isMissing: boolean
   onOpen: () => void
+  onRecover?: () => void
 }
 
 export function WhiteboardBlock({
@@ -14,8 +15,9 @@ export function WhiteboardBlock({
   previewUrl,
   isMissing,
   onOpen,
+  onRecover,
 }: WhiteboardBlockProps) {
-  return (
+  const card = (
     <CanvasEntryCard
       kindLabel="白板"
       title={title}
@@ -33,5 +35,18 @@ export function WhiteboardBlock({
       arrowClassName="whiteboard-card-arrow"
       emptyPreviewClassName="whiteboard-card-preview-empty"
     />
+  )
+
+  if (!isMissing || !onRecover) {
+    return card
+  }
+
+  return (
+    <div className="whiteboard-card-shell">
+      {card}
+      <button type="button" className="whiteboard-card-recover" onClick={onRecover}>
+        重建白板
+      </button>
+    </div>
   )
 }

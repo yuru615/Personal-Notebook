@@ -9,7 +9,17 @@ const pages = [
     id: 'page_parent',
     title: '产品',
     parentId: null,
-    icon: '💼',
+    icon: '📘',
+    cover: null,
+    createdAt: '',
+    updatedAt: '',
+    blocks: [],
+  },
+  {
+    id: 'page_child',
+    title: '需求池',
+    parentId: 'page_parent',
+    icon: '📄',
     cover: null,
     createdAt: '',
     updatedAt: '',
@@ -24,11 +34,78 @@ describe('SidebarTree', () => {
 
     render(
       <MemoryRouter>
-        <SidebarTree pages={pages} currentPageId="page_parent" onCreatePage={onCreatePage} />
+        <SidebarTree pages={pages as never} currentPageId="page_parent" onCreatePage={onCreatePage} />
       </MemoryRouter>,
     )
 
-    await user.click(screen.getByRole('button', { name: /新建页面/i }))
+    await user.click(screen.getByRole('button', { name: '新建页面' }))
     expect(onCreatePage).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders child pages by indentation without expand or collapse buttons', () => {
+    render(
+      <MemoryRouter>
+        <SidebarTree pages={pages as never} currentPageId="page_parent" onCreatePage={vi.fn()} />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('link', { name: '产品' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '需求池' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '展开页面' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '收起页面' })).not.toBeInTheDocument()
+  })
+
+  it('renders recent whiteboards from referenced boards only', () => {
+    const whiteboardPages = [
+      {
+        id: 'page_parent',
+        title: 'Product',
+        parentId: null,
+        icon: '??',
+        cover: null,
+        createdAt: '',
+        updatedAt: '',
+        blocks: [
+          {
+            id: 'block-whiteboard',
+            type: 'whiteboard',
+            boardId: 'board_recent',
+          },
+        ],
+      },
+    ]
+    const boards = [
+      {
+        id: 'board_recent',
+        title: 'Flow Board',
+        snapshot: null,
+        createdAt: '',
+        updatedAt: '2026-06-18T12:00:00.000Z',
+      },
+      {
+        id: 'board_orphan',
+        title: 'Orphan Board',
+        snapshot: null,
+        createdAt: '',
+        updatedAt: '2026-06-18T13:00:00.000Z',
+      },
+    ]
+
+    render(
+      <MemoryRouter>
+        <SidebarTree
+          pages={whiteboardPages as never}
+          boards={boards as never}
+          currentPageId="page_parent"
+          onCreatePage={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('link', { name: 'Flow Board' })).toHaveAttribute(
+      'href',
+      '/pages/page_parent/boards/board_recent',
+    )
+    expect(screen.queryByRole('link', { name: 'Orphan Board' })).not.toBeInTheDocument()
   })
 })

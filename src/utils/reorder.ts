@@ -1,17 +1,26 @@
+export type ReorderPosition = 'before' | 'after'
+
 export function reorderItems<T extends { id: string }>(
   items: T[],
   activeId: string,
   overId: string,
+  position: ReorderPosition = 'before',
 ): T[] {
   const oldIndex = items.findIndex((item) => item.id === activeId)
-  const newIndex = items.findIndex((item) => item.id === overId)
 
-  if (oldIndex < 0 || newIndex < 0) {
+  if (oldIndex < 0 || activeId === overId) {
     return items
   }
 
-  const next = [...items]
-  const [moved] = next.splice(oldIndex, 1)
-  next.splice(newIndex, 0, moved)
+  const moved = items[oldIndex]
+  const withoutMoved = items.filter((item) => item.id !== activeId)
+  const targetIndex = withoutMoved.findIndex((item) => item.id === overId)
+
+  if (targetIndex < 0) {
+    return items
+  }
+
+  const next = [...withoutMoved]
+  next.splice(position === 'after' ? targetIndex + 1 : targetIndex, 0, moved)
   return next
 }

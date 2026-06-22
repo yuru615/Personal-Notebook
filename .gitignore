@@ -10,7 +10,18 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+coverage
+.vite
+*.tsbuildinfo
 *.local
+.env
+.env.*
+!.env.example
+
+# Local tooling and generated artifacts
+.playwright-cli
+.superpowers
+output
 
 # Editor directories and files
 .vscode/*

@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Flowboard</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar" aria-label="白板工具栏">
+        <div class="tool-strip" role="group" aria-label="工具">
+          <button class="icon-button is-active" data-tool="select" data-tip="选择" aria-label="选择">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 3l13 9-6 1.2 3.2 6.1-2.6 1.4-3.2-6L5 19V3z" />
+            </svg>
+          </button>
+          <button class="icon-button" data-tool="hand" data-tip="移动画布" aria-label="移动画布">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 12V6a2 2 0 1 1 4 0v5" />
+              <path d="M12 11V5a2 2 0 1 1 4 0v8" />
+              <path d="M16 13V8a2 2 0 1 1 4 0v6c0 4.2-2.8 7-7 7h-1.2a7 7 0 0 1-5.5-2.7L3.4 14.5a1.9 1.9 0 0 1 .3-2.6 2 2 0 0 1 2.8.2L8 14" />
+            </svg>
+          </button>
+          <button class="icon-button" data-tool="note" data-tip="便签" aria-label="便签">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 3h12a2 2 0 0 1 2 2v10l-6 6H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+              <path d="M14 21v-6h6" />
+            </svg>
+          </button>
+          <button class="icon-button" data-tool="text" data-tip="文本" aria-label="文本">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 5h14" />
+              <path d="M12 5v14" />
+              <path d="M8 19h8" />
+            </svg>
+          </button>
+          <button class="icon-button" data-tool="connector" data-tip="连线" aria-label="连线">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M7 7h.01" />
+              <path d="M17 17h.01" />
+              <path d="M8.5 8.5l7 7" />
+              <path d="M5 5m-2 0a2 2 0 1 0 4 0 2 2 0 1 0-4 0" />
+              <path d="M19 19m-2 0a2 2 0 1 0 4 0 2 2 0 1 0-4 0" />
+            </svg>
+          </button>
+          <div class="shape-picker" id="shape-picker">
+            <button class="icon-button" data-tool="shape" data-tip="图形" aria-label="图形">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="6" y="6" width="12" height="12" />
+              </svg>
+            </button>
+            <div class="tool-strip shape-strip" id="shape-strip" role="group" aria-label="图形类型">
+              <button class="icon-button is-active" data-shape-type="rect" data-tip="矩形" aria-label="矩形">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="6" y="6" width="12" height="12" />
+                </svg>
+              </button>
+              <button class="icon-button" data-shape-type="ellipse" data-tip="圆形" aria-label="圆形">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="6" />
+                </svg>
+              </button>
+              <button class="icon-button" data-shape-type="diamond" data-tip="菱形" aria-label="菱形">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 3l8 9-8 9-8-9z" />
+                </svg>
+              </button>
+              <button class="icon-button" data-shape-type="triangle" data-tip="三角形" aria-label="三角形">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 4l9 16H3z" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <button class="icon-button" data-tool="pen" data-tip="画笔" aria-label="画笔">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+            </svg>
+          </button>
+          <button class="icon-button" data-tool="eraser" data-tip="橡皮擦" aria-label="橡皮擦">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 20H8l-5-5a2.8 2.8 0 0 1 0-4L10 4a2.8 2.8 0 0 1 4 0l7 7a2.8 2.8 0 0 1 0 4l-5 5" />
+              <path d="M6.5 8.5l9 9" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="color-picker" id="color-picker">
+          <button class="color-toggle" id="color-toggle" data-tip="颜色" aria-label="颜色" aria-expanded="false" aria-controls="color-panel">
+            <span class="current-swatch" id="current-color-swatch" style="--swatch: #17202a" aria-hidden="true"></span>
+          </button>
+          <div class="color-panel" id="color-panel" role="group" aria-label="颜色" hidden>
+            <div class="color-grid">
+              <button class="swatch is-active" data-color="#17202a" style="--swatch: #17202a" aria-label="黑色"></button>
+              <button class="swatch" data-color="#475569" style="--swatch: #475569" aria-label="灰蓝"></button>
+              <button class="swatch" data-color="#ef4444" style="--swatch: #ef4444" aria-label="红色"></button>
+              <button class="swatch" data-color="#f97316" style="--swatch: #f97316" aria-label="橙色"></button>
+              <button class="swatch" data-color="#f59e0b" style="--swatch: #f59e0b" aria-label="琥珀"></button>
+              <button class="swatch" data-color="#eab308" style="--swatch: #eab308" aria-label="黄色"></button>
+              <button class="swatch" data-color="#84cc16" style="--swatch: #84cc16" aria-label="黄绿"></button>
+              <button class="swatch" data-color="#22c55e" style="--swatch: #22c55e" aria-label="绿色"></button>
+              <button class="swatch" data-color="#0f766e" style="--swatch: #0f766e" aria-label="青色"></button>
+              <button class="swatch" data-color="#06b6d4" style="--swatch: #06b6d4" aria-label="蓝绿"></button>
+              <button class="swatch" data-color="#3b82f6" style="--swatch: #3b82f6" aria-label="蓝色"></button>
+              <button class="swatch" data-color="#2563eb" style="--swatch: #2563eb" aria-label="深蓝"></button>
+              <button class="swatch" data-color="#7c3aed" style="--swatch: #7c3aed" aria-label="紫色"></button>
+              <button class="swatch" data-color="#a855f7" style="--swatch: #a855f7" aria-label="亮紫"></button>
+              <button class="swatch" data-color="#d946ef" style="--swatch: #d946ef" aria-label="品红"></button>
+              <button class="swatch" data-color="#ec4899" style="--swatch: #ec4899" aria-label="粉色"></button>
+              <button class="swatch" data-color="#cf3f55" style="--swatch: #cf3f55" aria-label="玫红"></button>
+              <button class="swatch" data-color="#ffffff" style="--swatch: #ffffff" aria-label="白色"></button>
+            </div>
+            <label class="color-value-row" for="color-value">
+              <span>#</span>
+              <input id="color-value" type="text" value="17202A" maxlength="6" spellcheck="false" inputmode="text" aria-label="颜色值" />
+            </label>
+          </div>
+        </div>
+
+        <div class="tool-strip mode-strip" role="group" aria-label="连接类型">
+          <button class="icon-button is-active" data-line-mode="straight" data-tip="直线" aria-label="直线连接">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 19L19 5" />
+              <path d="M5 19h.01" />
+              <path d="M19 5h.01" />
+            </svg>
+          </button>
+          <button class="icon-button" data-line-mode="curve" data-tip="曲线" aria-label="贝塞尔曲线连接">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 18C8 6 16 6 20 18" />
+              <path d="M4 18h.01" />
+              <path d="M20 18h.01" />
+            </svg>
+          </button>
+        </div>
+
+        <label class="range-wrap" data-tip="粗细">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 12h16" />
+            <path d="M4 12a1.5 1.5 0 1 0 3 0 1.5 1.5 0 0 0-3 0z" />
+            <path d="M15 12a2.5 2.5 0 1 0 5 0 2.5 2.5 0 0 0-5 0z" />
+          </svg>
+          <input id="stroke-size" type="range" min="2" max="36" value="6" aria-label="笔触粗细" />
+        </label>
+
+        <div class="topbar-spacer"></div>
+
+        <div class="tool-strip action-strip" role="group" aria-label="操作">
+          <button class="icon-button" id="undo" data-tip="上一步" aria-label="上一步">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9 14l-5-5 5-5" />
+              <path d="M4 9h9a7 7 0 0 1 7 7v1" />
+            </svg>
+          </button>
+          <button class="icon-button" id="redo" data-tip="下一步" aria-label="下一步">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M15 14l5-5-5-5" />
+              <path d="M20 9h-9a7 7 0 0 0-7 7v1" />
+            </svg>
+          </button>
+          <div class="history-menu-wrap">
+            <button
+              class="history-toggle"
+              id="history-toggle"
+              type="button"
+              data-tip="历史记录"
+              aria-label="历史记录"
+              aria-expanded="false"
+              aria-controls="history-menu"
+            >
+              <span class="history-counts" id="history-counts">0 / 0</span>
+            </button>
+            <div class="history-menu" id="history-menu" role="menu" aria-label="历史记录" hidden>
+              <div class="history-menu-status" id="history-status">可回退 0 步，可前进 0 步</div>
+              <button type="button" role="menuitem" data-history-action="undo-1">回退 1 步</button>
+              <button type="button" role="menuitem" data-history-action="undo-5">回退 5 步</button>
+              <button type="button" role="menuitem" data-history-action="undo-all">回到最早</button>
+              <div class="menu-separator" aria-hidden="true"></div>
+              <button type="button" role="menuitem" data-history-action="redo-1">前进 1 步</button>
+              <button type="button" role="menuitem" data-history-action="redo-5">前进 5 步</button>
+              <button type="button" role="menuitem" data-history-action="redo-all">回到最新</button>
+            </div>
+          </div>
+          <button class="icon-button" id="export-board" data-tip="导出" aria-label="导出" aria-expanded="false" aria-controls="export-menu">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v12" />
+              <path d="M7 10l5 5 5-5" />
+              <path d="M5 21h14" />
+            </svg>
+          </button>
+          <div class="export-menu" id="export-menu" role="menu" aria-label="导出格式" hidden>
+            <button type="button" role="menuitem" data-export-format="json">JSON 数据</button>
+            <button type="button" role="menuitem" data-export-format="png">PNG 图片</button>
+            <button type="button" role="menuitem" data-export-format="pdf">PDF 文档</button>
+          </div>
+          <button class="icon-button" id="import-board" data-tip="导入" aria-label="导入">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 21V9" />
+              <path d="M7 14l5-5 5 5" />
+              <path d="M5 3h14" />
+            </svg>
+          </button>
+          <button class="icon-button danger" id="clear-board" data-tip="清空" aria-label="清空">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7h16" />
+              <path d="M10 11v6" />
+              <path d="M14 11v6" />
+              <path d="M6 7l1 14h10l1-14" />
+              <path d="M9 7V4h6v3" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <main id="viewport" aria-label="无限白板">
+        <canvas id="board"></canvas>
+        <div id="note-layer" aria-live="polite"></div>
+        <div class="status-pill" id="zoom-readout">100%</div>
+      </main>
+
+      <input id="import-file" type="file" accept="application/json,.json,image/*" hidden />
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

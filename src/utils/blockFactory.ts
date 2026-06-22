@@ -1,13 +1,4 @@
-import type {
-  BlockRecord,
-  BlockType,
-  BoardId,
-  BoardRecord,
-  MindmapBlock,
-  MindmapId,
-  MindmapRecord,
-  WhiteboardBlock,
-} from '../domain/types'
+import type { BlockRecord, BlockType, BoardId, BoardRecord, WhiteboardBlock } from '../domain/types'
 import { createEmptyBoardSnapshot } from '../components/whiteboard/whiteboardModel'
 import { createId } from './id'
 
@@ -29,41 +20,7 @@ export function createWhiteboardBlock(boardId: BoardId): WhiteboardBlock {
   }
 }
 
-export function createMindmapRecord(now = new Date().toISOString()): MindmapRecord {
-  const rootNodeId = createId('mindmap_node')
-
-  return {
-    id: createId('mindmap'),
-    title: '未命名思维导图',
-    rootNodeId,
-    layoutMode: 'balanced',
-    nodes: {
-      [rootNodeId]: {
-        id: rootNodeId,
-        parentId: null,
-        text: '中心主题',
-        order: 0,
-      },
-    },
-    viewport: {
-      x: 0,
-      y: 0,
-      zoom: 1,
-    },
-    createdAt: now,
-    updatedAt: now,
-  }
-}
-
-export function createMindmapBlock(mindmapId: MindmapId): MindmapBlock {
-  return {
-    id: createId('block'),
-    type: 'mindmap',
-    mindmapId,
-  }
-}
-
-export function createBlock(type: BlockType, options?: { boardId?: BoardId; mindmapId?: MindmapId }): BlockRecord {
+export function createBlock(type: BlockType, options?: { boardId?: BoardId }): BlockRecord {
   switch (type) {
     case 'paragraph':
     case 'heading_1':
@@ -85,11 +42,7 @@ export function createBlock(type: BlockType, options?: { boardId?: BoardId; mind
       if (!options?.boardId) {
         throw new Error('Whiteboard block requires boardId')
       }
+
       return createWhiteboardBlock(options.boardId)
-    case 'mindmap':
-      if (!options?.mindmapId) {
-        throw new Error('Mindmap block requires mindmapId')
-      }
-      return createMindmapBlock(options.mindmapId)
   }
 }

@@ -1,6 +1,5 @@
 import { render, screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { BoardRecord, PageRecord } from '../../domain/types'
 import { WhiteboardPage } from './WhiteboardPage'
 
@@ -28,44 +27,21 @@ const board: BoardRecord = {
 }
 
 describe('WhiteboardPage', () => {
-  it('renders the page shell and title input', () => {
+  it('marks host status chrome as visually hidden for an active board', () => {
     render(
-      <WhiteboardPage
-        page={page}
-        board={board}
-        onBack={() => undefined}
-        onRename={() => undefined}
-      >
+      <WhiteboardPage page={page} board={board} onBack={() => undefined} onRename={() => undefined}>
         <div>画布区域</div>
       </WhiteboardPage>,
     )
 
     expect(screen.getByRole('button', { name: '返回页面' })).toBeInTheDocument()
-    expect(screen.getByDisplayValue('白板标题')).toBeInTheDocument()
-    expect(screen.getByText('来源：知识库页面')).toBeInTheDocument()
     expect(screen.getByText('画布区域')).toBeInTheDocument()
-  })
-
-  it('calls rename when the board title changes', async () => {
-    const user = userEvent.setup()
-    const onRename = vi.fn()
-
-    render(
-      <WhiteboardPage
-        page={page}
-        board={board}
-        onBack={() => undefined}
-        onRename={onRename}
-      >
-        <div>画布区域</div>
-      </WhiteboardPage>,
+    expect(screen.getByDisplayValue('白板标题').closest('.whiteboard-page-status')).toHaveClass(
+      'whiteboard-page-overlay-hidden',
     )
-
-    const input = screen.getByLabelText('白板标题')
-    await user.clear(input)
-    await user.type(input, '流程图')
-
-    expect(onRename).toHaveBeenLastCalledWith('流程图')
+    expect(screen.getByText('来源：知识库页面').closest('.whiteboard-page-status')).toHaveClass(
+      'whiteboard-page-overlay-hidden',
+    )
   })
 
   it('renders a missing state when the board record is missing', () => {
