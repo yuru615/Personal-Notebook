@@ -21,7 +21,8 @@ function createSnapshot(): WorkspaceSnapshot {
         updatedAt: now,
       },
     ],
-pages: [
+    dataTables: [],
+    pages: [
       {
         id: 'page_1',
         parentId: null,
@@ -51,6 +52,7 @@ describe('createDexieWorkspaceRepository', () => {
   beforeEach(async () => {
     await db.pages.clear()
     await db.boards.clear()
+    await db.dataTables.clear()
     await db.settings.clear()
   })
 
@@ -70,6 +72,7 @@ describe('createDexieWorkspaceRepository', () => {
     const repository = createDexieWorkspaceRepository()
     const emptySnapshot: WorkspaceSnapshot = {
       boards: [],
+      dataTables: [],
       pages: [],
       settings: {
         lastOpenedPageId: null,
@@ -126,6 +129,7 @@ describe('createDexieWorkspaceRepository', () => {
 
     await expect(repository.load()).resolves.toEqual({
       boards: [],
+      dataTables: [],
       pages: [
         {
           id: 'page_legacy',

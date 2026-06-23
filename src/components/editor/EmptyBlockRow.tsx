@@ -6,11 +6,16 @@ import { getSlashMenuOptions, SlashMenu } from './SlashMenu'
 import { useDismissableLayer } from './useDismissableLayer'
 
 interface EmptyBlockRowProps {
+  allowedBlockTypes?: BlockType[]
   onInsert: (type: BlockType) => void
   onInsertParagraph?: (text: string) => void
 }
 
-export function EmptyBlockRow({ onInsert, onInsertParagraph }: EmptyBlockRowProps) {
+export function EmptyBlockRow({
+  allowedBlockTypes,
+  onInsert,
+  onInsertParagraph,
+}: EmptyBlockRowProps) {
   const [value, setValue] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
   const [slashMenuDismissed, setSlashMenuDismissed] = useState(false)
@@ -22,7 +27,10 @@ export function EmptyBlockRow({ onInsert, onInsertParagraph }: EmptyBlockRowProp
   const dismissableRefs = useMemo(() => [plusRef, inputRef, menuRef], [])
   const open = menuOpen || (value.startsWith('/') && !slashMenuDismissed)
   const query = open ? (value.startsWith('/') ? value : `/${value}`) : value
-  const menuOptions = useMemo(() => (open ? getSlashMenuOptions(query) : []), [open, query])
+  const menuOptions = useMemo(
+    () => (open ? getSlashMenuOptions(query, allowedBlockTypes) : []),
+    [allowedBlockTypes, open, query],
+  )
   const activeOption =
     activeOptionIndex >= 0 && activeOptionIndex < menuOptions.length
       ? menuOptions[activeOptionIndex]
@@ -144,6 +152,7 @@ export function EmptyBlockRow({ onInsert, onInsertParagraph }: EmptyBlockRowProp
         <SlashMenu
           query={query}
           activeType={activeOption?.type ?? null}
+          allowedBlockTypes={allowedBlockTypes}
           menuRef={menuRef}
           placement={menuLayout.placement}
           maxHeight={menuLayout.maxHeight}

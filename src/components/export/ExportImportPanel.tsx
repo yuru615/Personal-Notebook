@@ -4,6 +4,7 @@ import { uiCopy } from '../../ui/copy'
 import { SaveStatusBadge } from '../shared/SaveStatusBadge'
 
 const CLEANUP_ORPHAN_WHITEBOARDS_LABEL = '\u6e05\u7406\u5b64\u7acb\u767d\u677f'
+const CLEANUP_ORPHAN_DATA_TABLES_LABEL = '清理孤立数据表格'
 const IMPORT_MARKDOWN_LABEL = '\u5bfc\u5165 Markdown \u9875\u9762\u5305'
 
 interface ExportImportPanelProps {
@@ -23,6 +24,7 @@ interface ExportImportPanelProps {
   onImportJson: (file: File) => void | Promise<void>
   onImportMarkdown: (file: File) => void | Promise<void>
   onCleanupOrphanBoards: () => void | Promise<void>
+  onCleanupOrphanDataTables: () => void | Promise<void>
 }
 
 export function ExportImportPanel({
@@ -42,6 +44,7 @@ export function ExportImportPanel({
   onImportJson,
   onImportMarkdown,
   onCleanupOrphanBoards,
+  onCleanupOrphanDataTables,
 }: ExportImportPanelProps) {
   const [open, setOpen] = useState(false)
   const panelRef = useRef<HTMLDivElement | null>(null)
@@ -76,6 +79,11 @@ export function ExportImportPanel({
   function handleCleanupOrphanBoards() {
     closeMenu()
     void onCleanupOrphanBoards()
+  }
+
+  function handleCleanupOrphanDataTables() {
+    closeMenu()
+    void onCleanupOrphanDataTables()
   }
 
   const fontOptions: Array<{ value: PageFontFamily; label: string }> = [
@@ -201,6 +209,9 @@ export function ExportImportPanel({
             </label>
             <button type="button" className="page-menu-action" onClick={handleCleanupOrphanBoards}>
               <span className="page-menu-item-label">{CLEANUP_ORPHAN_WHITEBOARDS_LABEL}</span>
+            </button>
+            <button type="button" className="page-menu-action" onClick={handleCleanupOrphanDataTables}>
+              <span className="page-menu-item-label">{CLEANUP_ORPHAN_DATA_TABLES_LABEL}</span>
             </button>
             <label className="page-menu-toggle">
               <span className="page-menu-item-label">{uiCopy.export.reversible}</span>

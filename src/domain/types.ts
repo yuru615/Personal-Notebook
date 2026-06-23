@@ -1,6 +1,7 @@
 export type PageId = string
 export type BlockId = string
 export type BoardId = string
+export type DataTableId = string
 
 export type BlockType =
   | 'paragraph'
@@ -14,6 +15,7 @@ export type BlockType =
   | 'code'
   | 'table'
   | 'whiteboard'
+  | 'data_table'
 
 export type TextColor = 'gray' | 'brown' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'pink' | 'red'
 export type BlockBackgroundColor =
@@ -123,6 +125,11 @@ export interface WhiteboardBlock extends BlockBase {
   boardId: BoardId
 }
 
+export interface DataTableBlock extends BlockBase {
+  type: 'data_table'
+  databaseId: DataTableId
+}
+
 export type PageFontFamily = 'default' | 'serif' | 'mono'
 
 export type BlockRecord =
@@ -137,9 +144,18 @@ export type BlockRecord =
   | CodeBlock
   | TableBlock
   | WhiteboardBlock
+  | DataTableBlock
 
 export interface BoardRecord {
   id: BoardId
+  title: string
+  snapshot: unknown
+  createdAt: string
+  updatedAt: string
+}
+
+export interface DataTableRecord {
+  id: DataTableId
   title: string
   snapshot: unknown
   createdAt: string
@@ -167,6 +183,7 @@ export interface WorkspaceSettings {
 
 export interface WorkspaceSnapshot {
   boards: BoardRecord[]
+  dataTables?: DataTableRecord[]
   pages: PageRecord[]
   settings: WorkspaceSettings
 }

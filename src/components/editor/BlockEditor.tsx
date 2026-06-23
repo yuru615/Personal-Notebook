@@ -5,6 +5,7 @@ import type {
   BlockRecord,
   BlockType,
   BoardRecord,
+  DataTableRecord,
   PageRecord,
   TextBlockStyle,
 } from '../../domain/types'
@@ -16,6 +17,7 @@ import { getBlockAnchorId } from './blockAnchors'
 import { getTextBackgroundStyle, getTextInputStyle } from './blockTextStyle'
 import { ChildPageBlock } from './blocks/ChildPageBlock'
 import { CodeBlock } from './blocks/CodeBlock'
+import { DataTableBlock } from './blocks/DataTableBlock'
 import { ListBlock } from './blocks/ListBlock'
 import { ParagraphBlock } from './blocks/ParagraphBlock'
 import { TableBlock } from './blocks/TableBlock'
@@ -36,6 +38,8 @@ interface BlockEditorProps {
   page: PageRecord
   allPages: PageRecord[]
   boards?: BoardRecord[]
+  dataTables?: DataTableRecord[]
+  allowedBlockTypes?: BlockType[]
   onUpdateBlock: (blockId: string, nextBlock: BlockRecord) => void
   onInsert?: (type: BlockType) => Promise<string | null> | string | null | void
   onInsertParagraph?: (text: string) => void
@@ -52,12 +56,16 @@ interface BlockEditorProps {
   onOpenChildPage?: (pageId: string) => void
   onOpenWhiteboard?: (boardId: string) => void
   onRestoreWhiteboard?: (boardId: string) => void
+  onOpenDataTable?: (databaseId: string) => void
+  onRestoreDataTable?: (databaseId: string) => void
 }
 
 export function BlockEditor({
   page,
   allPages,
   boards = [],
+  dataTables = [],
+  allowedBlockTypes,
   onUpdateBlock,
   onInsert,
   onInsertParagraph,
@@ -70,9 +78,12 @@ export function BlockEditor({
   onOpenChildPage,
   onOpenWhiteboard,
   onRestoreWhiteboard,
+  onOpenDataTable,
+  onRestoreDataTable,
 }: BlockEditorProps) {
   const childPageTitleMap = Object.fromEntries(allPages.map((item) => [item.id, item.title]))
   const boardMap = new Map(boards.map((board) => [board.id, board]))
+  const dataTableMap = new Map(dataTables.map((dataTable) => [dataTable.id, dataTable]))
   const draggingBlockId = useRef<string | null>(null)
   const pendingFocusBlockId = useRef<FocusRequest | null>(null)
   const scrollFrameId = useRef<number | null>(null)
@@ -218,6 +229,7 @@ export function BlockEditor({
       >
         <BlockFrame
           textStyle={textStyle}
+          allowedBlockTypes={allowedBlockTypes}
           onDragStart={() => {
             draggingBlockId.current = blockId
             setDraggingVisualBlockId(blockId)
@@ -634,12 +646,28 @@ export function BlockEditor({
               />,
             )
           }
+          case 'data_table': {
+            const dataTable = dataTableMap.get(block.databaseId)
+
+            return renderBlockRow(
+              block,
+              <DataTableBlock
+                title={dataTable?.title ?? '数据表格不存在'}
+                updatedLabel={dataTable ? formatDataTableMeta(dataTable) : '引用已丢失'}
+                recordTitles={dataTable ? getDataTableRecordTitles(dataTable) : []}
+                isMissing={!dataTable}
+                onOpen={() => onOpenDataTable?.(block.databaseId)}
+                onRecover={!dataTable ? () => onRestoreDataTable?.(block.databaseId) : undefined}
+              />,
+            )
+          }
 
           default:
             return null
         }
       })}
       <EmptyBlockRow
+        allowedBlockTypes={allowedBlockTypes}
         onInsert={(type) => {
           void insertBlock(type)
         }}
@@ -727,4 +755,53 @@ function formatCanvasUpdatedLabel(updatedAt: string) {
 
   const date = new Date(timestamp)
   return `${date.getMonth() + 1}\u6708${date.getDate()}\u65e5\u66f4\u65b0`
+}
+
+function formatDataTableMeta(dataTable: DataTableRecord) {
+  const updatedLabel = formatCanvasUpdatedLabel(dataTable.updatedAt)
+  const snapshot = dataTable.snapshot
+
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    return updatedLabel
+  }
+
+  const { records, properties } = snapshot as {
+    records?: unknown
+    properties?: unknown
+  }
+
+  if (!records || typeof records !== 'object' || Array.isArray(records)) {
+    return updatedLabel
+  }
+
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) {
+    return updatedLabel
+  }
+
+  return `${Object.keys(records).length} 条记录 · ${Object.keys(properties).length} 个字段 · ${updatedLabel}`
+}
+
+function getDataTableRecordTitles(dataTable: DataTableRecord) {
+  const snapshot = dataTable.snapshot
+
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    return []
+  }
+
+  const records = (snapshot as { records?: unknown }).records
+
+  if (!records || typeof records !== 'object' || Array.isArray(records)) {
+    return []
+  }
+
+  return Object.values(records)
+    .flatMap((record) => {
+      if (!record || typeof record !== 'object' || Array.isArray(record)) {
+        return []
+      }
+
+      const title = (record as { title?: unknown }).title
+      return typeof title === 'string' && title.trim() ? [title.trim()] : []
+    })
+    .slice(0, 3)
 }

@@ -37,6 +37,7 @@ export function createSeedWorkspace(): WorkspaceSnapshot {
 
   return {
     boards: [],
+    dataTables: [],
     pages: [page],
     settings: {
       lastOpenedPageId: page.id,

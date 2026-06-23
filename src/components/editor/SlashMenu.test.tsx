@@ -1,6 +1,6 @@
 ﻿import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { SlashMenu } from './SlashMenu'
+import { getSlashMenuOptions, SlashMenu } from './SlashMenu'
 
 describe('SlashMenu', () => {
   it('renders grouped sections for core block types', () => {
@@ -25,5 +25,18 @@ describe('SlashMenu', () => {
 
     expect(screen.getByRole('button', { name: '白板' })).toBeInTheDocument()
     expect(screen.getByText('插入一个可点击进入的白板卡片')).toBeInTheDocument()
+  })
+
+  it('shows the data table option', () => {
+    render(<SlashMenu query="/数据" onPick={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: '数据表格' })).toBeInTheDocument()
+    expect(screen.getByText('插入一个可点击进入的数据库表格')).toBeInTheDocument()
+  })
+
+  it('filters options by allowed block types', () => {
+    const options = getSlashMenuOptions('/', ['paragraph', 'todo'])
+
+    expect(options.map((option) => option.type)).toEqual(['paragraph', 'todo'])
   })
 })

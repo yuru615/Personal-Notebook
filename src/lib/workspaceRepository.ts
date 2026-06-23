@@ -46,6 +46,7 @@ export function createDexieWorkspaceRepository(): WorkspaceRepository {
 
       return {
         boards,
+        dataTables: await db.dataTables.toArray(),
         pages,
         settings: {
           lastOpenedPageId: settings.lastOpenedPageId,
@@ -54,15 +55,20 @@ export function createDexieWorkspaceRepository(): WorkspaceRepository {
     },
 
     async save(snapshot) {
-      await this.replace(snapshot)
+      await this.replace({
+        ...snapshot,
+        dataTables: snapshot.dataTables ?? (await db.dataTables.toArray()),
+      })
     },
 
     async replace(snapshot) {
-      await db.transaction('rw', db.boards, db.pages, db.settings, async () => {
+      await db.transaction('rw', db.boards, db.dataTables, db.pages, db.settings, async () => {
         await db.boards.clear()
+        await db.dataTables.clear()
         await db.pages.clear()
         await db.settings.clear()
         await db.boards.bulkPut(snapshot.boards)
+        await db.dataTables.bulkPut(snapshot.dataTables ?? [])
         await db.pages.bulkPut(snapshot.pages)
         await db.settings.put(toSettingsRow(snapshot))
       })

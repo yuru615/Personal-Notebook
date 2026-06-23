@@ -172,6 +172,53 @@ a {
   --editor-line-box: 24px;
 }
 
+.page-breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 30px;
+  margin: 0 0 12px;
+  color: #787774;
+  font-size: 13px;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.page-breadcrumb-link,
+.page-breadcrumb-current {
+  min-width: 0;
+  max-width: 190px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.page-breadcrumb-link:hover {
+  background: #f3f2ef;
+  color: #37352f;
+}
+
+.page-breadcrumb-icon {
+  flex: 0 0 auto;
+  line-height: 1;
+}
+
+.page-breadcrumb-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.page-breadcrumb-separator {
+  flex: 0 0 auto;
+  color: #b8b5af;
+}
+
 .page-outline {
   position: fixed;
   top: 56px;
@@ -2106,6 +2153,158 @@ a {
 .whiteboard-card-recover:hover {
   background: #f7f6f3;
   color: #37352f;
+}
+
+.data-table-card-preview {
+  background: #fbfbfa;
+}
+
+.data-table-card-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  width: 118px;
+  height: 48px;
+  overflow: hidden;
+  border: 1px solid #dedbd6;
+  border-radius: 5px;
+  background: #ffffff;
+}
+
+.data-table-card-preview-grid span {
+  border-right: 1px solid #efeeeb;
+  border-bottom: 1px solid #efeeeb;
+}
+
+.data-table-card-preview-grid span:nth-child(3n) {
+  border-right: 0;
+}
+
+.data-table-card-preview-grid span:nth-last-child(-n + 3) {
+  border-bottom: 0;
+}
+
+.data-table-card-records {
+  display: grid;
+  gap: 3px;
+  margin-top: 4px;
+}
+
+.data-table-card-record {
+  overflow: hidden;
+  color: #787774;
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.data-table-card-record::before {
+  color: #b8b4ad;
+  content: "• ";
+}
+
+.data-table-card-shell {
+  display: grid;
+  gap: 8px;
+}
+
+.data-table-card-recover {
+  justify-self: start;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid #e7e5e4;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #6b6b67;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.data-table-card-recover:hover {
+  background: #f7f6f3;
+  color: #37352f;
+}
+
+.data-table-route-page {
+  position: relative;
+  min-height: 100vh;
+  background: #ffffff;
+}
+
+.data-table-route-topbar {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 30;
+  display: inline-flex;
+  pointer-events: none;
+}
+
+.data-table-route-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid #e2dfda;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #37352f;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.data-table-route-back:hover {
+  background: #eef3f5;
+  color: #0f766e;
+}
+
+.data-table-route-back svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.9;
+}
+
+.data-table-route-breadcrumb-row {
+  position: fixed;
+  top: 14px;
+  left: 60px;
+  z-index: 30;
+  max-width: calc(100vw - 84px);
+}
+
+.data-table-route-breadcrumb-row .page-breadcrumbs {
+  margin: 0;
+}
+
+.data-table-route-missing {
+  display: grid;
+  place-content: center;
+  min-height: 100vh;
+  color: #787774;
+  text-align: center;
+}
+
+.data-table-route-missing h1 {
+  margin: 0 0 8px;
+  color: #37352f;
+  font-size: 22px;
+}
+
+.data-table-route-missing p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.data-table-route-page .workspace-shell--single .record-page-header {
+  padding-top: 72px;
 }
 
 .whiteboard-canvas {

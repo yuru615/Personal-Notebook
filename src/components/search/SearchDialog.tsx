@@ -1,34 +1,49 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { BoardRecord, PageRecord } from '../../domain/types'
-import { searchBoards, searchPages, type SearchResult } from '../../domain/search'
+import type { BoardRecord, DataTableRecord, PageRecord } from '../../domain/types'
+import {
+  searchBoards,
+  searchDataTables,
+  searchPages,
+  type SearchResult,
+} from '../../domain/search'
 import { uiCopy } from '../../ui/copy'
 
 interface SearchDialogProps {
   open: boolean
   pages: PageRecord[]
   boards?: BoardRecord[]
+  dataTables?: DataTableRecord[]
   onClose: () => void
   onOpenPage: (pageId: string) => void
   onOpenBoard?: (pageId: string, boardId: string) => void
+  onOpenDataTable?: (pageId: string, databaseId: string, recordId?: string) => void
 }
 
 const OPEN_WHITEBOARD_LABEL = '\u6253\u5f00\u767d\u677f'
+const OPEN_DATA_TABLE_LABEL = '\u6253\u5f00\u6570\u636e\u8868\u683c'
+const OPEN_DATA_TABLE_RECORD_LABEL = '\u6253\u5f00\u8bb0\u5f55'
 
 export function SearchDialog({
   open,
   pages,
   boards = [],
+  dataTables = [],
   onClose,
   onOpenPage,
   onOpenBoard,
+  onOpenDataTable,
 }: SearchDialogProps) {
   const [query, setQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const results = useMemo(
-    () => [...searchPages(pages, query), ...searchBoards(pages, boards, query)],
-    [boards, pages, query],
+    () => [
+      ...searchPages(pages, query),
+      ...searchBoards(pages, boards, query),
+      ...searchDataTables(pages, dataTables, query),
+    ],
+    [boards, dataTables, pages, query],
   )
   const activeIndex = results.length > 0 ? Math.min(selectedIndex, results.length - 1) : -1
   const closeDialog = useCallback(() => {
@@ -40,6 +55,15 @@ export function SearchDialog({
   function openResult(result: SearchResult) {
     if (result.kind === 'whiteboard' && result.boardId) {
       onOpenBoard?.(result.pageId, result.boardId)
+      closeDialog()
+      return
+    }
+
+    if (
+      (result.kind === 'data_table' || result.kind === 'data_table_record') &&
+      result.databaseId
+    ) {
+      onOpenDataTable?.(result.pageId, result.databaseId, result.recordId)
       closeDialog()
       return
     }
@@ -144,11 +168,7 @@ export function SearchDialog({
           ) : results.length > 0 ? (
             results.map((result, index) => (
               <button
-                key={
-                  result.kind === 'whiteboard'
-                    ? `${result.pageId}-${result.boardId}`
-                    : result.pageId
-                }
+                key={getResultKey(result)}
                 type="button"
                 className={[
                   'search-result',
@@ -157,9 +177,7 @@ export function SearchDialog({
                   .filter(Boolean)
                   .join(' ')}
                 aria-label={`${
-                  result.kind === 'whiteboard'
-                    ? OPEN_WHITEBOARD_LABEL
-                    : uiCopy.search.openPage
+                  getResultActionLabel(result)
                 } ${result.title}`}
                 aria-current={index === activeIndex ? 'true' : undefined}
                 onClick={() => openResult(result)}
@@ -181,4 +199,32 @@ export function SearchDialog({
       </section>
     </div>
   )
+}
+
+function getResultKey(result: SearchResult) {
+  if (result.kind === 'whiteboard') {
+    return `${result.pageId}-${result.boardId}`
+  }
+
+  if (result.kind === 'data_table' || result.kind === 'data_table_record') {
+    return `${result.pageId}-${result.databaseId}-${result.recordId ?? 'table'}`
+  }
+
+  return result.pageId
+}
+
+function getResultActionLabel(result: SearchResult) {
+  if (result.kind === 'whiteboard') {
+    return OPEN_WHITEBOARD_LABEL
+  }
+
+  if (result.kind === 'data_table_record') {
+    return OPEN_DATA_TABLE_RECORD_LABEL
+  }
+
+  if (result.kind === 'data_table') {
+    return OPEN_DATA_TABLE_LABEL
+  }
+
+  return uiCopy.search.openPage
 }

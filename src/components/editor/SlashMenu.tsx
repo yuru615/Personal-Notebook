@@ -88,6 +88,13 @@ const options: SlashMenuOption[] = [
     icon: '◌',
     group: 'page_data',
   },
+  {
+    type: 'data_table',
+    label: '数据表格',
+    description: '插入一个可点击进入的数据库表格',
+    icon: '▤',
+    group: 'page_data',
+  },
 ]
 
 const groups: Array<{
@@ -102,6 +109,7 @@ const groups: Array<{
 interface SlashMenuProps {
   query: string
   activeType?: BlockType | null
+  allowedBlockTypes?: BlockType[]
   menuRef?: RefObject<HTMLDivElement | null>
   placement?: FloatingMenuPlacement
   maxHeight?: number
@@ -109,26 +117,29 @@ interface SlashMenuProps {
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
-export function getSlashMenuOptions(query: string) {
+export function getSlashMenuOptions(query: string, allowedBlockTypes?: BlockType[]) {
   const keyword = query.replace('/', '').trim()
+  const allowedTypes = allowedBlockTypes ? new Set(allowedBlockTypes) : null
 
   return options.filter(
     (option) =>
-      keyword.length === 0 ||
-      option.label.includes(keyword) ||
-      option.description.includes(keyword),
+      (!allowedTypes || allowedTypes.has(option.type)) &&
+      (keyword.length === 0 ||
+        option.label.includes(keyword) ||
+        option.description.includes(keyword)),
   )
 }
 
 export function SlashMenu({
   query,
   activeType = null,
+  allowedBlockTypes,
   menuRef,
   placement = 'bottom',
   maxHeight,
   onPick,
 }: SlashMenuProps) {
-  const filteredOptions = getSlashMenuOptions(query)
+  const filteredOptions = getSlashMenuOptions(query, allowedBlockTypes)
   const filteredGroups = groups
     .map((group) => ({
       ...group,

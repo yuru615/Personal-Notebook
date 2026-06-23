@@ -8,6 +8,7 @@ import { useDismissableLayer } from './useDismissableLayer'
 interface BlockFrameProps {
   children: ReactNode
   textStyle?: TextBlockStyle
+  allowedBlockTypes?: BlockType[]
   onDragStart: () => void
   onDragEnd: () => void
   onChangeTextStyle?: (nextStyle: TextBlockStyle) => void
@@ -19,6 +20,7 @@ interface BlockFrameProps {
 export function BlockFrame({
   children,
   textStyle,
+  allowedBlockTypes,
   onDragStart,
   onDragEnd,
   onChangeTextStyle,
@@ -76,6 +78,7 @@ export function BlockFrame({
           menuRef={menuRef}
           placement={menuLayout.placement}
           maxHeight={menuLayout.maxHeight}
+          allowedBlockTypes={allowedBlockTypes}
           textStyle={textStyle}
           onChangeTextStyle={onChangeTextStyle}
           onTurnInto={(type) => {

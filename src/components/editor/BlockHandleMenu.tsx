@@ -7,6 +7,7 @@ interface BlockHandleMenuProps {
   menuRef?: RefObject<HTMLDivElement | null>
   placement?: FloatingMenuPlacement
   maxHeight?: number
+  allowedBlockTypes?: BlockType[]
   textStyle?: TextBlockStyle
   onChangeTextStyle?: (nextStyle: TextBlockStyle) => void
   onTurnInto: (type: BlockType) => void
@@ -48,6 +49,7 @@ export function BlockHandleMenu({
   menuRef,
   placement = 'bottom',
   maxHeight,
+  allowedBlockTypes,
   textStyle,
   onChangeTextStyle,
   onTurnInto,
@@ -55,6 +57,10 @@ export function BlockHandleMenu({
   onDelete,
 }: BlockHandleMenuProps) {
   const currentTextStyle = textStyle ?? {}
+  const allowedTypes = allowedBlockTypes ? new Set(allowedBlockTypes) : null
+  const filteredTurnIntoOptions = allowedTypes
+    ? turnIntoOptions.filter((option) => allowedTypes.has(option.type))
+    : turnIntoOptions
   const canChangeTextStyle = textStyle !== undefined && onChangeTextStyle !== undefined
   const styleSection = canChangeTextStyle ? (
     <section className="block-menu-section">
@@ -177,7 +183,7 @@ export function BlockHandleMenu({
       <section className="block-menu-section">
         <div className="block-menu-label">转换为</div>
         <div className="block-menu-section-options">
-          {turnIntoOptions.map((option) => (
+          {filteredTurnIntoOptions.map((option) => (
             <button
               key={option.type}
               type="button"

@@ -6,6 +6,7 @@ import { uiCopy } from '../../ui/copy'
 import { ExportImportPanel } from './ExportImportPanel'
 
 const CLEANUP_ORPHAN_WHITEBOARDS_LABEL = '\u6e05\u7406\u5b64\u7acb\u767d\u677f'
+const CLEANUP_ORPHAN_DATA_TABLES_LABEL = '清理孤立数据表格'
 const IMPORT_MARKDOWN_LABEL = '\u5bfc\u5165 Markdown \u9875\u9762\u5305'
 
 function renderPanel(overrides: Partial<ComponentProps<typeof ExportImportPanel>> = {}) {
@@ -27,6 +28,7 @@ function renderPanel(overrides: Partial<ComponentProps<typeof ExportImportPanel>
       onImportJson={vi.fn()}
       onImportMarkdown={vi.fn()}
       onCleanupOrphanBoards={vi.fn()}
+      onCleanupOrphanDataTables={vi.fn()}
       {...overrides}
     />,
   )
@@ -165,5 +167,17 @@ describe('ExportImportPanel', () => {
     await user.click(screen.getByRole('button', { name: CLEANUP_ORPHAN_WHITEBOARDS_LABEL }))
 
     expect(onCleanupOrphanBoards).toHaveBeenCalledTimes(1)
+  })
+
+  it('triggers orphan data table cleanup from the page menu', async () => {
+    const user = userEvent.setup()
+    const onCleanupOrphanDataTables = vi.fn()
+
+    renderPanel({ onCleanupOrphanDataTables })
+
+    await user.click(screen.getByRole('button', { name: uiCopy.page.menu }))
+    await user.click(screen.getByRole('button', { name: CLEANUP_ORPHAN_DATA_TABLES_LABEL }))
+
+    expect(onCleanupOrphanDataTables).toHaveBeenCalledTimes(1)
   })
 })

@@ -1,9 +1,11 @@
-import type { BlockRecord, BoardRecord, PageRecord } from './types'
+import type { BlockRecord, BoardRecord, DataTableRecord, PageRecord } from './types'
 
 export interface SearchResult {
-  kind: 'page' | 'whiteboard'
+  kind: 'page' | 'whiteboard' | 'data_table' | 'data_table_record'
   pageId: string
   boardId?: string
+  databaseId?: string
+  recordId?: string
   title: string
   icon: string | null
   excerpt: string
@@ -87,6 +89,73 @@ export function searchBoards(
     })
 }
 
+export function searchDataTables(
+  pages: PageRecord[],
+  dataTables: DataTableRecord[],
+  query: string,
+): SearchResult[] {
+  const normalizedQuery = normalizeSearchText(query)
+
+  if (!normalizedQuery) {
+    return []
+  }
+
+  const pageTitleById = new Map(pages.map((page) => [page.id, page.title]))
+  const pageIdByDatabaseId = new Map<string, string>()
+
+  for (const page of pages) {
+    for (const block of page.blocks) {
+      if (block.type === 'data_table' && !pageIdByDatabaseId.has(block.databaseId)) {
+        pageIdByDatabaseId.set(block.databaseId, page.id)
+      }
+    }
+  }
+
+  const results: SearchResult[] = []
+
+  for (const dataTable of dataTables) {
+    const pageId = pageIdByDatabaseId.get(dataTable.id)
+
+    if (!pageId) {
+      continue
+    }
+
+    const pageTitle = pageTitleById.get(pageId)
+    const excerpt = pageTitle
+      ? `\u6570\u636e\u8868\u683c \u8def ${pageTitle}`
+      : '\u6570\u636e\u8868\u683c'
+
+    if (normalizeSearchText(dataTable.title).includes(normalizedQuery)) {
+      results.push({
+        kind: 'data_table',
+        pageId,
+        databaseId: dataTable.id,
+        title: dataTable.title,
+        icon: '\u25a6',
+        excerpt,
+      })
+    }
+
+    for (const record of getDataTableRecords(dataTable.snapshot)) {
+      if (!normalizeSearchText(record.title).includes(normalizedQuery)) {
+        continue
+      }
+
+      results.push({
+        kind: 'data_table_record',
+        pageId,
+        databaseId: dataTable.id,
+        recordId: record.id,
+        title: record.title,
+        icon: '\u25a6',
+        excerpt: `${dataTable.title} \u8def \u8bb0\u5f55`,
+      })
+    }
+  }
+
+  return results
+}
+
 function normalizeSearchText(value: string) {
   return value.trim().toLocaleLowerCase()
 }
@@ -109,5 +178,39 @@ function getBlockSearchText(block: BlockRecord, pageTitleById: Map<string, strin
       return pageTitleById.get(block.pageId)?.trim() ?? ''
     case 'whiteboard':
       return '\u767d\u677f'
+    case 'data_table':
+      return '数据表格'
   }
+}
+
+function getDataTableRecords(snapshot: unknown): Array<{ id: string; title: string }> {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    return []
+  }
+
+  const records = (snapshot as { records?: unknown }).records
+
+  if (!records || typeof records !== 'object' || Array.isArray(records)) {
+    return []
+  }
+
+  return Object.entries(records).flatMap(([recordId, value]) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return []
+    }
+
+    const record = value as { id?: unknown; title?: unknown }
+    const title = typeof record.title === 'string' ? record.title.trim() : ''
+
+    if (!title) {
+      return []
+    }
+
+    return [
+      {
+        id: typeof record.id === 'string' ? record.id : recordId,
+        title,
+      },
+    ]
+  })
 }

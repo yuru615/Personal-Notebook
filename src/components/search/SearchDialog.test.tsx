@@ -1,13 +1,15 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import type { BoardRecord, PageRecord } from '../../domain/types'
+import type { BoardRecord, DataTableRecord, PageRecord } from '../../domain/types'
 import { SearchDialog } from './SearchDialog'
 
 const now = '2026-06-15T00:00:00.000Z'
 const searchPlaceholder = '\u641c\u7d22\u9875\u9762\u6216\u5185\u5bb9'
 const openPageLabel = '\u6253\u5f00\u9875\u9762'
 const openWhiteboardLabel = '\u6253\u5f00\u767d\u677f'
+const openDataTableLabel = '\u6253\u5f00\u6570\u636e\u8868\u683c'
+const openDataTableRecordLabel = '\u6253\u5f00\u8bb0\u5f55'
 
 const pages: PageRecord[] = [
   {
@@ -57,6 +59,40 @@ const whiteboardPages: PageRecord[] = [
     icon: '📑',
     cover: null,
     blocks: [{ id: 'block-whiteboard', type: 'whiteboard', boardId: 'board-feedback' }],
+    createdAt: now,
+    updatedAt: now,
+  },
+]
+
+const dataTablePages: PageRecord[] = [
+  {
+    id: 'page-a',
+    parentId: null,
+    title: 'Customer Feedback',
+    icon: '馃搼',
+    cover: null,
+    blocks: [{ id: 'block-data', type: 'data_table', databaseId: 'database-feedback' }],
+    createdAt: now,
+    updatedAt: now,
+  },
+]
+
+const dataTables: DataTableRecord[] = [
+  {
+    id: 'database-feedback',
+    title: 'Feedback Database',
+    snapshot: {
+      version: 1,
+      records: {
+        'record-a': {
+          id: 'record-a',
+          title: 'Interview Record',
+          values: {},
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+    },
     createdAt: now,
     updatedAt: now,
   },
@@ -114,5 +150,47 @@ describe('SearchDialog', () => {
     expect(onOpenBoard).toHaveBeenCalledWith('page-a', 'board-feedback')
     expect(onOpenPage).not.toHaveBeenCalled()
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('opens referenced data table and record results', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    const onOpenPage = vi.fn()
+    const onOpenDataTable = vi.fn()
+
+    const { rerender } = render(
+      <SearchDialog
+        open
+        pages={dataTablePages}
+        dataTables={dataTables}
+        onClose={onClose}
+        onOpenPage={onOpenPage}
+        onOpenDataTable={onOpenDataTable}
+      />,
+    )
+
+    await user.type(screen.getByPlaceholderText(searchPlaceholder), 'feedback database')
+    await user.click(
+      screen.getByRole('button', { name: `${openDataTableLabel} Feedback Database` }),
+    )
+
+    expect(onOpenDataTable).toHaveBeenCalledWith('page-a', 'database-feedback', undefined)
+    expect(onOpenPage).not.toHaveBeenCalled()
+
+    rerender(
+      <SearchDialog
+        open
+        pages={dataTablePages}
+        dataTables={dataTables}
+        onClose={onClose}
+        onOpenPage={onOpenPage}
+        onOpenDataTable={onOpenDataTable}
+      />,
+    )
+
+    await user.type(screen.getByPlaceholderText(searchPlaceholder), 'interview record')
+    await user.click(screen.getByRole('button', { name: `${openDataTableRecordLabel} Interview Record` }))
+
+    expect(onOpenDataTable).toHaveBeenCalledWith('page-a', 'database-feedback', 'record-a')
   })
 })

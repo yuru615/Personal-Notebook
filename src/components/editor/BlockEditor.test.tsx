@@ -401,6 +401,115 @@ describe('BlockEditor', () => {
     }
   })
 
+  it('renders a data table card block', () => {
+    const dataTablePage = {
+      ...page,
+      blocks: [{ id: 'b6', type: 'data_table', databaseId: 'database-1' }],
+    }
+
+    render(
+      <BlockEditor
+        page={dataTablePage as never}
+        allPages={[dataTablePage as never]}
+        dataTables={[
+          {
+            id: 'database-1',
+            title: '项目数据库',
+            snapshot: { version: 1 },
+            createdAt: '2026-06-22T00:00:00.000Z',
+            updatedAt: '2026-06-22T00:00:00.000Z',
+          },
+        ] as never}
+        onUpdateBlock={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: '打开数据表格 项目数据库' })).toBeInTheDocument()
+  })
+
+  it('shows record and property counts on a data table card', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-22T12:00:00.000Z'))
+
+    try {
+      const dataTablePage = {
+        ...page,
+        blocks: [{ id: 'b6', type: 'data_table', databaseId: 'database-1' }],
+      }
+
+      render(
+        <BlockEditor
+          page={dataTablePage as never}
+          allPages={[dataTablePage as never]}
+          dataTables={[
+            {
+              id: 'database-1',
+              title: '项目数据库',
+              snapshot: {
+                version: 1,
+                database: {},
+                properties: {
+                  name: {},
+                  status: {},
+                },
+                records: {
+                  r1: {},
+                  r2: {},
+                },
+              },
+              createdAt: '2026-06-22T10:00:00.000Z',
+              updatedAt: '2026-06-22T11:59:30.000Z',
+            },
+          ] as never}
+          onUpdateBlock={vi.fn()}
+        />,
+      )
+
+      expect(screen.getByText('2 条记录 · 2 个字段 · 刚刚更新')).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows the first record titles on a data table card', () => {
+    const dataTablePage = {
+      ...page,
+      blocks: [{ id: 'b6', type: 'data_table', databaseId: 'database-1' }],
+    }
+
+    render(
+      <BlockEditor
+        page={dataTablePage as never}
+        allPages={[dataTablePage as never]}
+        dataTables={[
+          {
+            id: 'database-1',
+            title: '项目数据库',
+            snapshot: {
+              version: 1,
+              database: {},
+              properties: { name: {} },
+              records: {
+                r1: { title: '需求池' },
+                r2: { title: '本周计划' },
+                r3: { title: '客户访谈' },
+                r4: { title: '不应显示' },
+              },
+            },
+            createdAt: '2026-06-22T10:00:00.000Z',
+            updatedAt: '2026-06-22T11:59:30.000Z',
+          },
+        ] as never}
+        onUpdateBlock={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('需求池')).toBeInTheDocument()
+    expect(screen.getByText('本周计划')).toBeInTheDocument()
+    expect(screen.getByText('客户访谈')).toBeInTheDocument()
+    expect(screen.queryByText('不应显示')).not.toBeInTheDocument()
+  })
+
   it('commits plain text from the blank row when pressing enter', async () => {
     const user = userEvent.setup()
     const onInsertParagraph = vi.fn()

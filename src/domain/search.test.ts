@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { BoardRecord, PageRecord } from './types'
-import { searchBoards, searchPages } from './search'
+import type { BoardRecord, DataTableRecord, PageRecord } from './types'
+import { searchBoards, searchDataTables, searchPages } from './search'
 
 const now = '2026-06-15T00:00:00.000Z'
 
@@ -81,6 +81,58 @@ const boardPages: PageRecord[] = [
   },
 ]
 
+const dataTablePages: PageRecord[] = [
+  {
+    id: 'page-data',
+    parentId: null,
+    title: 'Project Workspace',
+    icon: null,
+    cover: null,
+    blocks: [{ id: 'block-data', type: 'data_table', databaseId: 'database-roadmap' }],
+    createdAt: now,
+    updatedAt: now,
+  },
+]
+
+const dataTables: DataTableRecord[] = [
+  {
+    id: 'database-roadmap',
+    title: 'Roadmap Database',
+    snapshot: {
+      version: 1,
+      records: {
+        'record-launch': {
+          id: 'record-launch',
+          title: 'Launch Checklist',
+          values: {},
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+    },
+    createdAt: now,
+    updatedAt: now,
+  },
+  {
+    id: 'database-orphan',
+    title: 'Orphan Database',
+    snapshot: {
+      version: 1,
+      records: {
+        'record-orphan': {
+          id: 'record-orphan',
+          title: 'Hidden Record',
+          values: {},
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+    },
+    createdAt: now,
+    updatedAt: now,
+  },
+]
+
 describe('searchPages', () => {
   it('returns pages whose title or block content matches the query', () => {
     expect(searchPages(pages, 'customer')[0]).toMatchObject({
@@ -116,5 +168,28 @@ describe('searchPages', () => {
     ])
 
     expect(searchBoards(boardPages, boards, 'orphan')).toEqual([])
+  })
+
+  it('returns referenced data tables and their records', () => {
+    expect(searchDataTables(dataTablePages, dataTables, 'roadmap')).toMatchObject([
+      {
+        kind: 'data_table',
+        pageId: 'page-data',
+        databaseId: 'database-roadmap',
+        title: 'Roadmap Database',
+      },
+    ])
+
+    expect(searchDataTables(dataTablePages, dataTables, 'launch')).toMatchObject([
+      {
+        kind: 'data_table_record',
+        pageId: 'page-data',
+        databaseId: 'database-roadmap',
+        recordId: 'record-launch',
+        title: 'Launch Checklist',
+      },
+    ])
+
+    expect(searchDataTables(dataTablePages, dataTables, 'orphan')).toEqual([])
   })
 })

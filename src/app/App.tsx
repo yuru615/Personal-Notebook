@@ -10,6 +10,7 @@ import {
   useParams,
 } from 'react-router-dom'
 import { BlockEditor } from '../components/editor/BlockEditor'
+import { DataTablePage } from '../components/dataTable/DataTablePage'
 import { PageHeader } from '../components/editor/PageHeader'
 import { PageOutline } from '../components/editor/PageOutline'
 import { useDismissableLayer } from '../components/editor/useDismissableLayer'
@@ -18,11 +19,16 @@ import { AppShell } from '../components/layout/AppShell'
 import { SearchDialog } from '../components/search/SearchDialog'
 import { SidebarTree } from '../components/sidebar/SidebarTree'
 import { AppErrorBoundary } from '../components/shared/AppErrorBoundary'
+import {
+  PageBreadcrumbs,
+  type PageBreadcrumbItem,
+} from '../components/shared/PageBreadcrumbs'
 import { WhiteboardCanvas } from '../components/whiteboard/WhiteboardCanvas'
 import { isWhiteboardSnapshot } from '../components/whiteboard/whiteboardModel'
 import { WhiteboardPage } from '../components/whiteboard/WhiteboardPage'
 import type {
   BoardRecord,
+  DataTableRecord,
   PageFontFamily,
   PageRecord,
   SaveStatus,
@@ -125,6 +131,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
   const router = (
     <AppRoutes
       boards={state.boards}
+      dataTables={state.dataTables}
       pages={state.pages}
       currentPageId={state.currentPageId}
       onCreatePage={() => store.getState().createPage()}
@@ -141,6 +148,12 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       }}
       onRestoreMissingBoard={(pageId, boardId) =>
         store.getState().restoreMissingBoardReference(pageId, boardId)
+      }
+      onUpdateDataTableSnapshot={(databaseId, snapshot) =>
+        store.getState().updateDataTableSnapshot(databaseId, snapshot)
+      }
+      onRestoreMissingDataTable={(pageId, databaseId) =>
+        store.getState().restoreMissingDataTableReference(pageId, databaseId)
       }
 
       onTogglePageFullWidth={(pageId, isFullWidth) =>
@@ -225,6 +238,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
         }
       }}
       onCleanupOrphanBoards={() => store.getState().cleanupOrphanBoards()}
+      onCleanupOrphanDataTables={() => store.getState().cleanupOrphanDataTables()}
     />
   )
 
@@ -237,6 +251,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
 
 interface AppRoutesProps {
   boards: BoardRecord[]
+  dataTables: DataTableRecord[]
   pages: AppState['pages']
   currentPageId: AppState['currentPageId']
   onCreatePage: () => Promise<PageRecord>
@@ -250,6 +265,8 @@ interface AppRoutesProps {
   ) => Promise<void>
   onDuplicateBoard: (pageId: string, boardId: string) => Promise<string | null>
   onRestoreMissingBoard: (pageId: string, boardId: string) => Promise<BoardRecord | null>
+  onUpdateDataTableSnapshot: (databaseId: string, snapshot: unknown) => Promise<void>
+  onRestoreMissingDataTable: (pageId: string, databaseId: string) => Promise<DataTableRecord | null>
 
   onTogglePageFullWidth: (pageId: string, isFullWidth: boolean) => Promise<void>
   onTogglePageSmallText: (pageId: string, isSmallText: boolean) => Promise<void>
@@ -295,10 +312,12 @@ interface AppRoutesProps {
   onImportJson: (file: File) => Promise<string | null>
   onImportMarkdown: (file: File) => Promise<string | null>
   onCleanupOrphanBoards: () => Promise<void>
+  onCleanupOrphanDataTables: () => Promise<void>
 }
 
 function AppRoutes({
   boards,
+  dataTables,
   pages,
   currentPageId,
   onCreatePage,
@@ -309,6 +328,8 @@ function AppRoutes({
   onImportBoard,
   onDuplicateBoard,
   onRestoreMissingBoard,
+  onUpdateDataTableSnapshot,
+  onRestoreMissingDataTable,
 
   onTogglePageFullWidth,
   onTogglePageSmallText,
@@ -334,9 +355,11 @@ function AppRoutes({
   onImportJson,
   onImportMarkdown,
   onCleanupOrphanBoards,
+  onCleanupOrphanDataTables,
 }: AppRoutesProps) {
   const navigate = useNavigate()
   const isWhiteboardRoute = useMatch('/pages/:pageId/boards/:boardId') !== null
+  const isDataTableRoute = useMatch('/pages/:pageId/data-tables/:databaseId/*') !== null
   const [isSearchOpen, setIsSearchOpen] = useState(false)
 
   async function handleCreatePage() {
@@ -372,7 +395,7 @@ function AppRoutes({
 
   return (
     <AppShell
-      hideSidebar={isWhiteboardRoute}
+      hideSidebar={isWhiteboardRoute || isDataTableRoute}
       sidebar={
         <SidebarTree
           pages={pages}
@@ -392,9 +415,17 @@ function AppRoutes({
         open={isSearchOpen}
         pages={pages}
         boards={boards}
+        dataTables={dataTables}
         onClose={() => setIsSearchOpen(false)}
         onOpenPage={(pageId) => navigate(`/pages/${pageId}`)}
         onOpenBoard={(pageId, boardId) => navigate(`/pages/${pageId}/boards/${boardId}`)}
+        onOpenDataTable={(pageId, databaseId, recordId) =>
+          navigate(
+            recordId
+              ? `/pages/${pageId}/data-tables/${databaseId}/records/${recordId}`
+              : `/pages/${pageId}/data-tables/${databaseId}`,
+          )
+        }
       />
       <AppErrorBoundary resetKey={currentPageId}>
         <Routes>
@@ -413,6 +444,7 @@ function AppRoutes({
             element={
               <PageRoute
                 boards={boards}
+                dataTables={dataTables}
                 pages={pages}
                 currentPageId={currentPageId}
                 onRoutePageChange={onRoutePageChange}
@@ -440,7 +472,9 @@ function AppRoutes({
                 onImportJson={onImportJson}
                 onImportMarkdown={onImportMarkdown}
                 onCleanupOrphanBoards={onCleanupOrphanBoards}
+                onCleanupOrphanDataTables={onCleanupOrphanDataTables}
                 onRestoreMissingBoard={onRestoreMissingBoard}
+                onRestoreMissingDataTable={onRestoreMissingDataTable}
               />
             }
           />
@@ -460,6 +494,36 @@ function AppRoutes({
               />
             }
           />
+          <Route
+            path="/pages/:pageId/data-tables/:databaseId"
+            element={
+              <DataTableRoute
+                pages={pages}
+                dataTables={dataTables}
+                currentPageId={currentPageId}
+                saveStatus={saveStatus}
+                route="table"
+                onRoutePageChange={onRoutePageChange}
+                onUpdateDataTableSnapshot={onUpdateDataTableSnapshot}
+                onRestoreMissingDataTable={onRestoreMissingDataTable}
+              />
+            }
+          />
+          <Route
+            path="/pages/:pageId/data-tables/:databaseId/records/:recordId"
+            element={
+              <DataTableRoute
+                pages={pages}
+                dataTables={dataTables}
+                currentPageId={currentPageId}
+                saveStatus={saveStatus}
+                route="record"
+                onRoutePageChange={onRoutePageChange}
+                onUpdateDataTableSnapshot={onUpdateDataTableSnapshot}
+                onRestoreMissingDataTable={onRestoreMissingDataTable}
+              />
+            }
+          />
         </Routes>
       </AppErrorBoundary>
     </AppShell>
@@ -468,6 +532,7 @@ function AppRoutes({
 
 interface PageRouteProps {
   boards: BoardRecord[]
+  dataTables: DataTableRecord[]
   pages: PageRecord[]
   currentPageId: string | null
   onRoutePageChange: (pageId: string) => Promise<void>
@@ -515,11 +580,14 @@ interface PageRouteProps {
   onImportJson: (file: File) => Promise<string | null>
   onImportMarkdown: (file: File) => Promise<string | null>
   onCleanupOrphanBoards: () => Promise<void>
+  onCleanupOrphanDataTables: () => Promise<void>
   onRestoreMissingBoard: (pageId: string, boardId: string) => Promise<BoardRecord | null>
+  onRestoreMissingDataTable: (pageId: string, databaseId: string) => Promise<DataTableRecord | null>
 }
 
 function PageRoute({
   boards,
+  dataTables,
   pages,
   currentPageId,
   onRoutePageChange,
@@ -547,7 +615,9 @@ function PageRoute({
   onImportJson,
   onImportMarkdown,
   onCleanupOrphanBoards,
+  onCleanupOrphanDataTables,
   onRestoreMissingBoard,
+  onRestoreMissingDataTable,
 }: PageRouteProps) {
   const { pageId } = useParams()
   const navigate = useNavigate()
@@ -574,6 +644,7 @@ function PageRoute({
   ]
     .filter(Boolean)
     .join(' ')
+  const breadcrumbs = buildPageBreadcrumbs(pages, page)
 
   return (
     <div
@@ -581,6 +652,9 @@ function PageRoute({
         outlineVisible ? 'page-with-outline' : 'page-with-outline page-with-outline-hidden'
       }
     >
+      {breadcrumbs.length > 1 ? (
+        <PageBreadcrumbs items={breadcrumbs} className={pageContentClassName} />
+      ) : null}
       <PageHeader
         page={page}
         bodyClassName={pageContentClassName}
@@ -625,6 +699,7 @@ function PageRoute({
               navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
             }}
             onCleanupOrphanBoards={() => void onCleanupOrphanBoards()}
+            onCleanupOrphanDataTables={() => void onCleanupOrphanDataTables()}
           />
         }
       />
@@ -633,6 +708,7 @@ function PageRoute({
           page={page}
           allPages={pages}
           boards={boards}
+          dataTables={dataTables}
           onUpdateBlock={(blockId, nextBlock) => {
             void onUpdateBlock(page.id, blockId, nextBlock)
           }}
@@ -666,12 +742,153 @@ function PageRoute({
               navigate(`/pages/${page.id}/boards/${board.id}`)
             }
           }}
+          onOpenDataTable={(databaseId) => {
+            navigate(`/pages/${page.id}/data-tables/${databaseId}`)
+          }}
+          onRestoreDataTable={async (databaseId) => {
+            const dataTable = await onRestoreMissingDataTable(page.id, databaseId)
+            if (dataTable) {
+              navigate(`/pages/${page.id}/data-tables/${dataTable.id}`)
+            }
+          }}
 
 
         />
       </div>
       {outlineVisible ? <PageOutline blocks={page.blocks} /> : null}
     </div>
+  )
+}
+
+function buildPageBreadcrumbs(
+  pages: PageRecord[],
+  page: PageRecord,
+  options: { linkCurrent?: boolean } = {},
+): PageBreadcrumbItem[] {
+  const pageById = new Map(pages.map((item) => [item.id, item]))
+  const chain: PageRecord[] = []
+  const seen = new Set<string>()
+  let current: PageRecord | undefined = page
+
+  while (current && !seen.has(current.id)) {
+    chain.push(current)
+    seen.add(current.id)
+    current = current.parentId ? pageById.get(current.parentId) : undefined
+  }
+
+  const orderedChain = chain.reverse()
+  return orderedChain.map((item, index) => {
+    const isCurrent = index === orderedChain.length - 1
+    return {
+      label: item.title.trim() || uiCopy.page.untitled,
+      icon: item.icon,
+      to: options.linkCurrent || !isCurrent ? `/pages/${item.id}` : undefined,
+    }
+  })
+}
+
+function getDataTableRecordTitle(
+  dataTable: DataTableRecord | null,
+  recordId: string | undefined,
+) {
+  if (!dataTable || !recordId || !dataTable.snapshot || typeof dataTable.snapshot !== 'object') {
+    return null
+  }
+
+  const records = (dataTable.snapshot as { records?: unknown }).records
+  if (!records || typeof records !== 'object') {
+    return null
+  }
+
+  const record = (records as Record<string, unknown>)[recordId]
+  if (!record || typeof record !== 'object') {
+    return null
+  }
+
+  const title = (record as { title?: unknown }).title
+  return typeof title === 'string' && title.trim() ? title : '未命名记录'
+}
+
+interface DataTableRouteProps {
+  pages: PageRecord[]
+  dataTables: DataTableRecord[]
+  currentPageId: string | null
+  saveStatus: SaveStatus
+  route: 'table' | 'record'
+  onRoutePageChange: (pageId: string) => Promise<void>
+  onUpdateDataTableSnapshot: (databaseId: string, snapshot: unknown) => Promise<void>
+  onRestoreMissingDataTable: (pageId: string, databaseId: string) => Promise<DataTableRecord | null>
+}
+
+function DataTableRoute({
+  pages,
+  dataTables,
+  currentPageId,
+  saveStatus,
+  route,
+  onRoutePageChange,
+  onUpdateDataTableSnapshot,
+  onRestoreMissingDataTable,
+}: DataTableRouteProps) {
+  const { pageId, databaseId, recordId } = useParams()
+  const navigate = useNavigate()
+  const page = pages.find((item) => item.id === pageId)
+  const dataTable = dataTables.find((item) => item.id === databaseId) ?? null
+
+  useEffect(() => {
+    if (!page || currentPageId === page.id) {
+      return
+    }
+
+    void onRoutePageChange(page.id)
+  }, [currentPageId, onRoutePageChange, page])
+
+  useEffect(() => {
+    if (!page || dataTable || !databaseId) {
+      return
+    }
+
+    void onRestoreMissingDataTable(page.id, databaseId).then((nextDataTable) => {
+      if (nextDataTable) {
+        navigate(`/pages/${page.id}/data-tables/${nextDataTable.id}`, { replace: true })
+      }
+    })
+  }, [dataTable, databaseId, navigate, onRestoreMissingDataTable, page])
+
+  if (!page || !databaseId) {
+    return <div className="page-empty">{uiCopy.app.pageNotFound}</div>
+  }
+
+  const basePath = `/pages/${page.id}/data-tables/${databaseId}`
+  const breadcrumbs: PageBreadcrumbItem[] = [
+    ...buildPageBreadcrumbs(pages, page, { linkCurrent: true }),
+    {
+      label: dataTable?.title.trim() || '数据表格',
+      to: route === 'record' ? basePath : undefined,
+    },
+  ]
+
+  if (route === 'record') {
+    breadcrumbs.push({
+      label: getDataTableRecordTitle(dataTable, recordId) ?? '记录详情',
+    })
+  }
+
+  return (
+    <DataTablePage
+      page={page}
+      dataTable={dataTable}
+      saveStatus={saveStatus}
+      route={route}
+      basePath={basePath}
+      breadcrumbs={breadcrumbs}
+      onBack={() => navigate(`/pages/${page.id}`)}
+      onChange={(snapshot) => {
+        if (dataTable) {
+          void onUpdateDataTableSnapshot(dataTable.id, snapshot)
+        }
+      }}
+    />
   )
 }
 

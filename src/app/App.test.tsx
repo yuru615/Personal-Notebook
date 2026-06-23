@@ -41,4 +41,49 @@ describe('App', () => {
     const paragraphEditor = await screen.findByRole('textbox', { name: '输入正文' })
     await waitFor(() => expect(paragraphEditor).toHaveFocus())
   })
+
+  it('shows breadcrumbs on nested pages', async () => {
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      pages: [
+        {
+          id: 'page_parent',
+          parentId: null,
+          title: 'Parent',
+          icon: 'P',
+          cover: null,
+          blocks: [],
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:00.000Z',
+        },
+        {
+          id: 'page_child',
+          parentId: 'page_parent',
+          title: 'Child',
+          icon: 'C',
+          cover: null,
+          blocks: [],
+          createdAt: '2026-06-21T00:00:00.000Z',
+          updatedAt: '2026-06-21T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: 'page_child' },
+    }
+
+    render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={['/pages/page_child']}
+      />,
+    )
+
+    const breadcrumbs = await screen.findByRole('navigation', { name: '页面层级' })
+    expect(breadcrumbs).toHaveTextContent('Parent')
+    expect(breadcrumbs).toHaveTextContent('Child')
+    expect(screen.getByRole('link', { name: 'P Parent' })).toHaveAttribute(
+      'href',
+      '/pages/page_parent',
+    )
+  })
 })

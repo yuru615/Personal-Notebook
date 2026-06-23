@@ -1,4 +1,14 @@
-import type { BlockRecord, BlockType, BoardId, BoardRecord, WhiteboardBlock } from '../domain/types'
+import { createDefaultAppState } from '../components/dataTable/domain/factory'
+import type {
+  BlockRecord,
+  BlockType,
+  BoardId,
+  BoardRecord,
+  DataTableBlock,
+  DataTableId,
+  DataTableRecord,
+  WhiteboardBlock,
+} from '../domain/types'
 import { createEmptyBoardSnapshot } from '../components/whiteboard/whiteboardModel'
 import { createId } from './id'
 
@@ -20,7 +30,30 @@ export function createWhiteboardBlock(boardId: BoardId): WhiteboardBlock {
   }
 }
 
-export function createBlock(type: BlockType, options?: { boardId?: BoardId }): BlockRecord {
+export function createDataTableRecord(now = new Date().toISOString()): DataTableRecord {
+  const snapshot = createDefaultAppState()
+
+  return {
+    id: snapshot.database.id,
+    title: snapshot.database.name,
+    snapshot,
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+export function createDataTableBlock(databaseId: DataTableId): DataTableBlock {
+  return {
+    id: createId('block'),
+    type: 'data_table',
+    databaseId,
+  }
+}
+
+export function createBlock(
+  type: BlockType,
+  options?: { boardId?: BoardId; databaseId?: DataTableId },
+): BlockRecord {
   switch (type) {
     case 'paragraph':
     case 'heading_1':
@@ -44,5 +77,11 @@ export function createBlock(type: BlockType, options?: { boardId?: BoardId }): B
       }
 
       return createWhiteboardBlock(options.boardId)
+    case 'data_table':
+      if (!options?.databaseId) {
+        throw new Error('Data table block requires databaseId')
+      }
+
+      return createDataTableBlock(options.databaseId)
   }
 }

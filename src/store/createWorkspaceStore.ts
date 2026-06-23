@@ -8,6 +8,7 @@ import type {
   BlockRecord,
   BlockType,
   BoardRecord,
+  DataTableRecord,
   PageFontFamily,
   PageId,
   PageRecord,
@@ -21,6 +22,8 @@ import { ensureSnapshot, type WorkspaceRepository } from '../lib/workspaceReposi
 import {
   createBlock,
   createBoardRecord,
+  createDataTableBlock,
+  createDataTableRecord,
   createWhiteboardBlock,
 } from '../utils/blockFactory'
 import { createId } from '../utils/id'
@@ -33,6 +36,7 @@ const COPY_SUFFIX = ' \u526f\u672c'
 
 export interface WorkspaceState {
   boards: BoardRecord[]
+  dataTables: DataTableRecord[]
   pages: PageRecord[]
   settings: WorkspaceSettings
   currentPageId: PageId | null
@@ -52,6 +56,11 @@ export interface WorkspaceState {
   duplicateBoardToPage: (pageId: PageId, boardId: string) => Promise<BoardRecord | null>
   restoreMissingBoardReference: (pageId: PageId, boardId: string) => Promise<BoardRecord | null>
   cleanupOrphanBoards: () => Promise<void>
+  renameDataTable: (databaseId: string, title: string) => Promise<void>
+  updateDataTableSnapshot: (databaseId: string, snapshot: unknown) => Promise<void>
+  duplicateDataTableToPage: (pageId: PageId, databaseId: string) => Promise<DataTableRecord | null>
+  restoreMissingDataTableReference: (pageId: PageId, databaseId: string) => Promise<DataTableRecord | null>
+  cleanupOrphanDataTables: () => Promise<void>
   renamePage: (pageId: PageId, title: string) => Promise<void>
   deletePage: (pageId: PageId) => Promise<void>
   updateBlock: (pageId: PageId, blockId: string, nextBlock: BlockRecord) => Promise<void>
@@ -87,6 +96,7 @@ export interface WorkspaceState {
 function createEmptyState(): WorkspaceState {
   return {
     boards: [],
+    dataTables: [],
     pages: [],
     settings: {
       lastOpenedPageId: null,
@@ -134,6 +144,21 @@ function createEmptyState(): WorkspaceState {
       throw new Error('not implemented')
     },
     cleanupOrphanBoards: async () => {
+      throw new Error('not implemented')
+    },
+    renameDataTable: async () => {
+      throw new Error('not implemented')
+    },
+    updateDataTableSnapshot: async () => {
+      throw new Error('not implemented')
+    },
+    duplicateDataTableToPage: async () => {
+      throw new Error('not implemented')
+    },
+    restoreMissingDataTableReference: async () => {
+      throw new Error('not implemented')
+    },
+    cleanupOrphanDataTables: async () => {
       throw new Error('not implemented')
     },
     renamePage: async () => {
@@ -299,10 +324,20 @@ function normalizeWorkspaceSnapshot(snapshot: WorkspaceSnapshot) {
   const rawBoards = Array.isArray((snapshot as WorkspaceSnapshot & { boards?: BoardRecord[] }).boards)
     ? snapshot.boards
     : []
+  const rawDataTables = Array.isArray(
+    (snapshot as WorkspaceSnapshot & { dataTables?: DataTableRecord[] }).dataTables,
+  )
+    ? snapshot.dataTables
+    : []
   const normalizedBoards = normalizeBoards(rawBoards)
   const boards = normalizedBoards.boards
+  const dataTables = structuredClone(rawDataTables)
 
   if (normalizedBoards.didChange) {
+    didChange = true
+  }
+
+  if (!Array.isArray((snapshot as WorkspaceSnapshot & { dataTables?: DataTableRecord[] }).dataTables)) {
     didChange = true
   }
 
@@ -319,6 +354,7 @@ function normalizeWorkspaceSnapshot(snapshot: WorkspaceSnapshot) {
     'code',
     'table',
     'whiteboard',
+    'data_table',
   ])
 
   const pages = snapshot.pages.map((page) => {
@@ -340,8 +376,8 @@ function normalizeWorkspaceSnapshot(snapshot: WorkspaceSnapshot) {
 
   return {
     snapshot: didChange
-      ? { boards, pages, settings: snapshot.settings }
-      : { ...snapshot, boards },
+      ? { boards, dataTables, pages, settings: snapshot.settings }
+      : { ...snapshot, boards, dataTables },
     didChange,
   }
 }
@@ -361,6 +397,7 @@ function createBackupPayload(snapshot: WorkspaceSnapshot): WorkspaceBackup {
     version: BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
     boards: snapshot.boards,
+    dataTables: snapshot.dataTables ?? [],
     pages: snapshot.pages,
     settings: snapshot.settings,
   }
@@ -373,6 +410,7 @@ function normalizeImportedSnapshot(payload: unknown): WorkspaceSnapshot {
 
   const candidate = payload as {
     boards?: unknown
+    dataTables?: unknown
     pages?: unknown
     settings?: {
       lastOpenedPageId?: unknown
@@ -394,6 +432,9 @@ function normalizeImportedSnapshot(payload: unknown): WorkspaceSnapshot {
 
   return {
     boards: Array.isArray(candidate.boards) ? structuredClone(candidate.boards as BoardRecord[]) : [],
+    dataTables: Array.isArray(candidate.dataTables)
+      ? structuredClone(candidate.dataTables as DataTableRecord[])
+      : [],
     pages: structuredClone(candidate.pages as PageRecord[]),
     settings: createSettings(lastOpenedPageId ?? null),
   }
@@ -415,6 +456,7 @@ function getPlainTextFromBlock(block: BlockRecord): string {
       return block.rows.flat().join(' ').trim()
     case 'child_page':
     case 'whiteboard':
+    case 'data_table':
       return ''
   }
 }
@@ -440,6 +482,7 @@ function preserveBlockContent(nextBlock: BlockRecord, currentBlock: BlockRecord)
     case 'table':
     case 'child_page':
     case 'whiteboard':
+    case 'data_table':
       return nextBlock
   }
 }
@@ -526,6 +569,20 @@ function collectReferencedBoardIds(pages: PageRecord[]) {
   return referencedBoardIds
 }
 
+function collectReferencedDataTableIds(pages: PageRecord[]) {
+  const referencedDataTableIds = new Set<string>()
+
+  for (const page of pages) {
+    for (const block of page.blocks) {
+      if (block.type === 'data_table') {
+        referencedDataTableIds.add(block.databaseId)
+      }
+    }
+  }
+
+  return referencedDataTableIds
+}
+
 export function createWorkspaceStore(repository: WorkspaceRepository) {
   const undoStack: WorkspaceSnapshot[] = []
   const redoStack: WorkspaceSnapshot[] = []
@@ -533,17 +590,18 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
   let nonPageAssetsPersistVersion = 0
 
   function createSnapshotFromState(
-    state: Pick<WorkspaceState, 'boards' | 'pages' | 'settings'>,
+    state: Pick<WorkspaceState, 'boards' | 'dataTables' | 'pages' | 'settings'>,
   ): WorkspaceSnapshot {
     return structuredClone({
       boards: state.boards,
+      dataTables: state.dataTables,
       pages: state.pages,
       settings: state.settings,
     })
   }
 
   function pushUndoSnapshot(
-    state: Pick<WorkspaceState, 'boards' | 'pages' | 'settings'>,
+    state: Pick<WorkspaceState, 'boards' | 'dataTables' | 'pages' | 'settings'>,
   ) {
     undoStack.push(createSnapshotFromState(state))
     redoStack.length = 0
@@ -555,13 +613,15 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
   return createStore<WorkspaceState>()((set, get) => {
     async function persistNonPageAssets(
-      state: Pick<WorkspaceState, 'boards' | 'pages' | 'settings'>,
-      nextAssets: Partial<Pick<WorkspaceState, 'boards'>>,
+      state: Pick<WorkspaceState, 'boards' | 'dataTables' | 'pages' | 'settings'>,
+      nextAssets: Partial<Pick<WorkspaceState, 'boards' | 'dataTables'>>,
     ) {
       const nextBoards = nextAssets.boards ?? state.boards
+      const nextDataTables = nextAssets.dataTables ?? state.dataTables
       const persistVersion = ++nonPageAssetsPersistVersion
       set({
         boards: nextBoards,
+        dataTables: nextDataTables,
         saveStatus: 'saving',
       })
 
@@ -569,6 +629,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         const latestState = get()
         return repository.save({
           boards: nextBoards,
+          dataTables: nextDataTables,
           pages: latestState.pages,
           settings: latestState.settings,
         })
@@ -605,6 +666,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
       set({
         boards: snapshot.boards,
+        dataTables: snapshot.dataTables ?? [],
         pages: snapshot.pages,
         settings: createSettings(currentPageId),
         currentPageId,
@@ -1060,6 +1122,213 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         throw new Error('Failed to cleanup orphan boards')
       }
     },
+
+    cleanupOrphanDataTables: async () => {
+      const state = get()
+      const referencedDataTableIds = collectReferencedDataTableIds(state.pages)
+      const nextDataTables = state.dataTables.filter((dataTable) =>
+        referencedDataTableIds.has(dataTable.id),
+      )
+
+      if (nextDataTables.length === state.dataTables.length) {
+        return
+      }
+
+      pushUndoSnapshot(state)
+      try {
+        await persistNonPageAssets(state, { dataTables: nextDataTables })
+      } catch {
+        throw new Error('Failed to cleanup orphan data tables')
+      }
+    },
+
+    renameDataTable: async (databaseId: string, title: string) => {
+      const state = get()
+      const nextTitle = title.trim() || '未命名数据表格'
+      const nextDataTables = state.dataTables.map((dataTable) =>
+        dataTable.id === databaseId
+          ? {
+              ...dataTable,
+              title: nextTitle,
+              updatedAt: new Date().toISOString(),
+            }
+          : dataTable,
+      )
+
+      pushUndoSnapshot(state)
+      try {
+        await persistNonPageAssets(state, { dataTables: nextDataTables })
+      } catch {
+        throw new Error('Failed to rename data table')
+      }
+    },
+
+    updateDataTableSnapshot: async (databaseId: string, snapshot: unknown) => {
+      const state = get()
+      const currentDataTable = state.dataTables.find((dataTable) => dataTable.id === databaseId)
+      if (!currentDataTable) {
+        return
+      }
+
+      const nextSerializedSnapshot = JSON.stringify(snapshot)
+      if (JSON.stringify(currentDataTable.snapshot) === nextSerializedSnapshot) {
+        return
+      }
+
+      const nextTitle =
+        snapshot &&
+        typeof snapshot === 'object' &&
+        'database' in snapshot &&
+        snapshot.database &&
+        typeof snapshot.database === 'object' &&
+        'name' in snapshot.database &&
+        typeof snapshot.database.name === 'string'
+          ? snapshot.database.name
+          : currentDataTable.title
+      const nextDataTables = state.dataTables.map((dataTable) =>
+        dataTable.id === databaseId
+          ? {
+              ...dataTable,
+              title: nextTitle.trim() || dataTable.title,
+              snapshot: structuredClone(snapshot),
+              updatedAt: new Date().toISOString(),
+            }
+          : dataTable,
+      )
+
+      pushUndoSnapshot(state)
+      try {
+        await persistNonPageAssets(state, { dataTables: nextDataTables })
+      } catch {
+        throw new Error('Failed to update data table snapshot')
+      }
+    },
+
+    duplicateDataTableToPage: async (pageId: PageId, databaseId: string) => {
+      const state = get()
+      const sourceDataTable = state.dataTables.find((dataTable) => dataTable.id === databaseId)
+
+      if (!sourceDataTable || !state.pages.some((page) => page.id === pageId)) {
+        return null
+      }
+
+      const now = new Date().toISOString()
+      const nextDataTable = {
+        ...createDataTableRecord(now),
+        title: `${sourceDataTable.title}${COPY_SUFFIX}`,
+        snapshot: structuredClone(sourceDataTable.snapshot),
+      }
+      const nextDataTables = [...state.dataTables, nextDataTable]
+      let didInsert = false
+
+      const nextPages = state.pages.map((page) => {
+        if (page.id !== pageId) {
+          return page
+        }
+
+        const sourceBlockIndex = page.blocks.findIndex(
+          (block) => block.type === 'data_table' && block.databaseId === databaseId,
+        )
+        const blocks = [...page.blocks]
+        blocks.splice(
+          sourceBlockIndex >= 0 ? sourceBlockIndex + 1 : blocks.length,
+          0,
+          createDataTableBlock(nextDataTable.id),
+        )
+        didInsert = true
+
+        return {
+          ...page,
+          updatedAt: now,
+          blocks,
+        }
+      })
+
+      if (!didInsert) {
+        return null
+      }
+
+      pushUndoSnapshot(state)
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save({
+          boards: state.boards,
+          dataTables: nextDataTables,
+          pages: nextPages,
+          settings: state.settings,
+        })
+        set({
+          dataTables: nextDataTables,
+          pages: nextPages,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to duplicate data table')
+      }
+
+      return nextDataTable
+    },
+
+    restoreMissingDataTableReference: async (pageId: PageId, databaseId: string) => {
+      const state = get()
+
+      if (state.dataTables.some((dataTable) => dataTable.id === databaseId)) {
+        return state.dataTables.find((dataTable) => dataTable.id === databaseId) ?? null
+      }
+
+      const page = state.pages.find((item) => item.id === pageId)
+      const hasMissingReference = page?.blocks.some(
+        (block) => block.type === 'data_table' && block.databaseId === databaseId,
+      )
+
+      if (!hasMissingReference) {
+        return null
+      }
+
+      const now = new Date().toISOString()
+      const nextDataTable = createDataTableRecord(now)
+      const nextDataTables = [...state.dataTables, nextDataTable]
+      const nextPages = state.pages.map((currentPage) => {
+        if (currentPage.id !== pageId) {
+          return currentPage
+        }
+
+        return {
+          ...currentPage,
+          updatedAt: now,
+          blocks: currentPage.blocks.map((block) =>
+            block.type === 'data_table' && block.databaseId === databaseId
+              ? { ...block, databaseId: nextDataTable.id }
+              : block,
+          ),
+        }
+      })
+
+      pushUndoSnapshot(state)
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save({
+          boards: state.boards,
+          dataTables: nextDataTables,
+          pages: nextPages,
+          settings: state.settings,
+        })
+        set({
+          dataTables: nextDataTables,
+          pages: nextPages,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to restore missing data table reference')
+      }
+
+      return nextDataTable
+    },
+
     renamePage: async (pageId: PageId, title: string) => {
       const state = get()
       const nextTitle = title.trim() || UNTITLED_PAGE_TITLE
@@ -1150,6 +1419,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       let insertedBlock: BlockRecord | null = null
       let didInsert = false
       let nextBoards = state.boards
+      let nextDataTables = state.dataTables
 
       const nextPages = state.pages.map((page) => {
         if (page.id !== pageId) {
@@ -1200,6 +1470,19 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           }
         }
 
+        if (type === 'data_table') {
+          const dataTable = createDataTableRecord(now)
+          nextDataTables = [...state.dataTables, dataTable]
+          insertedBlock = createDataTableBlock(dataTable.id)
+          didInsert = true
+
+          return {
+            ...page,
+            updatedAt: now,
+            blocks: [...page.blocks, insertedBlock],
+          }
+        }
+
         insertedBlock = createBlock(type)
         didInsert = true
 
@@ -1222,11 +1505,13 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       try {
         await repository.save({
           boards: nextBoards,
+          dataTables: nextDataTables,
           pages: snapshotPages,
           settings: state.settings,
         })
         set({
           boards: nextBoards,
+          dataTables: nextDataTables,
           pages: snapshotPages,
           saveStatus: 'saved',
         })
@@ -1286,6 +1571,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       let insertedBlock: BlockRecord | null = null
       let didInsert = false
       let nextBoards = state.boards
+      let nextDataTables = state.dataTables
 
       const nextPages = state.pages.map((page) => {
         if (page.id !== pageId) {
@@ -1323,6 +1609,10 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           const board = createBoardRecord(now)
           nextBoards = [...state.boards, board]
           insertedBlock = createWhiteboardBlock(board.id)
+        } else if (type === 'data_table') {
+          const dataTable = createDataTableRecord(now)
+          nextDataTables = [...state.dataTables, dataTable]
+          insertedBlock = createDataTableBlock(dataTable.id)
         } else {
           insertedBlock = createBlock(type)
         }
@@ -1350,11 +1640,13 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       try {
         await repository.save({
           boards: nextBoards,
+          dataTables: nextDataTables,
           pages: snapshotPages,
           settings: state.settings,
         })
         set({
           boards: nextBoards,
+          dataTables: nextDataTables,
           pages: snapshotPages,
           saveStatus: 'saved',
         })
@@ -1521,6 +1813,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       const state = get()
       const now = new Date().toISOString()
       let nextBoards = state.boards
+      let nextDataTables = state.dataTables
       const nextPages = state.pages.map((page) => {
         if (page.id !== pageId) {
           return page
@@ -1555,6 +1848,29 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           }
         }
 
+        if (source.type === 'data_table') {
+          const sourceDataTable = state.dataTables.find(
+            (dataTable) => dataTable.id === source.databaseId,
+          )
+
+          if (sourceDataTable) {
+            const nextDataTable = {
+              ...createDataTableRecord(now),
+              title: `${sourceDataTable.title}${COPY_SUFFIX}`,
+              snapshot: structuredClone(sourceDataTable.snapshot),
+            }
+
+            nextDataTables = [...state.dataTables, nextDataTable]
+            blocks.splice(index + 1, 0, createDataTableBlock(nextDataTable.id))
+
+            return {
+              ...page,
+              updatedAt: now,
+              blocks,
+            }
+          }
+        }
+
         const clone = { ...structuredClone(source), id: createId('block') }
         blocks.splice(index + 1, 0, clone)
 
@@ -1571,10 +1887,16 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       try {
         await repository.save({
           boards: nextBoards,
+          dataTables: nextDataTables,
           pages: nextPages,
           settings: state.settings,
         })
-        set({ boards: nextBoards, pages: nextPages, saveStatus: 'saved' })
+        set({
+          boards: nextBoards,
+          dataTables: nextDataTables,
+          pages: nextPages,
+          saveStatus: 'saved',
+        })
       } catch {
         set({ saveStatus: 'error' })
         throw new Error('Failed to duplicate block')
@@ -1585,6 +1907,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       const state = get()
       const now = new Date().toISOString()
       let nextBoards = state.boards
+      let nextDataTables = state.dataTables
       const nextPages = state.pages.map((page) => {
         if (page.id !== pageId) {
           return page
@@ -1609,6 +1932,12 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
                     nextBoards = [...state.boards, board]
                     return createWhiteboardBlock(board.id)
                   })()
+                : type === 'data_table'
+                  ? (() => {
+                      const dataTable = createDataTableRecord(now)
+                      nextDataTables = [...state.dataTables, dataTable]
+                      return createDataTableBlock(dataTable.id)
+                    })()
                 : createBlock(type)
             return { ...preserveBlockContent(fresh, block), id: block.id }
           }),
@@ -1621,10 +1950,16 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       try {
         await repository.save({
           boards: nextBoards,
+          dataTables: nextDataTables,
           pages: nextPages,
           settings: state.settings,
         })
-        set({ boards: nextBoards, pages: nextPages, saveStatus: 'saved' })
+        set({
+          boards: nextBoards,
+          dataTables: nextDataTables,
+          pages: nextPages,
+          saveStatus: 'saved',
+        })
       } catch {
         set({ saveStatus: 'error' })
         throw new Error('Failed to turn block into another type')
@@ -1651,7 +1986,8 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         await repository.replace(snapshot)
         set({
           boards: snapshot.boards,
-                pages: snapshot.pages,
+          dataTables: snapshot.dataTables ?? [],
+          pages: snapshot.pages,
           settings: snapshot.settings,
           currentPageId,
           saveStatus: 'saved',
@@ -1684,7 +2020,8 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         await repository.replace(snapshot)
         set({
           boards: snapshot.boards,
-                pages: snapshot.pages,
+          dataTables: snapshot.dataTables ?? [],
+          pages: snapshot.pages,
           settings: snapshot.settings,
           currentPageId,
           saveStatus: 'saved',
@@ -1703,6 +2040,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       return JSON.stringify(
         createBackupPayload({
           boards: state.boards,
+          dataTables: state.dataTables,
           pages: state.pages,
           settings: state.settings,
         }),
@@ -1719,6 +2057,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       const state = get()
       const nextSnapshot = normalizeWorkspaceSnapshot({
         boards: [...state.boards, ...boards],
+        dataTables: state.dataTables,
         pages: [...state.pages, ...pages],
         settings: createSettings(rootPageId),
       }).snapshot
@@ -1730,6 +2069,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         await repository.save(nextSnapshot)
         set({
           boards: nextSnapshot.boards,
+          dataTables: nextSnapshot.dataTables ?? [],
           pages: nextSnapshot.pages,
           settings: nextSnapshot.settings,
           currentPageId: rootPageId,
@@ -1748,6 +2088,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       const currentPageId = resolveCurrentPageId(snapshot)
       const nextSnapshot = {
         boards: snapshot.boards,
+        dataTables: snapshot.dataTables ?? [],
         pages: snapshot.pages,
         settings: createSettings(currentPageId),
       }
@@ -1759,6 +2100,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         await repository.replace(nextSnapshot)
         set({
           boards: nextSnapshot.boards,
+          dataTables: nextSnapshot.dataTables,
           pages: nextSnapshot.pages,
           settings: nextSnapshot.settings,
           currentPageId,

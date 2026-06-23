@@ -144,6 +144,8 @@ function blockToMarkdown(
       return `[${WHITEBOARD_LINK_PREFIX}${boardTitles.get(block.boardId) ?? WHITEBOARD_LABEL}](${
         boardLinks.get(block.boardId) ?? '#'
       })`
+    case 'data_table':
+      return '[数据表格](#)'
   }
 }
 

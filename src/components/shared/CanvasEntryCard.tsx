@@ -17,6 +17,7 @@ interface CanvasEntryCardProps {
   arrowClassName?: string
   emptyPreviewClassName?: string
   previewContent?: ReactNode
+  bodyContent?: ReactNode
 }
 
 function joinClassNames(...parts: Array<string | undefined | false>) {
@@ -40,6 +41,7 @@ export function CanvasEntryCard({
   arrowClassName,
   emptyPreviewClassName,
   previewContent,
+  bodyContent,
 }: CanvasEntryCardProps) {
   return (
     <button
@@ -65,6 +67,7 @@ export function CanvasEntryCard({
       <span className={joinClassNames('canvas-entry-card-body', bodyClassName)}>
         <span className={joinClassNames('canvas-entry-card-title', titleClassName)}>{title}</span>
         <span className={joinClassNames('canvas-entry-card-meta', metaClassName)}>{meta}</span>
+        {bodyContent}
       </span>
       {isMissing ? null : (
         <span className={joinClassNames('canvas-entry-card-arrow', arrowClassName)} aria-hidden="true">
