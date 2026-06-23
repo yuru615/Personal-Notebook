@@ -39,4 +39,23 @@ describe('SlashMenu', () => {
 
     expect(options.map((option) => option.type)).toEqual(['paragraph', 'todo'])
   })
+
+  it('keeps the active option visible while navigating by keyboard', () => {
+    const scrollIntoView = vi.fn()
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView
+    HTMLElement.prototype.scrollIntoView = scrollIntoView
+
+    try {
+      const { rerender } = render(<SlashMenu query="/" activeType="paragraph" onPick={vi.fn()} />)
+
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' })
+
+      scrollIntoView.mockClear()
+      rerender(<SlashMenu query="/" activeType="data_table" onPick={vi.fn()} />)
+
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' })
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView
+    }
+  })
 })

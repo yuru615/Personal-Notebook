@@ -1495,6 +1495,11 @@ a {
   flex: 1 1 auto;
 }
 
+.todo-input-checked {
+  color: #9b9a97;
+  text-decoration: line-through;
+}
+
 .code-block {
   display: grid;
   gap: 8px;
@@ -2161,25 +2166,41 @@ a {
 
 .data-table-card-preview-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  width: 118px;
-  height: 48px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 132px;
+  height: 62px;
   overflow: hidden;
   border: 1px solid #dedbd6;
   border-radius: 5px;
   background: #ffffff;
+  color: #787774;
+  font-size: 9px;
+  line-height: 1;
 }
 
-.data-table-card-preview-grid span {
+.data-table-card-preview-cell {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 5px;
   border-right: 1px solid #efeeeb;
   border-bottom: 1px solid #efeeeb;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.data-table-card-preview-grid span:nth-child(3n) {
+.data-table-card-preview-heading {
+  background: #f7f6f3;
+  color: #5f5e59;
+  font-weight: 600;
+}
+
+.data-table-card-preview-cell:nth-child(3n) {
   border-right: 0;
 }
 
-.data-table-card-preview-grid span:nth-last-child(-n + 3) {
+.data-table-card-preview-cell:nth-last-child(-n + 3) {
   border-bottom: 0;
 }
 
@@ -2201,6 +2222,10 @@ a {
 .data-table-card-record::before {
   color: #b8b4ad;
   content: "• ";
+}
+
+.data-table-card-record::before {
+  content: "\2022 ";
 }
 
 .data-table-card-shell {

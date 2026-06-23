@@ -1,4 +1,5 @@
 ﻿import type { RefObject } from 'react'
+import { useEffect } from 'react'
 import type { BlockType } from '../../domain/types'
 import type { FloatingMenuPlacement } from './floatingMenu'
 
@@ -147,6 +148,16 @@ export function SlashMenu({
     }))
     .filter((group) => group.options.length > 0)
 
+  useEffect(() => {
+    if (!activeType) {
+      return
+    }
+
+    document
+      .querySelector<HTMLElement>(`.slash-option[data-slash-option-type="${activeType}"]`)
+      ?.scrollIntoView?.({ block: 'nearest' })
+  }, [activeType, query])
+
   return (
     <div
       ref={menuRef}
@@ -168,6 +179,7 @@ export function SlashMenu({
                     key={option.type}
                     type="button"
                     className={`slash-option${activeType === option.type ? ' slash-option-active' : ''}`}
+                    data-slash-option-type={option.type}
                     aria-label={option.label}
                     aria-selected={activeType === option.type ? 'true' : undefined}
                     onClick={() => onPick(option.type)}

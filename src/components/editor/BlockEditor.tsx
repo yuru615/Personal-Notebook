@@ -23,6 +23,7 @@ import { ParagraphBlock } from './blocks/ParagraphBlock'
 import { TableBlock } from './blocks/TableBlock'
 import { TodoBlock } from './blocks/TodoBlock'
 import { WhiteboardBlock } from './blocks/WhiteboardBlock'
+import { getSlashMenuOptions, SlashMenu } from './SlashMenu'
 import type { ReorderPosition } from '../../utils/reorder'
 
 interface DropTarget {
@@ -32,6 +33,11 @@ interface DropTarget {
 interface FocusRequest {
   blockId: string
   mode: 'any' | 'rich_text' | 'textarea'
+}
+interface BlockSlashCommand {
+  blockId: string
+  query: string
+  activeOptionIndex: number
 }
 
 interface BlockEditorProps {
@@ -87,9 +93,20 @@ export function BlockEditor({
   const draggingBlockId = useRef<string | null>(null)
   const pendingFocusBlockId = useRef<FocusRequest | null>(null)
   const scrollFrameId = useRef<number | null>(null)
+  const slashMenuRef = useRef<HTMLDivElement | null>(null)
   const [draggingVisualBlockId, setDraggingVisualBlockId] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
+  const [blockSlashCommand, setBlockSlashCommand] = useState<BlockSlashCommand | null>(null)
   const [focusRequestVersion, setFocusRequestVersion] = useState(0)
+  const blockSlashMenuOptions = blockSlashCommand
+    ? getSlashMenuOptions(blockSlashCommand.query, allowedBlockTypes)
+    : []
+  const activeBlockSlashOption =
+    blockSlashCommand &&
+    blockSlashCommand.activeOptionIndex >= 0 &&
+    blockSlashCommand.activeOptionIndex < blockSlashMenuOptions.length
+      ? blockSlashMenuOptions[blockSlashCommand.activeOptionIndex]
+      : null
 
   useEffect(() => {
     const focusRequest = pendingFocusBlockId.current
@@ -249,6 +266,17 @@ export function BlockEditor({
         >
           {content}
         </BlockFrame>
+        {blockSlashCommand?.blockId === blockId ? (
+          <SlashMenu
+            query={blockSlashCommand.query}
+            activeType={activeBlockSlashOption?.type ?? null}
+            allowedBlockTypes={allowedBlockTypes}
+            menuRef={slashMenuRef}
+            onPick={(type) => {
+              void pickBlockSlashCommand(type)
+            }}
+          />
+        ) : null}
       </div>
     )
   }
@@ -306,6 +334,17 @@ export function BlockEditor({
   async function turnBlockInto(blockId: string, type: BlockType) {
     await onTurnInto?.(blockId, type)
     requestBlockFocus(blockId, getFocusModeForBlockType(type))
+  }
+
+  async function pickBlockSlashCommand(type: BlockType) {
+    const command = blockSlashCommand
+
+    if (!command) {
+      return
+    }
+
+    setBlockSlashCommand(null)
+    await turnBlockInto(command.blockId, type)
   }
 
   function focusPreviousBlockAfterDelete(blockId: string) {
@@ -480,6 +519,100 @@ export function BlockEditor({
       }
     >,
   ) {
+    if (blockSlashCommand?.blockId === block.id) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setBlockSlashCommand(null)
+        return
+      }
+
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        setBlockSlashCommand((current) =>
+          current?.blockId === block.id
+            ? {
+                ...current,
+                activeOptionIndex:
+                  blockSlashMenuOptions.length === 0
+                    ? -1
+                    : current.activeOptionIndex < 0
+                      ? 0
+                      : (current.activeOptionIndex + 1) % blockSlashMenuOptions.length,
+              }
+            : current,
+        )
+        return
+      }
+
+      if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        setBlockSlashCommand((current) =>
+          current?.blockId === block.id
+            ? {
+                ...current,
+                activeOptionIndex:
+                  blockSlashMenuOptions.length === 0
+                    ? -1
+                    : current.activeOptionIndex <= 0
+                      ? blockSlashMenuOptions.length - 1
+                      : current.activeOptionIndex - 1,
+              }
+            : current,
+        )
+        return
+      }
+
+      if (event.key === 'Enter') {
+        event.preventDefault()
+
+        if (activeBlockSlashOption) {
+          void pickBlockSlashCommand(activeBlockSlashOption.type)
+        }
+
+        return
+      }
+
+      if (event.key === 'Backspace') {
+        event.preventDefault()
+        setBlockSlashCommand((current) =>
+          current?.blockId === block.id && current.query.length > 1
+            ? { ...current, query: current.query.slice(0, -1), activeOptionIndex: -1 }
+            : null,
+        )
+        return
+      }
+
+      if (
+        event.key.length === 1 &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.nativeEvent.isComposing
+      ) {
+        event.preventDefault()
+        setBlockSlashCommand((current) =>
+          current?.blockId === block.id
+            ? { ...current, query: `${current.query}${event.key}`, activeOptionIndex: -1 }
+            : current,
+        )
+        return
+      }
+    }
+
+    if (
+      event.key === '/' &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.nativeEvent.isComposing &&
+      getLiveEditableBlockText(event.currentTarget, block).trim().length === 0
+    ) {
+      event.preventDefault()
+      setBlockSlashCommand({ blockId: block.id, query: '/', activeOptionIndex: -1 })
+      return
+    }
+
     if (
       event.key === 'ArrowDown' &&
       !event.shiftKey &&
@@ -539,7 +672,25 @@ export function BlockEditor({
   }
 
   return (
-    <section className="editor-surface" onInput={keepInputInView}>
+    <section
+      className="editor-surface"
+      onInput={keepInputInView}
+      onPointerDownCapture={(event) => {
+        if (!blockSlashCommand || !(event.target instanceof Element)) {
+          return
+        }
+
+        const targetRow = event.target.closest<HTMLElement>('.editor-row')
+        if (
+          slashMenuRef.current?.contains(event.target) ||
+          targetRow?.dataset.blockId === blockSlashCommand.blockId
+        ) {
+          return
+        }
+
+        setBlockSlashCommand(null)
+      }}
+    >
       {page.blocks.map((block) => {
         switch (block.type) {
           case 'paragraph':
@@ -648,13 +799,16 @@ export function BlockEditor({
           }
           case 'data_table': {
             const dataTable = dataTableMap.get(block.databaseId)
+            const recordTitles = dataTable ? getDataTableRecordTitles(dataTable) : []
 
             return renderBlockRow(
               block,
               <DataTableBlock
                 title={dataTable?.title ?? '数据表格不存在'}
                 updatedLabel={dataTable ? formatDataTableMeta(dataTable) : '引用已丢失'}
-                recordTitles={dataTable ? getDataTableRecordTitles(dataTable) : []}
+                recordTitles={recordTitles}
+                previewColumns={dataTable ? getDataTablePropertyNames(dataTable) : []}
+                previewRows={recordTitles}
                 isMissing={!dataTable}
                 onOpen={() => onOpenDataTable?.(block.databaseId)}
                 onRecover={!dataTable ? () => onRestoreDataTable?.(block.databaseId) : undefined}
@@ -802,6 +956,45 @@ function getDataTableRecordTitles(dataTable: DataTableRecord) {
 
       const title = (record as { title?: unknown }).title
       return typeof title === 'string' && title.trim() ? [title.trim()] : []
+    })
+    .slice(0, 3)
+}
+
+function getDataTablePropertyNames(dataTable: DataTableRecord) {
+  const snapshot = dataTable.snapshot
+
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    return []
+  }
+
+  const { database, properties } = snapshot as {
+    database?: unknown
+    properties?: unknown
+  }
+
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) {
+    return []
+  }
+
+  const propertyRecord = properties as Record<string, unknown>
+  const propertyIds =
+    database &&
+    typeof database === 'object' &&
+    !Array.isArray(database) &&
+    Array.isArray((database as { propertyOrder?: unknown }).propertyOrder)
+      ? (database as { propertyOrder: unknown[] }).propertyOrder.map(String)
+      : Object.keys(propertyRecord)
+
+  return propertyIds
+    .flatMap((propertyId) => {
+      const property = propertyRecord[propertyId]
+
+      if (!property || typeof property !== 'object' || Array.isArray(property)) {
+        return []
+      }
+
+      const name = (property as { name?: unknown }).name
+      return typeof name === 'string' && name.trim() ? [name.trim()] : []
     })
     .slice(0, 3)
 }

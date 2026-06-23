@@ -22,7 +22,7 @@ export function TodoBlock({ text, richText, checked, style, onChange, onKeyDown 
       />
       <RichTextEditable
         ariaLabel="待办事项"
-        className="block-input todo-input"
+        className={checked ? 'block-input todo-input todo-input-checked' : 'block-input todo-input'}
         value={text}
         richText={richText}
         style={style}

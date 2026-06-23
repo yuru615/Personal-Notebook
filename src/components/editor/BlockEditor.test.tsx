@@ -116,6 +116,25 @@ describe('BlockEditor', () => {
     expect(surface?.getAttribute('style')).toContain('background-color')
   })
 
+  it('marks checked todo text as completed', () => {
+    const todoPage = {
+      ...page,
+      blocks: [
+        { id: 'todo-open', type: 'todo' as const, text: '待办事项', checked: false },
+        { id: 'todo-done', type: 'todo' as const, text: '完成第一个待办', checked: true },
+      ],
+    }
+
+    render(<BlockEditor page={todoPage as never} allPages={[todoPage as never]} onUpdateBlock={vi.fn()} />)
+
+    const todoInputs = screen.getAllByRole('textbox', { name: '待办事项' })
+    const openTodoInput = todoInputs.find((input) => input.textContent === '待办事项')
+    const doneTodoInput = todoInputs.find((input) => input.textContent === '完成第一个待办')
+
+    expect(openTodoInput).not.toHaveClass('todo-input-checked')
+    expect(doneTodoInput).toHaveClass('todo-input-checked')
+  })
+
   it('updates table cell styles from row and column menus', async () => {
     const user = userEvent.setup()
     const onUpdateBlock = vi.fn()
@@ -334,6 +353,33 @@ describe('BlockEditor', () => {
     })
   })
 
+  it('opens the slash menu from an empty text block and turns that block into the picked type', async () => {
+    const user = userEvent.setup()
+    const onTurnInto = vi.fn()
+    const textPage = {
+      ...page,
+      blocks: [{ id: 'b1', type: 'paragraph' as const, text: '' }],
+    }
+
+    render(
+      <BlockEditor
+        page={textPage as never}
+        allPages={[textPage as never]}
+        onUpdateBlock={vi.fn()}
+        onTurnInto={onTurnInto}
+      />,
+    )
+
+    await user.click(screen.getByRole('textbox', { name: '输入正文' }))
+    await user.keyboard('/')
+
+    expect(screen.getByText('基础块')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '待办列表' }))
+
+    expect(onTurnInto).toHaveBeenCalledWith('b1', 'todo')
+  })
+
   it('renders a whiteboard card block', () => {
     const whiteboardPage = {
       ...page,
@@ -504,10 +550,55 @@ describe('BlockEditor', () => {
       />,
     )
 
-    expect(screen.getByText('需求池')).toBeInTheDocument()
-    expect(screen.getByText('本周计划')).toBeInTheDocument()
+    expect(screen.getAllByText('需求池').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('本周计划').length).toBeGreaterThan(0)
     expect(screen.getByText('客户访谈')).toBeInTheDocument()
     expect(screen.queryByText('不应显示')).not.toBeInTheDocument()
+  })
+
+  it('shows table fields and rows in the data table card preview', () => {
+    const dataTablePage = {
+      ...page,
+      blocks: [{ id: 'b6', type: 'data_table', databaseId: 'database-1' }],
+    }
+
+    render(
+      <BlockEditor
+        page={dataTablePage as never}
+        allPages={[dataTablePage as never]}
+        dataTables={[
+          {
+            id: 'database-1',
+            title: '项目数据库',
+            snapshot: {
+              version: 1,
+              database: {},
+              properties: {
+                name: { name: '名称' },
+                status: { name: '状态' },
+                owner: { name: '负责人' },
+                hidden: { name: '不应显示字段' },
+              },
+              records: {
+                r1: { title: '需求池' },
+                r2: { title: '本周计划' },
+                r3: { title: '客户访谈' },
+                r4: { title: '不应显示记录' },
+              },
+            },
+            createdAt: '2026-06-22T10:00:00.000Z',
+            updatedAt: '2026-06-22T11:59:30.000Z',
+          },
+        ] as never}
+        onUpdateBlock={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('名称')).toBeInTheDocument()
+    expect(screen.getByText('状态')).toBeInTheDocument()
+    expect(screen.getAllByText('需求池').length).toBeGreaterThan(0)
+    expect(screen.queryByText('不应显示字段')).not.toBeInTheDocument()
+    expect(screen.queryByText('不应显示记录')).not.toBeInTheDocument()
   })
 
   it('commits plain text from the blank row when pressing enter', async () => {

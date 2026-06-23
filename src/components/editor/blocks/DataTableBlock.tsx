@@ -4,23 +4,45 @@ interface DataTableBlockProps {
   title: string
   updatedLabel: string
   recordTitles?: string[]
+  previewColumns?: string[]
+  previewRows?: string[]
   isMissing: boolean
   onOpen: () => void
   onRecover?: () => void
 }
 
-function DataTablePreview() {
+function DataTablePreview({
+  columns,
+  rows,
+}: {
+  columns: string[]
+  rows: string[]
+}) {
+  const previewColumns = columns.slice(0, 3)
+  const previewRows = rows.slice(0, 2)
+
+  while (previewColumns.length < 3) {
+    previewColumns.push('')
+  }
+
+  while (previewRows.length < 2) {
+    previewRows.push('')
+  }
+
   return (
     <span className="data-table-card-preview-grid" aria-hidden="true">
-      <span />
-      <span />
-      <span />
-      <span />
-      <span />
-      <span />
-      <span />
-      <span />
-      <span />
+      {previewColumns.map((column, index) => (
+        <span key={`column-${index}`} className="data-table-card-preview-cell data-table-card-preview-heading">
+          {column}
+        </span>
+      ))}
+      {previewRows.flatMap((row, rowIndex) =>
+        previewColumns.map((_, columnIndex) => (
+          <span key={`row-${rowIndex}-${columnIndex}`} className="data-table-card-preview-cell">
+            {columnIndex === 0 ? row : ''}
+          </span>
+        )),
+      )}
     </span>
   )
 }
@@ -29,6 +51,8 @@ export function DataTableBlock({
   title,
   updatedLabel,
   recordTitles = [],
+  previewColumns = [],
+  previewRows = [],
   isMissing,
   onOpen,
   onRecover,
@@ -49,7 +73,7 @@ export function DataTableBlock({
       metaClassName="data-table-card-meta"
       arrowClassName="data-table-card-arrow"
       emptyPreviewClassName="data-table-card-preview-empty"
-      previewContent={<DataTablePreview />}
+      previewContent={<DataTablePreview columns={previewColumns} rows={previewRows} />}
       bodyContent={
         recordTitles.length > 0 ? (
           <span className="data-table-card-records" aria-label="数据表格记录预览">
