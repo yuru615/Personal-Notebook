@@ -61,6 +61,7 @@ type DatabaseTableProps = {
   selectedRecordIds?: string[];
   groupedSections?: TableGroupSection[];
   hiddenGroups?: TableHiddenGroup[];
+  loadMoreCount?: number;
   onCreateRecord?: () => void;
   onCreateRecordInGroup?: (group: TableGroupSection) => void;
   onAddProperty?: () => void;
@@ -97,6 +98,7 @@ type DatabaseTableProps = {
   onDragRecordStart?: (recordId: string) => void;
   onDragRecordEnd?: () => void;
   onReorderRecord?: (recordId: string, targetRecordId: string) => void;
+  onLoadMore?: () => void;
   onCellChange: (
     recordId: string,
     property: Property,
@@ -125,6 +127,7 @@ export default function DatabaseTable({
   selectedRecordIds = [],
   groupedSections,
   hiddenGroups = [],
+  loadMoreCount = 0,
   onCreateRecord,
   onCreateRecordInGroup,
   onAddProperty,
@@ -152,6 +155,7 @@ export default function DatabaseTable({
   onDragRecordStart,
   onDragRecordEnd,
   onReorderRecord,
+  onLoadMore,
   onCellChange,
 }: DatabaseTableProps) {
   const headerCheckboxRef = useRef<HTMLInputElement | null>(null);
@@ -167,6 +171,7 @@ export default function DatabaseTable({
     left: 0,
   });
   const hasVisibleRows = records.length > 0;
+  const canLoadMore = loadMoreCount > 0 && Boolean(onLoadMore);
   const allVisibleSelected =
     records.length > 0 && records.every((record) => selectedRecordIds.includes(record.id));
   const hasSomeVisibleSelected =
@@ -689,6 +694,19 @@ export default function DatabaseTable({
                     <span className="database-table-empty-copy">{emptyCopy}</span>
                   ) : null}
                 </div>
+              </td>
+            </tr>
+          ) : null}
+          {canLoadMore ? (
+            <tr className="database-table-load-more-row">
+              <td colSpan={totalColumnSpan}>
+                <button
+                  type="button"
+                  className="database-load-more"
+                  onClick={onLoadMore}
+                >
+                  加载更多 {loadMoreCount} 条数据
+                </button>
               </td>
             </tr>
           ) : null}

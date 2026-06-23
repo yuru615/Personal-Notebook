@@ -19,6 +19,29 @@ describe('BlockHandleMenu', () => {
     expect(screen.getByRole('button', { name: '删除' })).toBeInTheDocument()
   })
 
+  it('locks page scrolling while the menu is open', () => {
+    const originalOverflow = document.documentElement.style.overflow
+    document.documentElement.style.overflow = 'auto'
+
+    try {
+      const { unmount } = render(
+        <BlockHandleMenu
+          onTurnInto={vi.fn()}
+          onDuplicate={vi.fn()}
+          onDelete={vi.fn()}
+        />,
+      )
+
+      expect(document.documentElement.style.overflow).toBe('hidden')
+
+      unmount()
+
+      expect(document.documentElement.style.overflow).toBe('auto')
+    } finally {
+      document.documentElement.style.overflow = originalOverflow
+    }
+  })
+
   it('renders text style controls when the block supports text styling', async () => {
     const user = userEvent.setup()
     const onChangeTextStyle = vi.fn()

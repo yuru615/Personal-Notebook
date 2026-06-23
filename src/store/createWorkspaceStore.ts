@@ -57,6 +57,8 @@ export interface WorkspaceState {
   restoreMissingBoardReference: (pageId: PageId, boardId: string) => Promise<BoardRecord | null>
   cleanupOrphanBoards: () => Promise<void>
   renameDataTable: (databaseId: string, title: string) => Promise<void>
+  setDataTableIcon: (databaseId: string, icon: string | null) => Promise<void>
+  setDataTableCover: (databaseId: string, cover: string | null) => Promise<void>
   updateDataTableSnapshot: (databaseId: string, snapshot: unknown) => Promise<void>
   duplicateDataTableToPage: (pageId: PageId, databaseId: string) => Promise<DataTableRecord | null>
   restoreMissingDataTableReference: (pageId: PageId, databaseId: string) => Promise<DataTableRecord | null>
@@ -147,6 +149,12 @@ function createEmptyState(): WorkspaceState {
       throw new Error('not implemented')
     },
     renameDataTable: async () => {
+      throw new Error('not implemented')
+    },
+    setDataTableIcon: async () => {
+      throw new Error('not implemented')
+    },
+    setDataTableCover: async () => {
       throw new Error('not implemented')
     },
     updateDataTableSnapshot: async () => {
@@ -317,6 +325,27 @@ function normalizeBoards(boards: BoardRecord[]) {
     }),
     didChange,
   }
+}
+
+function renameDataTableSnapshot(snapshot: unknown, title: string) {
+  if (!snapshot || typeof snapshot !== 'object') {
+    return snapshot
+  }
+
+  const nextSnapshot = structuredClone(snapshot) as {
+    database?: Record<string, unknown>
+  }
+
+  if (!nextSnapshot.database || typeof nextSnapshot.database !== 'object') {
+    return snapshot
+  }
+
+  nextSnapshot.database = {
+    ...nextSnapshot.database,
+    name: title,
+  }
+
+  return nextSnapshot
 }
 
 function normalizeWorkspaceSnapshot(snapshot: WorkspaceSnapshot) {
@@ -537,6 +566,14 @@ function withEditableBlockText(
     default:
       return block
   }
+}
+
+function isDataTableCommandType(type: BlockType) {
+  return type === 'data_table' || type === 'data_table_inline'
+}
+
+function getDataTableDisplayMode(type: BlockType) {
+  return type === 'data_table_inline' ? 'inline' : undefined
 }
 
 function mergeEditableBlockRichText(
@@ -1150,6 +1187,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           ? {
               ...dataTable,
               title: nextTitle,
+              snapshot: renameDataTableSnapshot(dataTable.snapshot, nextTitle),
               updatedAt: new Date().toISOString(),
             }
           : dataTable,
@@ -1160,6 +1198,46 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         await persistNonPageAssets(state, { dataTables: nextDataTables })
       } catch {
         throw new Error('Failed to rename data table')
+      }
+    },
+
+    setDataTableIcon: async (databaseId: string, icon: string | null) => {
+      const state = get()
+      const nextDataTables = state.dataTables.map((dataTable) =>
+        dataTable.id === databaseId
+          ? {
+              ...dataTable,
+              icon,
+              updatedAt: new Date().toISOString(),
+            }
+          : dataTable,
+      )
+
+      pushUndoSnapshot(state)
+      try {
+        await persistNonPageAssets(state, { dataTables: nextDataTables })
+      } catch {
+        throw new Error('Failed to update data table icon')
+      }
+    },
+
+    setDataTableCover: async (databaseId: string, cover: string | null) => {
+      const state = get()
+      const nextDataTables = state.dataTables.map((dataTable) =>
+        dataTable.id === databaseId
+          ? {
+              ...dataTable,
+              cover,
+              updatedAt: new Date().toISOString(),
+            }
+          : dataTable,
+      )
+
+      pushUndoSnapshot(state)
+      try {
+        await persistNonPageAssets(state, { dataTables: nextDataTables })
+      } catch {
+        throw new Error('Failed to update data table cover')
       }
     },
 
@@ -1470,10 +1548,10 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           }
         }
 
-        if (type === 'data_table') {
+        if (isDataTableCommandType(type)) {
           const dataTable = createDataTableRecord(now)
           nextDataTables = [...state.dataTables, dataTable]
-          insertedBlock = createDataTableBlock(dataTable.id)
+          insertedBlock = createDataTableBlock(dataTable.id, getDataTableDisplayMode(type))
           didInsert = true
 
           return {
@@ -1609,10 +1687,10 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           const board = createBoardRecord(now)
           nextBoards = [...state.boards, board]
           insertedBlock = createWhiteboardBlock(board.id)
-        } else if (type === 'data_table') {
+        } else if (isDataTableCommandType(type)) {
           const dataTable = createDataTableRecord(now)
           nextDataTables = [...state.dataTables, dataTable]
-          insertedBlock = createDataTableBlock(dataTable.id)
+          insertedBlock = createDataTableBlock(dataTable.id, getDataTableDisplayMode(type))
         } else {
           insertedBlock = createBlock(type)
         }
@@ -1861,7 +1939,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
             }
 
             nextDataTables = [...state.dataTables, nextDataTable]
-            blocks.splice(index + 1, 0, createDataTableBlock(nextDataTable.id))
+            blocks.splice(index + 1, 0, createDataTableBlock(nextDataTable.id, source.displayMode))
 
             return {
               ...page,
@@ -1932,11 +2010,11 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
                     nextBoards = [...state.boards, board]
                     return createWhiteboardBlock(board.id)
                   })()
-                : type === 'data_table'
+                : isDataTableCommandType(type)
                   ? (() => {
                       const dataTable = createDataTableRecord(now)
                       nextDataTables = [...state.dataTables, dataTable]
-                      return createDataTableBlock(dataTable.id)
+                      return createDataTableBlock(dataTable.id, getDataTableDisplayMode(type))
                     })()
                 : createBlock(type)
             return { ...preserveBlockContent(fresh, block), id: block.id }

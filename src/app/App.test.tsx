@@ -1,10 +1,21 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceSnapshot } from '../domain/types'
+import { createDefaultAppState } from '../components/dataTable/domain/factory'
 import { createMemoryRepository } from '../test/memoryRepository'
 import { App } from './App'
 
 describe('App', () => {
+  let scrollTo: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
+  })
+
+  afterEach(() => {
+    scrollTo.mockRestore()
+  })
+
   it('focuses the paragraph editor after exiting an empty list item', async () => {
     const pageId = 'page_focus'
     const snapshot: WorkspaceSnapshot = {
@@ -85,5 +96,50 @@ describe('App', () => {
       'href',
       '/pages/page_parent',
     )
+  })
+
+  it('keeps the page directory visible on data table pages', async () => {
+    const pageId = 'page_database'
+    const databaseId = 'database_project'
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [
+        {
+          id: databaseId,
+          title: '项目数据库',
+          icon: null,
+          cover: null,
+          snapshot: createDefaultAppState(),
+          createdAt: '2026-06-23T00:00:00.000Z',
+          updatedAt: '2026-06-23T00:00:00.000Z',
+        },
+      ],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: '快速开始',
+          icon: null,
+          cover: null,
+          blocks: [{ id: 'block_database', type: 'data_table', databaseId }],
+          createdAt: '2026-06-23T00:00:00.000Z',
+          updatedAt: '2026-06-23T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+
+    const { container } = render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={[`/pages/${pageId}/data-tables/${databaseId}`]}
+      />,
+    )
+
+    const sidebar = await screen.findByRole('complementary', { name: '侧边栏' })
+
+    expect(sidebar).toBeInTheDocument()
+    expect(container.querySelector('.page-panel-focus')).toBeNull()
+    expect(within(sidebar).getByText('快速开始')).toBeInTheDocument()
   })
 })

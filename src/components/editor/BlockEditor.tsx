@@ -15,9 +15,11 @@ import { EmptyBlockRow } from './EmptyBlockRow'
 import { BlockFrame } from './BlockFrame'
 import { getBlockAnchorId } from './blockAnchors'
 import { getTextBackgroundStyle, getTextInputStyle } from './blockTextStyle'
+import { useFloatingMenuLayout } from './floatingMenu'
 import { ChildPageBlock } from './blocks/ChildPageBlock'
 import { CodeBlock } from './blocks/CodeBlock'
 import { DataTableBlock } from './blocks/DataTableBlock'
+import { EmbeddedDataTableBlock } from './blocks/EmbeddedDataTableBlock'
 import { ListBlock } from './blocks/ListBlock'
 import { ParagraphBlock } from './blocks/ParagraphBlock'
 import { TableBlock } from './blocks/TableBlock'
@@ -64,6 +66,7 @@ interface BlockEditorProps {
   onRestoreWhiteboard?: (boardId: string) => void
   onOpenDataTable?: (databaseId: string) => void
   onRestoreDataTable?: (databaseId: string) => void
+  onUpdateDataTableSnapshot?: (databaseId: string, snapshot: unknown) => void
 }
 
 export function BlockEditor({
@@ -86,6 +89,7 @@ export function BlockEditor({
   onRestoreWhiteboard,
   onOpenDataTable,
   onRestoreDataTable,
+  onUpdateDataTableSnapshot,
 }: BlockEditorProps) {
   const childPageTitleMap = Object.fromEntries(allPages.map((item) => [item.id, item.title]))
   const boardMap = new Map(boards.map((board) => [board.id, board]))
@@ -93,6 +97,7 @@ export function BlockEditor({
   const draggingBlockId = useRef<string | null>(null)
   const pendingFocusBlockId = useRef<FocusRequest | null>(null)
   const scrollFrameId = useRef<number | null>(null)
+  const slashMenuAnchorRef = useRef<HTMLDivElement | null>(null)
   const slashMenuRef = useRef<HTMLDivElement | null>(null)
   const [draggingVisualBlockId, setDraggingVisualBlockId] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
@@ -107,6 +112,11 @@ export function BlockEditor({
     blockSlashCommand.activeOptionIndex < blockSlashMenuOptions.length
       ? blockSlashMenuOptions[blockSlashCommand.activeOptionIndex]
       : null
+  const blockSlashMenuLayout = useFloatingMenuLayout({
+    open: blockSlashCommand !== null,
+    anchorRef: slashMenuAnchorRef,
+    menuRef: slashMenuRef,
+  })
 
   useEffect(() => {
     const focusRequest = pendingFocusBlockId.current
@@ -211,6 +221,11 @@ export function BlockEditor({
         id={getBlockAnchorId(blockId)}
         data-block-id={blockId}
         className={rowClassName}
+        ref={(element) => {
+          if (blockSlashCommand?.blockId === blockId) {
+            slashMenuAnchorRef.current = element
+          }
+        }}
         onDragOver={(event) => {
           event.preventDefault()
 
@@ -272,6 +287,8 @@ export function BlockEditor({
             activeType={activeBlockSlashOption?.type ?? null}
             allowedBlockTypes={allowedBlockTypes}
             menuRef={slashMenuRef}
+            placement={blockSlashMenuLayout.placement}
+            maxHeight={blockSlashMenuLayout.maxHeight}
             onPick={(type) => {
               void pickBlockSlashCommand(type)
             }}
@@ -800,6 +817,20 @@ export function BlockEditor({
           case 'data_table': {
             const dataTable = dataTableMap.get(block.databaseId)
             const recordTitles = dataTable ? getDataTableRecordTitles(dataTable) : []
+
+            if (block.displayMode === 'inline' && dataTable) {
+              return renderBlockRow(
+                block,
+                <EmbeddedDataTableBlock
+                  dataTable={dataTable}
+                  basePath={`/pages/${page.id}/data-tables/${block.databaseId}`}
+                  onOpen={() => onOpenDataTable?.(block.databaseId)}
+                  onChange={(snapshot) => {
+                    onUpdateDataTableSnapshot?.(block.databaseId, snapshot)
+                  }}
+                />,
+              )
+            }
 
             return renderBlockRow(
               block,

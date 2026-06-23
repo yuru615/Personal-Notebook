@@ -1,4 +1,5 @@
 import type { RefObject } from 'react'
+import { useEffect } from 'react'
 import type { BlockBackgroundColor, BlockType, TextBlockStyle, TextColor } from '../../domain/types'
 import { blockBackgroundColorValues, textColorValues } from './blockTextStyle'
 import type { FloatingMenuPlacement } from './floatingMenu'
@@ -56,6 +57,16 @@ export function BlockHandleMenu({
   onDuplicate,
   onDelete,
 }: BlockHandleMenuProps) {
+  useEffect(() => {
+    const root = document.documentElement
+    const previousOverflow = root.style.overflow
+    root.style.overflow = 'hidden'
+
+    return () => {
+      root.style.overflow = previousOverflow
+    }
+  }, [])
+
   const currentTextStyle = textStyle ?? {}
   const allowedTypes = allowedBlockTypes ? new Set(allowedBlockTypes) : null
   const filteredTurnIntoOptions = allowedTypes

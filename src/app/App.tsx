@@ -27,6 +27,7 @@ import { WhiteboardCanvas } from '../components/whiteboard/WhiteboardCanvas'
 import { isWhiteboardSnapshot } from '../components/whiteboard/whiteboardModel'
 import { WhiteboardPage } from '../components/whiteboard/WhiteboardPage'
 import type {
+  BlockType,
   BoardRecord,
   DataTableRecord,
   PageFontFamily,
@@ -152,6 +153,15 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onUpdateDataTableSnapshot={(databaseId, snapshot) =>
         store.getState().updateDataTableSnapshot(databaseId, snapshot)
       }
+      onRenameDataTable={(databaseId, title) =>
+        store.getState().renameDataTable(databaseId, title)
+      }
+      onChangeDataTableIcon={(databaseId, icon) =>
+        store.getState().setDataTableIcon(databaseId, icon)
+      }
+      onChangeDataTableCover={(databaseId, cover) =>
+        store.getState().setDataTableCover(databaseId, cover)
+      }
       onRestoreMissingDataTable={(pageId, databaseId) =>
         store.getState().restoreMissingDataTableReference(pageId, databaseId)
       }
@@ -266,6 +276,9 @@ interface AppRoutesProps {
   onDuplicateBoard: (pageId: string, boardId: string) => Promise<string | null>
   onRestoreMissingBoard: (pageId: string, boardId: string) => Promise<BoardRecord | null>
   onUpdateDataTableSnapshot: (databaseId: string, snapshot: unknown) => Promise<void>
+  onRenameDataTable: (databaseId: string, title: string) => Promise<void>
+  onChangeDataTableIcon: (databaseId: string, icon: string | null) => Promise<void>
+  onChangeDataTableCover: (databaseId: string, cover: string | null) => Promise<void>
   onRestoreMissingDataTable: (pageId: string, databaseId: string) => Promise<DataTableRecord | null>
 
   onTogglePageFullWidth: (pageId: string, isFullWidth: boolean) => Promise<void>
@@ -281,13 +294,13 @@ interface AppRoutesProps {
   ) => Promise<void>
   onInsertBlock: (
     pageId: string,
-    type: PageRecord['blocks'][number]['type'],
+    type: BlockType,
   ) => Promise<string | null>
   onInsertParagraphBlock: (pageId: string, text: string) => Promise<void>
   onInsertBlockAfter: (
     pageId: string,
     blockId: string,
-    type: PageRecord['blocks'][number]['type'],
+    type: BlockType,
   ) => Promise<string | null>
   onReorderPage: (activePageId: string, overPageId: string) => Promise<void>
   onReorderBlock: (
@@ -302,7 +315,7 @@ interface AppRoutesProps {
   onTurnBlockInto: (
     pageId: string,
     blockId: string,
-    type: PageRecord['blocks'][number]['type'],
+    type: BlockType,
   ) => Promise<void>
   saveStatus: SaveStatus
   reversibleExport: boolean
@@ -329,6 +342,9 @@ function AppRoutes({
   onDuplicateBoard,
   onRestoreMissingBoard,
   onUpdateDataTableSnapshot,
+  onRenameDataTable,
+  onChangeDataTableIcon,
+  onChangeDataTableCover,
   onRestoreMissingDataTable,
 
   onTogglePageFullWidth,
@@ -359,7 +375,6 @@ function AppRoutes({
 }: AppRoutesProps) {
   const navigate = useNavigate()
   const isWhiteboardRoute = useMatch('/pages/:pageId/boards/:boardId') !== null
-  const isDataTableRoute = useMatch('/pages/:pageId/data-tables/:databaseId/*') !== null
   const [isSearchOpen, setIsSearchOpen] = useState(false)
 
   async function handleCreatePage() {
@@ -395,7 +410,7 @@ function AppRoutes({
 
   return (
     <AppShell
-      hideSidebar={isWhiteboardRoute || isDataTableRoute}
+      hideSidebar={isWhiteboardRoute}
       sidebar={
         <SidebarTree
           pages={pages}
@@ -473,6 +488,7 @@ function AppRoutes({
                 onImportMarkdown={onImportMarkdown}
                 onCleanupOrphanBoards={onCleanupOrphanBoards}
                 onCleanupOrphanDataTables={onCleanupOrphanDataTables}
+                onUpdateDataTableSnapshot={onUpdateDataTableSnapshot}
                 onRestoreMissingBoard={onRestoreMissingBoard}
                 onRestoreMissingDataTable={onRestoreMissingDataTable}
               />
@@ -505,6 +521,9 @@ function AppRoutes({
                 route="table"
                 onRoutePageChange={onRoutePageChange}
                 onUpdateDataTableSnapshot={onUpdateDataTableSnapshot}
+                onRenameDataTable={onRenameDataTable}
+                onChangeDataTableIcon={onChangeDataTableIcon}
+                onChangeDataTableCover={onChangeDataTableCover}
                 onRestoreMissingDataTable={onRestoreMissingDataTable}
               />
             }
@@ -520,6 +539,9 @@ function AppRoutes({
                 route="record"
                 onRoutePageChange={onRoutePageChange}
                 onUpdateDataTableSnapshot={onUpdateDataTableSnapshot}
+                onRenameDataTable={onRenameDataTable}
+                onChangeDataTableIcon={onChangeDataTableIcon}
+                onChangeDataTableCover={onChangeDataTableCover}
                 onRestoreMissingDataTable={onRestoreMissingDataTable}
               />
             }
@@ -550,13 +572,13 @@ interface PageRouteProps {
   ) => Promise<void>
   onInsertBlock: (
     pageId: string,
-    type: PageRecord['blocks'][number]['type'],
+    type: BlockType,
   ) => Promise<string | null>
   onInsertParagraphBlock: (pageId: string, text: string) => Promise<void>
   onInsertBlockAfter: (
     pageId: string,
     blockId: string,
-    type: PageRecord['blocks'][number]['type'],
+    type: BlockType,
   ) => Promise<string | null>
   onReorderBlock: (
     pageId: string,
@@ -570,7 +592,7 @@ interface PageRouteProps {
   onTurnBlockInto: (
     pageId: string,
     blockId: string,
-    type: PageRecord['blocks'][number]['type'],
+    type: BlockType,
   ) => Promise<void>
   saveStatus: SaveStatus
   reversibleExport: boolean
@@ -581,6 +603,7 @@ interface PageRouteProps {
   onImportMarkdown: (file: File) => Promise<string | null>
   onCleanupOrphanBoards: () => Promise<void>
   onCleanupOrphanDataTables: () => Promise<void>
+  onUpdateDataTableSnapshot: (databaseId: string, snapshot: unknown) => Promise<void>
   onRestoreMissingBoard: (pageId: string, boardId: string) => Promise<BoardRecord | null>
   onRestoreMissingDataTable: (pageId: string, databaseId: string) => Promise<DataTableRecord | null>
 }
@@ -616,6 +639,7 @@ function PageRoute({
   onImportMarkdown,
   onCleanupOrphanBoards,
   onCleanupOrphanDataTables,
+  onUpdateDataTableSnapshot,
   onRestoreMissingBoard,
   onRestoreMissingDataTable,
 }: PageRouteProps) {
@@ -745,6 +769,9 @@ function PageRoute({
           onOpenDataTable={(databaseId) => {
             navigate(`/pages/${page.id}/data-tables/${databaseId}`)
           }}
+          onUpdateDataTableSnapshot={(databaseId, snapshot) => {
+            void onUpdateDataTableSnapshot(databaseId, snapshot)
+          }}
           onRestoreDataTable={async (databaseId) => {
             const dataTable = await onRestoreMissingDataTable(page.id, databaseId)
             if (dataTable) {
@@ -817,6 +844,9 @@ interface DataTableRouteProps {
   route: 'table' | 'record'
   onRoutePageChange: (pageId: string) => Promise<void>
   onUpdateDataTableSnapshot: (databaseId: string, snapshot: unknown) => Promise<void>
+  onRenameDataTable: (databaseId: string, title: string) => Promise<void>
+  onChangeDataTableIcon: (databaseId: string, icon: string | null) => Promise<void>
+  onChangeDataTableCover: (databaseId: string, cover: string | null) => Promise<void>
   onRestoreMissingDataTable: (pageId: string, databaseId: string) => Promise<DataTableRecord | null>
 }
 
@@ -828,6 +858,9 @@ function DataTableRoute({
   route,
   onRoutePageChange,
   onUpdateDataTableSnapshot,
+  onRenameDataTable,
+  onChangeDataTableIcon,
+  onChangeDataTableCover,
   onRestoreMissingDataTable,
 }: DataTableRouteProps) {
   const { pageId, databaseId, recordId } = useParams()
@@ -882,10 +915,24 @@ function DataTableRoute({
       route={route}
       basePath={basePath}
       breadcrumbs={breadcrumbs}
-      onBack={() => navigate(`/pages/${page.id}`)}
       onChange={(snapshot) => {
         if (dataTable) {
           void onUpdateDataTableSnapshot(dataTable.id, snapshot)
+        }
+      }}
+      onRename={(title) => {
+        if (dataTable) {
+          void onRenameDataTable(dataTable.id, title)
+        }
+      }}
+      onChangeIcon={(icon) => {
+        if (dataTable) {
+          void onChangeDataTableIcon(dataTable.id, icon)
+        }
+      }}
+      onChangeCover={(cover) => {
+        if (dataTable) {
+          void onChangeDataTableCover(dataTable.id, cover)
         }
       }}
     />

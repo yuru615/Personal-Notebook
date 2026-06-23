@@ -113,6 +113,7 @@ export function createDefaultDatabaseView(
     calendarDatePropertyId: null,
     openMode: "sidePeek",
     tableWidthMode: "fitPage",
+    tablePageSize: 10,
     wrapCells: false,
     freezeFirstColumn: false,
     hiddenPropertyIds: [],

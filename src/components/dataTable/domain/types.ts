@@ -86,6 +86,7 @@ export type DatabaseView = {
   calendarDatePropertyId: string | null;
   openMode: "sidePeek" | "centerPeek" | "fullPage";
   tableWidthMode: "fitPage" | "content";
+  tablePageSize: number;
   wrapCells: boolean;
   freezeFirstColumn: boolean;
   hiddenPropertyIds: string[];

@@ -27,11 +27,12 @@ describe('SlashMenu', () => {
     expect(screen.getByText('插入一个可点击进入的白板卡片')).toBeInTheDocument()
   })
 
-  it('shows the data table option', () => {
+  it('shows data table page and inline options', () => {
     render(<SlashMenu query="/数据" onPick={vi.fn()} />)
 
-    expect(screen.getByRole('button', { name: '数据表格' })).toBeInTheDocument()
-    expect(screen.getByText('插入一个可点击进入的数据库表格')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '数据表格-子页面' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '数据表格-嵌入' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '数据表格' })).not.toBeInTheDocument()
   })
 
   it('filters options by allowed block types', () => {
@@ -51,11 +52,28 @@ describe('SlashMenu', () => {
       expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' })
 
       scrollIntoView.mockClear()
-      rerender(<SlashMenu query="/" activeType="data_table" onPick={vi.fn()} />)
+      rerender(<SlashMenu query="/" activeType="data_table_inline" onPick={vi.fn()} />)
 
       expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' })
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView
+    }
+  })
+
+  it('locks page scrolling while the menu is open', () => {
+    const originalOverflow = document.documentElement.style.overflow
+    document.documentElement.style.overflow = 'auto'
+
+    try {
+      const { unmount } = render(<SlashMenu query="/" onPick={vi.fn()} />)
+
+      expect(document.documentElement.style.overflow).toBe('hidden')
+
+      unmount()
+
+      expect(document.documentElement.style.overflow).toBe('auto')
+    } finally {
+      document.documentElement.style.overflow = originalOverflow
     }
   })
 })

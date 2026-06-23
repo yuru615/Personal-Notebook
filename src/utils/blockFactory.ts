@@ -36,23 +36,33 @@ export function createDataTableRecord(now = new Date().toISOString()): DataTable
   return {
     id: snapshot.database.id,
     title: snapshot.database.name,
+    icon: null,
+    cover: null,
     snapshot,
     createdAt: now,
     updatedAt: now,
   }
 }
 
-export function createDataTableBlock(databaseId: DataTableId): DataTableBlock {
+export function createDataTableBlock(
+  databaseId: DataTableId,
+  displayMode?: DataTableBlock['displayMode'],
+): DataTableBlock {
   return {
     id: createId('block'),
     type: 'data_table',
     databaseId,
+    ...(displayMode ? { displayMode } : {}),
   }
 }
 
 export function createBlock(
   type: BlockType,
-  options?: { boardId?: BoardId; databaseId?: DataTableId },
+  options?: {
+    boardId?: BoardId
+    databaseId?: DataTableId
+    dataTableDisplayMode?: DataTableBlock['displayMode']
+  },
 ): BlockRecord {
   switch (type) {
     case 'paragraph':
@@ -78,10 +88,14 @@ export function createBlock(
 
       return createWhiteboardBlock(options.boardId)
     case 'data_table':
+    case 'data_table_inline':
       if (!options?.databaseId) {
         throw new Error('Data table block requires databaseId')
       }
 
-      return createDataTableBlock(options.databaseId)
+      return createDataTableBlock(
+        options.databaseId,
+        type === 'data_table_inline' ? 'inline' : options.dataTableDisplayMode,
+      )
   }
 }

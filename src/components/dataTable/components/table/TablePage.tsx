@@ -1,5 +1,13 @@
 import { Search } from "lucide-react";
-import { useEffect, useMemo, useState, type MouseEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import { applyFilters, applySort, evaluateFormulaValue } from "../../domain/query";
 import type { AppState, DatabaseRecord, Property, RecordValue } from "../../domain/types";
@@ -78,9 +86,16 @@ function getInitialValueForTableGroup(
 interface TablePageProps {
   basePath: string;
   showSidebar?: boolean;
+  isEmbedded?: boolean;
+  showHeader?: boolean;
 }
 
-export default function TablePage({ basePath, showSidebar = true }: TablePageProps) {
+export default function TablePage({
+  basePath,
+  showSidebar = true,
+  isEmbedded = false,
+  showHeader = true,
+}: TablePageProps) {
   const navigate = useNavigate();
   const { state, loaded, saveStatus, replaceState, actions } = useAppStore();
   const [activePanel, setActivePanel] = useState<TablePanel | null>(null);
@@ -96,6 +111,7 @@ export default function TablePage({ basePath, showSidebar = true }: TablePagePro
   const [activeColumnMenuPropertyId, setActiveColumnMenuPropertyId] = useState<
     string | null
   >(null);
+  const toolbarPopoverLayerRef = useRef<HTMLDivElement | null>(null);
   const orderedViews = state.database.viewOrder
     .map((id) => state.database.views[id])
     .filter(Boolean);
@@ -129,11 +145,13 @@ export default function TablePage({ basePath, showSidebar = true }: TablePagePro
     calendarDatePropertyId,
     openMode,
     tableWidthMode,
+    tablePageSize,
     wrapCells,
     freezeFirstColumn,
     hiddenPropertyIds,
     columnWidths,
   } = activeView;
+  const [visibleRecordCount, setVisibleRecordCount] = useState(tablePageSize);
   const hasAnyRecords = Object.keys(state.records).length > 0;
   const orderedProperties = state.database.propertyOrder
     .map((id) => state.properties[id])
@@ -195,6 +213,21 @@ export default function TablePage({ basePath, showSidebar = true }: TablePagePro
         (rank.get(right.id) ?? Number.MAX_SAFE_INTEGER),
     );
   }, [filteredRecords, recordOrder, sort, state]);
+  const tableRecords = useMemo(
+    () =>
+      isEmbedded && layout === "table"
+        ? orderedRecords.slice(0, visibleRecordCount)
+        : orderedRecords,
+    [isEmbedded, layout, orderedRecords, visibleRecordCount],
+  );
+  const remainingTableRecordCount =
+    isEmbedded && layout === "table"
+      ? Math.max(orderedRecords.length - tableRecords.length, 0)
+      : 0;
+  const loadMoreTableRecordCount = Math.min(
+    tablePageSize,
+    remainingTableRecordCount,
+  );
   const boardOrderedRecords = useMemo(() => {
     if (sort) {
       return orderedRecords;
@@ -243,14 +276,14 @@ export default function TablePage({ basePath, showSidebar = true }: TablePagePro
     () =>
       buildTableGroupingResult(
         tableGroupProperty,
-        orderedRecords,
+        tableRecords,
         tableGroupOrder,
         tableHiddenGroupIds,
         tableCollapsedGroupIds,
         tableHideEmptyGroups,
       ),
     [
-      orderedRecords,
+      tableRecords,
       tableGroupOrder,
       tableGroupProperty,
       tableHiddenGroupIds,
@@ -266,12 +299,18 @@ export default function TablePage({ basePath, showSidebar = true }: TablePagePro
     : [];
   const filterCount = filters.filter((filter) => filter.propertyId).length;
   const sortCount = sort ? 1 : 0;
-  const selectedVisibleCount = orderedRecords.filter((record) =>
+  const selectedVisibleCount = tableRecords.filter((record) =>
     selectedRecordIds.includes(record.id),
   ).length;
+  const databasePageClassName = [
+    tableWidthMode === "fitPage" ? "database-page is-full-width" : "database-page",
+    showHeader ? "" : "database-page-without-header",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   useEffect(() => {
-    const visibleIds = new Set(orderedRecords.map((record) => record.id));
+    const visibleIds = new Set(tableRecords.map((record) => record.id));
     setSelectedRecordIds((current) =>
       {
         const next = current.filter((recordId) => visibleIds.has(recordId));
@@ -286,7 +325,11 @@ export default function TablePage({ basePath, showSidebar = true }: TablePagePro
         return next;
       },
     );
-  }, [orderedRecords]);
+  }, [tableRecords]);
+
+  useEffect(() => {
+    setVisibleRecordCount(tablePageSize);
+  }, [activeViewId, filters, layout, searchQuery, sort, tablePageSize]);
 
   useEffect(() => {
     const nextIds = Object.values(state.records)
@@ -346,6 +389,52 @@ export default function TablePage({ basePath, showSidebar = true }: TablePagePro
 
     setPendingDeletePropertyId(null);
   }, [pendingDeletePropertyId, state.properties]);
+
+  const updateToolbarPopoverMaxHeight = useCallback(() => {
+    const layer = toolbarPopoverLayerRef.current;
+
+    if (!layer) {
+      return;
+    }
+
+    const top = layer.getBoundingClientRect().top;
+    const maxHeight = Math.max(0, Math.floor(window.innerHeight - top - 16));
+    layer.style.setProperty("--database-toolbar-popover-max-height", `${maxHeight}px`);
+  }, []);
+
+  useLayoutEffect(() => {
+    const layer = toolbarPopoverLayerRef.current;
+
+    if (!layer) {
+      return;
+    }
+
+    if (!activePanel) {
+      layer.style.removeProperty("--database-toolbar-popover-max-height");
+      return;
+    }
+
+    updateToolbarPopoverMaxHeight();
+    window.addEventListener("resize", updateToolbarPopoverMaxHeight);
+
+    return () => {
+      window.removeEventListener("resize", updateToolbarPopoverMaxHeight);
+    };
+  }, [activePanel, updateToolbarPopoverMaxHeight]);
+
+  useEffect(() => {
+    if (!activePanel) {
+      return;
+    }
+
+    const root = document.documentElement;
+    const previousOverflow = root.style.overflow;
+    root.style.overflow = "hidden";
+
+    return () => {
+      root.style.overflow = previousOverflow;
+    };
+  }, [activePanel]);
 
   useEffect(() => {
     if (!activePanel && !activeColumnMenuPropertyId) {
@@ -501,7 +590,7 @@ export default function TablePage({ basePath, showSidebar = true }: TablePagePro
 
   const toggleAllVisibleRows = () => {
     setActiveColumnMenuPropertyId(null);
-    const visibleIds = orderedRecords.map((record) => record.id);
+    const visibleIds = tableRecords.map((record) => record.id);
     const allSelected =
       visibleIds.length > 0 &&
       visibleIds.every((recordId) => selectedRecordIds.includes(recordId));
@@ -712,20 +801,16 @@ export default function TablePage({ basePath, showSidebar = true }: TablePagePro
       showSidebar={showSidebar}
     >
       <main className="database-page-shell">
-        <section
-          className={
-            tableWidthMode === "fitPage"
-              ? "database-page is-full-width"
-              : "database-page"
-          }
-        >
+        <section className={databasePageClassName}>
           {showSidebar ? <div className="database-page-breadcrumb">工作区 / 数据库</div> : null}
-          <header className="database-page-header">
-            <div className="database-page-title-row">
-              <span className="database-page-icon" aria-hidden="true" />
-              <h1>{state.database.name}</h1>
-            </div>
-          </header>
+          {showHeader ? (
+            <header className="database-page-header">
+              <div className="database-page-title-row">
+                <span className="database-page-icon" aria-hidden="true" />
+                <h1>{state.database.name}</h1>
+              </div>
+            </header>
+          ) : null}
 
           <div className="database-toolbar-region">
             <TableToolbar
@@ -750,7 +835,10 @@ export default function TablePage({ basePath, showSidebar = true }: TablePagePro
               onCreateRecord={() => actions.createRecord()}
             />
 
-            <div className="database-toolbar-floating-layer database-toolbar-floating-layer--centered">
+            <div
+              ref={toolbarPopoverLayerRef}
+              className="database-toolbar-floating-layer database-toolbar-floating-layer--centered"
+            >
               {activePanel === "viewOptions" ? (
                 <ToolbarPopover title="视图设置">
                   <ViewOptionsMenu
@@ -758,6 +846,8 @@ export default function TablePage({ basePath, showSidebar = true }: TablePagePro
                     activeViewId={activeViewId}
                     openMode={openMode}
                     tableWidthMode={tableWidthMode}
+                    tablePageSize={tablePageSize}
+                    showTablePageSize={isEmbedded}
                     wrapCells={wrapCells}
                     freezeFirstColumn={freezeFirstColumn}
                     properties={orderedProperties}
@@ -841,6 +931,9 @@ export default function TablePage({ basePath, showSidebar = true }: TablePagePro
                     onTableWidthModeChange={(mode) =>
                       actions.updateActiveView({ tableWidthMode: mode })
                     }
+                    onTablePageSizeChange={(size) =>
+                      actions.updateActiveView({ tablePageSize: size })
+                    }
                     onWrapCellsChange={(nextValue) =>
                       actions.updateActiveView({ wrapCells: nextValue })
                     }
@@ -904,7 +997,7 @@ export default function TablePage({ basePath, showSidebar = true }: TablePagePro
               <DatabaseTable
               state={state}
               properties={visibleProperties}
-              records={orderedRecords}
+              records={tableRecords}
               hasAnyRecords={hasAnyRecords}
               tableWidthMode={tableWidthMode}
               wrapCells={wrapCells}
@@ -918,6 +1011,7 @@ export default function TablePage({ basePath, showSidebar = true }: TablePagePro
               selectedRecordIds={selectedRecordIds}
               groupedSections={tableGrouping?.sections}
               hiddenGroups={tableGrouping?.hiddenSections}
+              loadMoreCount={loadMoreTableRecordCount}
               onCreateRecord={() => actions.createRecord()}
               onCreateRecordInGroup={createRecordInTableGroup}
               onAddProperty={() => {
@@ -959,6 +1053,9 @@ export default function TablePage({ basePath, showSidebar = true }: TablePagePro
               onDragRecordStart={setDraggingRecordId}
               onDragRecordEnd={() => setDraggingRecordId(null)}
               onReorderRecord={reorderRecord}
+              onLoadMore={() =>
+                setVisibleRecordCount((current) => current + tablePageSize)
+              }
               onCellChange={(recordId, property, value) =>
                 actions.updateRecordValue(recordId, property, value)
               }

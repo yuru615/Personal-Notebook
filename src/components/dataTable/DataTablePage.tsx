@@ -1,8 +1,10 @@
+import { useEffect } from 'react'
 import type { DataTableRecord, PageRecord, SaveStatus } from '../../domain/types'
 import {
   PageBreadcrumbs,
   type PageBreadcrumbItem,
 } from '../shared/PageBreadcrumbs'
+import { PageHeader } from '../editor/PageHeader'
 import { AppStoreProvider, type SaveStatus as DataTableSaveStatus } from './store/AppStore'
 import TablePage from './components/table/TablePage'
 import RecordPage from './components/record/RecordPage'
@@ -17,8 +19,10 @@ interface DataTablePageProps {
   route: 'table' | 'record'
   basePath: string
   breadcrumbs?: PageBreadcrumbItem[]
-  onBack: () => void
   onChange: (snapshot: AppState) => void
+  onRename: (title: string) => void
+  onChangeIcon: (icon: string | null) => void
+  onChangeCover: (cover: string | null) => void
 }
 
 function isDataTableState(value: unknown): value is AppState {
@@ -50,42 +54,64 @@ export function DataTablePage({
   route,
   basePath,
   breadcrumbs = [],
-  onBack,
   onChange,
+  onRename,
+  onChangeIcon,
+  onChangeCover,
 }: DataTablePageProps) {
   const initialState = dataTable && isDataTableState(dataTable.snapshot) ? dataTable.snapshot : createDefaultAppState()
+  const dataTableHeaderPage: PageRecord | null = dataTable
+    ? {
+        id: dataTable.id,
+        parentId: page.id,
+        title: dataTable.title.trim() || '数据表格',
+        icon: dataTable.icon ?? null,
+        cover: dataTable.cover ?? null,
+        blocks: [],
+        createdAt: dataTable.createdAt,
+        updatedAt: dataTable.updatedAt,
+      }
+    : null
+
+  useEffect(() => {
+    try {
+      window.scrollTo({ top: 0, left: 0 })
+    } catch {
+      // jsdom exposes scrollTo but does not implement it.
+    }
+  }, [dataTable?.id, route])
 
   return (
     <section className="data-table-route-page">
-      <div className="data-table-route-topbar">
-        <button
-          type="button"
-          className="data-table-route-back"
-          aria-label="返回页面"
-          onClick={onBack}
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M15 18l-6-6 6-6" />
-            <path d="M9 12h8" />
-          </svg>
-        </button>
-      </div>
       <div className="data-table-route-breadcrumb-row">
         <PageBreadcrumbs items={breadcrumbs} />
       </div>
       {dataTable ? (
-        <AppStoreProvider
-          key={dataTable.id}
-          initialState={initialState}
-          saveStatus={toDataTableSaveStatus(saveStatus)}
-          onChange={onChange}
-        >
-          {route === 'record' ? (
-            <RecordPage basePath={basePath} showSidebar={false} />
-          ) : (
-            <TablePage basePath={basePath} showSidebar={false} />
-          )}
-        </AppStoreProvider>
+        <>
+          {route === 'table' && dataTableHeaderPage ? (
+            <div className="data-table-route-page-header">
+              <PageHeader
+                page={dataTableHeaderPage}
+                bodyClassName="data-table-route-header-body"
+                onRename={onRename}
+                onChangeIcon={onChangeIcon}
+                onChangeCover={onChangeCover}
+              />
+            </div>
+          ) : null}
+          <AppStoreProvider
+            key={`${dataTable.id}:${dataTable.title}`}
+            initialState={initialState}
+            saveStatus={toDataTableSaveStatus(saveStatus)}
+            onChange={onChange}
+          >
+            {route === 'record' ? (
+              <RecordPage basePath={basePath} showSidebar={false} />
+            ) : (
+              <TablePage basePath={basePath} showSidebar={false} showHeader={false} />
+            )}
+          </AppStoreProvider>
+        </>
       ) : (
         <div className="data-table-route-missing">
           <h1>数据表格不存在</h1>

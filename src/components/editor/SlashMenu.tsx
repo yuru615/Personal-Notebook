@@ -91,9 +91,16 @@ const options: SlashMenuOption[] = [
   },
   {
     type: 'data_table',
-    label: '数据表格',
+    label: '数据表格-子页面',
     description: '插入一个可点击进入的数据库表格',
     icon: '▤',
+    group: 'page_data',
+  },
+  {
+    type: 'data_table_inline',
+    label: '数据表格-嵌入',
+    description: '直接在当前页面中编辑数据表格',
+    icon: '▦',
     group: 'page_data',
   },
 ]
@@ -147,6 +154,16 @@ export function SlashMenu({
       options: filteredOptions.filter((option) => option.group === group.id),
     }))
     .filter((group) => group.options.length > 0)
+
+  useEffect(() => {
+    const root = document.documentElement
+    const previousOverflow = root.style.overflow
+    root.style.overflow = 'hidden'
+
+    return () => {
+      root.style.overflow = previousOverflow
+    }
+  }, [])
 
   useEffect(() => {
     if (!activeType) {

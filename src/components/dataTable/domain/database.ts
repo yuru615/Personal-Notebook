@@ -52,6 +52,7 @@ const OPTION_COLOR_PALETTE = [
 ];
 const DEFAULT_BOARD_COLUMN_IDS = ["todo", "doing", "done", "ungrouped"];
 const DEFAULT_TABLE_GROUP_IDS = ["ungrouped"];
+const TABLE_PAGE_SIZE_OPTIONS = [10, 20, 30, 50];
 
 function createDefaultOptions(): SelectOption[] {
   return DEFAULT_SELECT_OPTIONS.map((option) => ({
@@ -490,6 +491,12 @@ function normalizeBoardCardSortMode(
   return "manual";
 }
 
+function normalizeTablePageSize(tablePageSize: number | undefined) {
+  return TABLE_PAGE_SIZE_OPTIONS.includes(tablePageSize ?? 0)
+    ? tablePageSize!
+    : 10;
+}
+
 function normalizeDatabaseView(
   view:
     | (Partial<DatabaseView> & {
@@ -620,6 +627,7 @@ function normalizeDatabaseView(
         : fallback.openMode,
     tableWidthMode:
       view?.tableWidthMode === "content" ? "content" : fallback.tableWidthMode,
+    tablePageSize: normalizeTablePageSize(view?.tablePageSize),
     wrapCells: view?.wrapCells ?? fallback.wrapCells,
     freezeFirstColumn: view?.freezeFirstColumn ?? fallback.freezeFirstColumn,
     hiddenPropertyIds,

@@ -24,6 +24,10 @@
   box-sizing: border-box;
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
 html,
 body,
 #root {
@@ -57,6 +61,12 @@ a {
 }
 
 .sidebar {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border-right: 1px solid #f0f0ee;
   background: #fbfbfa;
   padding: 14px 12px;
@@ -1032,7 +1042,7 @@ a {
 .block-menu {
   position: absolute;
   left: 0;
-  z-index: 8;
+  z-index: 70;
   display: grid;
   gap: 6px;
   min-width: 248px;
@@ -2252,61 +2262,43 @@ a {
 }
 
 .data-table-route-page {
+  --page-content-available-width: calc(
+    100vw - var(--app-sidebar-width) - (var(--page-panel-inline-padding) * 2)
+  );
   position: relative;
   min-height: 100vh;
   background: #ffffff;
 }
 
-.data-table-route-topbar {
-  position: fixed;
-  top: 12px;
-  left: 12px;
-  z-index: 30;
-  display: inline-flex;
-  pointer-events: none;
-}
-
-.data-table-route-back {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  border: 1px solid #e2dfda;
-  border-radius: 9px;
-  background: rgba(255, 255, 255, 0.92);
-  color: #37352f;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
-  cursor: pointer;
-  pointer-events: auto;
-}
-
-.data-table-route-back:hover {
-  background: #eef3f5;
-  color: #0f766e;
-}
-
-.data-table-route-back svg {
-  width: 20px;
-  height: 20px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.9;
+.data-table-route-page .database-page.is-full-width {
+  padding-left: 0;
+  padding-right: 0;
 }
 
 .data-table-route-breadcrumb-row {
-  position: fixed;
-  top: 14px;
-  left: 60px;
-  z-index: 30;
-  max-width: calc(100vw - 84px);
+  box-sizing: border-box;
+  width: min(100%, var(--page-content-available-width));
 }
 
-.data-table-route-breadcrumb-row .page-breadcrumbs {
+.data-table-route-page-header {
+  width: min(100%, var(--page-content-available-width));
   margin: 0;
+  padding: 0;
+}
+
+.data-table-route-page-header .page-header {
+  width: 100%;
+  margin-bottom: 20px;
+}
+
+.data-table-route-page-header .page-header-top {
+  width: 100%;
+}
+
+.data-table-route-header-body {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
 }
 
 .data-table-route-missing {
@@ -2326,10 +2318,6 @@ a {
 .data-table-route-missing p {
   margin: 0;
   font-size: 13px;
-}
-
-.data-table-route-page .workspace-shell--single .record-page-header {
-  padding-top: 72px;
 }
 
 .whiteboard-canvas {
@@ -2888,7 +2876,7 @@ a {
     0 24px 48px rgba(15, 23, 42, 0.12),
     0 4px 12px rgba(15, 23, 42, 0.05);
   overflow-y: auto;
-  z-index: 6;
+  z-index: 70;
 }
 
 .slash-menu-header {
@@ -3031,6 +3019,10 @@ a {
   }
 
   .sidebar {
+    position: static;
+    height: auto;
+    overflow-y: visible;
+    overscroll-behavior: auto;
     border-right: 0;
     border-bottom: 1px solid #f0f0ee;
   }

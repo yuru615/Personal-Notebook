@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { createDefaultAppState } from '../components/dataTable/domain/factory'
 import { createMemoryRepository } from '../test/memoryRepository'
 import { createWorkspaceStore } from './createWorkspaceStore'
 import type { WorkspaceSnapshot } from '../domain/types'
@@ -44,6 +45,21 @@ describe('createWorkspaceStore data tables', () => {
       id: (block as { databaseId: string }).databaseId,
       title: '项目数据库',
     })
+  })
+
+  it('creates an inline data table block from the inline command type', async () => {
+    const repository = createMemoryRepository(createWorkspace())
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const block = await store.getState().insertBlock('page_1', 'data_table_inline')
+
+    expect(block).toMatchObject({
+      type: 'data_table',
+      displayMode: 'inline',
+      databaseId: expect.stringMatching(/^database_/),
+    })
+    expect(store.getState().dataTables).toHaveLength(1)
   })
 
   it('cleans up data tables that are no longer referenced by page blocks', async () => {
@@ -139,5 +155,60 @@ describe('createWorkspaceStore data tables', () => {
       },
     ])
     expect(targetStore.getState().currentPageId).toBe('page_1')
+  })
+
+  it('renames a data table and keeps the internal database name in sync', async () => {
+    const workspace = createWorkspace()
+    const snapshot = createDefaultAppState()
+    snapshot.database.name = 'Old Database'
+    workspace.dataTables = [
+      {
+        id: snapshot.database.id,
+        title: 'Old Database',
+        snapshot,
+        createdAt: '2026-06-22T00:00:00.000Z',
+        updatedAt: '2026-06-22T00:00:00.000Z',
+      },
+    ]
+    const store = createWorkspaceStore(createMemoryRepository(workspace))
+
+    await store.getState().bootstrap()
+    await store.getState().renameDataTable(snapshot.database.id, 'Client Database')
+
+    const dataTable = store.getState().dataTables[0]
+    expect(dataTable.title).toBe('Client Database')
+    expect((dataTable.snapshot as ReturnType<typeof createDefaultAppState>).database.name).toBe(
+      'Client Database',
+    )
+  })
+
+  it('updates data table icon and cover independently from the source page', async () => {
+    const workspace = createWorkspace()
+    const snapshot = createDefaultAppState()
+    workspace.dataTables = [
+      {
+        id: snapshot.database.id,
+        title: 'Project Database',
+        icon: null,
+        cover: null,
+        snapshot,
+        createdAt: '2026-06-22T00:00:00.000Z',
+        updatedAt: '2026-06-22T00:00:00.000Z',
+      },
+    ]
+    const store = createWorkspaceStore(createMemoryRepository(workspace))
+
+    await store.getState().bootstrap()
+    await store.getState().setDataTableIcon(snapshot.database.id, '📊')
+    await store.getState().setDataTableCover(snapshot.database.id, 'ocean')
+
+    expect(store.getState().dataTables[0]).toMatchObject({
+      icon: '📊',
+      cover: 'ocean',
+    })
+    expect(store.getState().pages[0]).toMatchObject({
+      icon: null,
+      cover: null,
+    })
   })
 })

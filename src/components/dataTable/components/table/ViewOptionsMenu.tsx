@@ -33,6 +33,8 @@ type ViewOptionsMenuProps = {
   calendarDatePropertyId: string | null;
   openMode: TableOpenMode;
   tableWidthMode: TableWidthMode;
+  tablePageSize: number;
+  showTablePageSize?: boolean;
   wrapCells: boolean;
   freezeFirstColumn: boolean;
   properties: Property[];
@@ -57,6 +59,7 @@ type ViewOptionsMenuProps = {
   onDeleteView: (viewId: string) => void;
   onOpenModeChange: (mode: TableOpenMode) => void;
   onTableWidthModeChange: (mode: TableWidthMode) => void;
+  onTablePageSizeChange: (size: number) => void;
   onWrapCellsChange: (nextValue: boolean) => void;
   onFreezeFirstColumnChange: (nextValue: boolean) => void;
   onTogglePropertyVisibility: (propertyId: string) => void;
@@ -82,6 +85,8 @@ const TABLE_WIDTH_OPTIONS: Array<{ value: TableWidthMode; label: string }> = [
   { value: "fitPage", label: "适应页面宽度" },
   { value: "content", label: "按内容宽度" },
 ];
+
+const TABLE_PAGE_SIZE_OPTIONS = [10, 20, 30, 50];
 
 const BOARD_CARD_SORT_OPTIONS: Array<{
   value: BoardCardSortMode;
@@ -172,6 +177,8 @@ export default function ViewOptionsMenu({
   calendarDatePropertyId,
   openMode,
   tableWidthMode,
+  tablePageSize,
+  showTablePageSize = false,
   wrapCells,
   freezeFirstColumn,
   properties,
@@ -196,6 +203,7 @@ export default function ViewOptionsMenu({
   onDeleteView,
   onOpenModeChange,
   onTableWidthModeChange,
+  onTablePageSizeChange,
   onWrapCellsChange,
   onFreezeFirstColumnChange,
   onTogglePropertyVisibility,
@@ -1159,6 +1167,37 @@ export default function ViewOptionsMenu({
             </label>
           ))}
         </div>
+
+        {showTablePageSize && layout === "table" ? (
+          <div className="view-options-text-field">
+            <span>每次加载条数</span>
+            <div
+              className="view-options-radio-group"
+              role="radiogroup"
+              aria-label="每次加载条数"
+            >
+              {TABLE_PAGE_SIZE_OPTIONS.map((size) => (
+                <label
+                  key={size}
+                  className={
+                    tablePageSize === size
+                      ? "view-options-radio is-active"
+                      : "view-options-radio"
+                  }
+                >
+                  <input
+                    type="radio"
+                    name="table-page-size"
+                    checked={tablePageSize === size}
+                    onChange={() => onTablePageSizeChange(size)}
+                  />
+                  <span className="view-options-radio-indicator" aria-hidden="true" />
+                  <span>{size}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         <label
           className={wrapCells ? "view-options-toggle is-active" : "view-options-toggle"}

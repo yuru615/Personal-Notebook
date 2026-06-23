@@ -1,7 +1,7 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DataTableRecord, PageRecord } from '../../domain/types'
 import { createDefaultAppState } from './domain/factory'
 import { DataTablePage } from './DataTablePage'
@@ -19,6 +19,8 @@ const page: PageRecord = {
 
 const dataTable: DataTableRecord = {
   id: 'database-1',
+  icon: null,
+  cover: null,
   title: '项目数据库',
   snapshot: createDefaultAppState(),
   createdAt: '2026-06-22T00:00:00.000Z',
@@ -26,7 +28,39 @@ const dataTable: DataTableRecord = {
 }
 
 describe('DataTablePage', () => {
-  it('uses the knowledge-base fullscreen shell without the copied workspace sidebar', () => {
+  let scrollTo: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
+  })
+
+  afterEach(() => {
+    scrollTo.mockRestore()
+  })
+
+  it('scrolls to the top when opening the full data table page', async () => {
+    render(
+      <MemoryRouter>
+        <DataTablePage
+          page={page}
+          dataTable={dataTable}
+          saveStatus="saved"
+          route="table"
+          basePath="/pages/page-1/data-tables/database-1"
+          onChange={vi.fn()}
+          onRename={vi.fn()}
+          onChangeIcon={vi.fn()}
+          onChangeCover={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(scrollTo).toHaveBeenCalledWith({ top: 0, left: 0 })
+    })
+  })
+
+  it('uses the knowledge-base page shell without the copied workspace sidebar', () => {
     const { container } = render(
       <MemoryRouter>
         <DataTablePage
@@ -35,13 +69,15 @@ describe('DataTablePage', () => {
           saveStatus="saved"
           route="table"
           basePath="/pages/page-1/data-tables/database-1"
-          onBack={vi.fn()}
           onChange={vi.fn()}
+          onRename={vi.fn()}
+          onChangeIcon={vi.fn()}
+          onChangeCover={vi.fn()}
         />
       </MemoryRouter>,
     )
 
-    expect(screen.getByRole('button', { name: '返回页面' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '返回页面' })).not.toBeInTheDocument()
     expect(screen.queryByText('工作区 / 数据库')).not.toBeInTheDocument()
     expect(container.querySelector('.data-table-route-breadcrumbs')).toBeNull()
     expect(container.querySelector('.workspace-sidebar')).toBeNull()
@@ -80,8 +116,10 @@ describe('DataTablePage', () => {
                   { label: 'Database', to: '/pages/page-1/data-tables/database-1' },
                   { label: 'Record' },
                 ]}
-                onBack={vi.fn()}
                 onChange={vi.fn()}
+                onRename={vi.fn()}
+                onChangeIcon={vi.fn()}
+                onChangeCover={vi.fn()}
               />
             }
           />
@@ -89,7 +127,7 @@ describe('DataTablePage', () => {
       </MemoryRouter>,
     )
 
-    expect(screen.getByRole('button', { name: '返回页面' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '返回页面' })).not.toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: '页面层级' })).toHaveTextContent('Source')
     expect(screen.getByRole('link', { name: 'Source' })).toHaveAttribute('href', '/pages/page-1')
     expect(screen.getByRole('link', { name: 'Database' })).toHaveAttribute(
@@ -125,8 +163,10 @@ describe('DataTablePage', () => {
           saveStatus="saved"
           route="table"
           basePath="/pages/page-1/data-tables/database-1"
-          onBack={vi.fn()}
           onChange={vi.fn()}
+          onRename={vi.fn()}
+          onChangeIcon={vi.fn()}
+          onChangeCover={vi.fn()}
         />
       </MemoryRouter>,
     )
@@ -158,8 +198,10 @@ describe('DataTablePage', () => {
           saveStatus="saved"
           route="table"
           basePath="/pages/page-1/data-tables/database-1"
-          onBack={vi.fn()}
           onChange={vi.fn()}
+          onRename={vi.fn()}
+          onChangeIcon={vi.fn()}
+          onChangeCover={vi.fn()}
         />
       </MemoryRouter>,
     )
@@ -207,8 +249,10 @@ describe('DataTablePage', () => {
                 saveStatus="saved"
                 route="record"
                 basePath="/pages/page-1/data-tables/database-1"
-                onBack={vi.fn()}
                 onChange={vi.fn()}
+                onRename={vi.fn()}
+                onChangeIcon={vi.fn()}
+                onChangeCover={vi.fn()}
               />
             }
           />
@@ -218,5 +262,56 @@ describe('DataTablePage', () => {
 
     expect(screen.getByRole('textbox', { name: '输入正文' })).toHaveTextContent('访谈摘要')
     expect(screen.queryByRole('textbox', { name: '块内容' })).not.toBeInTheDocument()
+  })
+  it('uses the page header controls on the full data table page', async () => {
+    const user = userEvent.setup()
+    const onRename = vi.fn()
+    const onChangeIcon = vi.fn()
+    const onChangeCover = vi.fn()
+    const snapshot = createDefaultAppState()
+    snapshot.database.name = 'Project Database'
+
+    const { container } = render(
+      <MemoryRouter>
+        <DataTablePage
+          page={page}
+          dataTable={{
+            ...dataTable,
+            title: 'Project Database',
+            icon: null,
+            cover: null,
+            snapshot,
+          }}
+          saveStatus="saved"
+          route="table"
+          basePath="/pages/page-1/data-tables/database-1"
+          onChange={vi.fn()}
+          onRename={onRename}
+          onChangeIcon={onChangeIcon}
+          onChangeCover={onChangeCover}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(container.querySelector('.page-header')).toBeInTheDocument()
+    expect(container.querySelector('.database-page-title-row')).toBeNull()
+
+    const titleInput = screen.getByDisplayValue('Project Database')
+    await user.clear(titleInput)
+    await user.type(titleInput, 'Client Database')
+    await user.tab()
+
+    expect(onRename).toHaveBeenCalledWith('Client Database')
+
+    const headerActions = container.querySelectorAll<HTMLButtonElement>(
+      '.page-header-actions .page-header-action',
+    )
+    await user.click(headerActions[0])
+    await user.click(container.querySelector<HTMLButtonElement>('.page-cover-option')!)
+    expect(onChangeCover).toHaveBeenCalledWith(expect.any(String))
+
+    await user.click(headerActions[1])
+    await user.click(container.querySelector<HTMLButtonElement>('.page-icon-option')!)
+    expect(onChangeIcon).toHaveBeenCalledWith(expect.any(String))
   })
 })

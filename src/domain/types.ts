@@ -16,6 +16,7 @@ export type BlockType =
   | 'table'
   | 'whiteboard'
   | 'data_table'
+  | 'data_table_inline'
 
 export type TextColor = 'gray' | 'brown' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'pink' | 'red'
 export type BlockBackgroundColor =
@@ -128,6 +129,7 @@ export interface WhiteboardBlock extends BlockBase {
 export interface DataTableBlock extends BlockBase {
   type: 'data_table'
   databaseId: DataTableId
+  displayMode?: 'inline'
 }
 
 export type PageFontFamily = 'default' | 'serif' | 'mono'
@@ -157,6 +159,8 @@ export interface BoardRecord {
 export interface DataTableRecord {
   id: DataTableId
   title: string
+  icon?: string | null
+  cover?: string | null
   snapshot: unknown
   createdAt: string
   updatedAt: string

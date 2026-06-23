@@ -1,8 +1,10 @@
 import { act, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import { BlockEditor } from './BlockEditor'
+import { createDefaultAppState } from '../dataTable/domain/factory'
 
 const page = {
   id: 'page_a',
@@ -380,6 +382,85 @@ describe('BlockEditor', () => {
     expect(onTurnInto).toHaveBeenCalledWith('b1', 'todo')
   })
 
+  it('keeps the slash menu opened from a text block inside the viewport', async () => {
+    const user = userEvent.setup()
+    const originalInnerHeight = window.innerHeight
+    const getBoundingClientRect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function () {
+        const element = this as HTMLElement
+
+        if (element.classList.contains('editor-row')) {
+          return {
+            bottom: 332,
+            height: 32,
+            left: 0,
+            right: 760,
+            top: 300,
+            width: 760,
+            x: 0,
+            y: 300,
+            toJSON: () => ({}),
+          } as DOMRect
+        }
+
+        if (element.classList.contains('slash-menu')) {
+          return {
+            bottom: 1040,
+            height: 700,
+            left: 0,
+            right: 320,
+            top: 340,
+            width: 320,
+            x: 0,
+            y: 340,
+            toJSON: () => ({}),
+          } as DOMRect
+        }
+
+        return {
+          bottom: 0,
+          height: 0,
+          left: 0,
+          right: 0,
+          top: 0,
+          width: 0,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect
+      })
+
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 900 })
+
+    try {
+      const textPage = {
+        ...page,
+        blocks: [{ id: 'b1', type: 'paragraph' as const, text: '' }],
+      }
+      const { container } = render(
+        <BlockEditor
+          page={textPage as never}
+          allPages={[textPage as never]}
+          onUpdateBlock={vi.fn()}
+        />,
+      )
+
+      await user.click(screen.getByRole('textbox', { name: '输入正文' }))
+      await user.keyboard('/')
+
+      await waitFor(() => {
+        expect(container.querySelector('.slash-menu')).toHaveStyle({ maxHeight: '544px' })
+      })
+    } finally {
+      getBoundingClientRect.mockRestore()
+      Object.defineProperty(window, 'innerHeight', {
+        configurable: true,
+        value: originalInnerHeight,
+      })
+    }
+  })
+
   it('renders a whiteboard card block', () => {
     const whiteboardPage = {
       ...page,
@@ -471,6 +552,41 @@ describe('BlockEditor', () => {
     )
 
     expect(screen.getByRole('button', { name: '打开数据表格 项目数据库' })).toBeInTheDocument()
+  })
+
+  it('renders an inline data table block', () => {
+    const dataTablePage = {
+      ...page,
+      blocks: [
+        { id: 'b6', type: 'data_table', displayMode: 'inline', databaseId: 'database-1' },
+      ],
+    }
+    const snapshot = createDefaultAppState()
+
+    snapshot.database.name = '项目数据表'
+
+    render(
+      <MemoryRouter>
+        <BlockEditor
+          page={dataTablePage as never}
+          allPages={[dataTablePage as never]}
+          dataTables={[
+            {
+              id: 'database-1',
+              title: '项目数据表',
+              snapshot,
+              createdAt: '2026-06-22T00:00:00.000Z',
+              updatedAt: '2026-06-22T00:00:00.000Z',
+            },
+          ] as never}
+          onUpdateBlock={vi.fn()}
+          onUpdateDataTableSnapshot={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('button', { name: '打开整页' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '项目数据表' })).toBeInTheDocument()
   })
 
   it('shows record and property counts on a data table card', () => {
