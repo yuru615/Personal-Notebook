@@ -13,6 +13,7 @@ import { BlockEditor } from '../components/editor/BlockEditor'
 import { DataTablePage } from '../components/dataTable/DataTablePage'
 import { PageHeader } from '../components/editor/PageHeader'
 import { PageOutline } from '../components/editor/PageOutline'
+import { MindmapFrame } from '../components/mindmap/MindmapFrame'
 import { MindmapPage } from '../components/mindmap/MindmapPage'
 import { useDismissableLayer } from '../components/editor/useDismissableLayer'
 import { ExportImportPanel } from '../components/export/ExportImportPanel'
@@ -171,6 +172,9 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onRestoreMissingMindmap={(pageId, mindmapId) =>
         store.getState().restoreMissingMindmapReference(pageId, mindmapId)
       }
+      onUpdateMindmapSnapshot={(mindmapId, snapshot) =>
+        store.getState().updateMindmapSnapshot(mindmapId, snapshot)
+      }
 
       onTogglePageFullWidth={(pageId, isFullWidth) =>
         store.getState().setPageFullWidth(pageId, isFullWidth)
@@ -288,6 +292,7 @@ interface AppRoutesProps {
   onChangeDataTableCover: (databaseId: string, cover: string | null) => Promise<void>
   onRestoreMissingDataTable: (pageId: string, databaseId: string) => Promise<DataTableRecord | null>
   onRestoreMissingMindmap: (pageId: string, mindmapId: string) => Promise<MindmapRecord | null>
+  onUpdateMindmapSnapshot: (mindmapId: string, snapshot: unknown) => Promise<void>
 
   onTogglePageFullWidth: (pageId: string, isFullWidth: boolean) => Promise<void>
   onTogglePageSmallText: (pageId: string, isSmallText: boolean) => Promise<void>
@@ -356,6 +361,7 @@ function AppRoutes({
   onChangeDataTableCover,
   onRestoreMissingDataTable,
   onRestoreMissingMindmap,
+  onUpdateMindmapSnapshot,
 
   onTogglePageFullWidth,
   onTogglePageSmallText,
@@ -569,6 +575,7 @@ function AppRoutes({
                 currentPageId={currentPageId}
                 onRoutePageChange={onRoutePageChange}
                 onRestoreMissingMindmap={onRestoreMissingMindmap}
+                onUpdateMindmapSnapshot={onUpdateMindmapSnapshot}
               />
             }
           />
@@ -1215,6 +1222,7 @@ interface MindmapRouteProps {
   currentPageId: string | null
   onRoutePageChange: (pageId: string) => Promise<void>
   onRestoreMissingMindmap: (pageId: string, mindmapId: string) => Promise<MindmapRecord | null>
+  onUpdateMindmapSnapshot: (mindmapId: string, snapshot: unknown) => Promise<void>
 }
 
 function MindmapRoute({
@@ -1223,6 +1231,7 @@ function MindmapRoute({
   currentPageId,
   onRoutePageChange,
   onRestoreMissingMindmap,
+  onUpdateMindmapSnapshot,
 }: MindmapRouteProps) {
   const { pageId, mindmapId } = useParams()
   const navigate = useNavigate()
@@ -1257,7 +1266,13 @@ function MindmapRoute({
   return (
     <MindmapPage page={page} mindmap={mindmap} onBack={() => navigate(`/pages/${routePageId}`)}>
       {mindmap ? (
-        <div className="mindmap-route-surface" data-mindmap-id={mindmap.id} />
+        <MindmapFrame
+          mindmapId={mindmap.id}
+          snapshot={mindmap.snapshot}
+          onSnapshotChange={(snapshot) => {
+            void onUpdateMindmapSnapshot(mindmap.id, snapshot)
+          }}
+        />
       ) : (
         <div className="mindmap-route-missing-actions">
           <button
