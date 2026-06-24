@@ -22,6 +22,7 @@ coverage
 .playwright-cli
 .superpowers
 output
+.worktrees
 
 # Editor directories and files
 .vscode/*
