@@ -13,6 +13,7 @@ import { BlockEditor } from '../components/editor/BlockEditor'
 import { DataTablePage } from '../components/dataTable/DataTablePage'
 import { PageHeader } from '../components/editor/PageHeader'
 import { PageOutline } from '../components/editor/PageOutline'
+import { MindmapPage } from '../components/mindmap/MindmapPage'
 import { useDismissableLayer } from '../components/editor/useDismissableLayer'
 import { ExportImportPanel } from '../components/export/ExportImportPanel'
 import { AppShell } from '../components/layout/AppShell'
@@ -30,6 +31,7 @@ import type {
   BlockType,
   BoardRecord,
   DataTableRecord,
+  MindmapRecord,
   PageFontFamily,
   PageRecord,
   SaveStatus,
@@ -133,6 +135,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
     <AppRoutes
       boards={state.boards}
       dataTables={state.dataTables}
+      mindmaps={state.mindmaps}
       pages={state.pages}
       currentPageId={state.currentPageId}
       onCreatePage={() => store.getState().createPage()}
@@ -164,6 +167,12 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       }
       onRestoreMissingDataTable={(pageId, databaseId) =>
         store.getState().restoreMissingDataTableReference(pageId, databaseId)
+      }
+      onUpdateMindmapSnapshot={(mindmapId, snapshot) =>
+        store.getState().updateMindmapSnapshot(mindmapId, snapshot)
+      }
+      onRestoreMissingMindmap={(pageId, mindmapId) =>
+        store.getState().restoreMissingMindmapReference(pageId, mindmapId)
       }
 
       onTogglePageFullWidth={(pageId, isFullWidth) =>
@@ -262,6 +271,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
 interface AppRoutesProps {
   boards: BoardRecord[]
   dataTables: DataTableRecord[]
+  mindmaps: MindmapRecord[]
   pages: AppState['pages']
   currentPageId: AppState['currentPageId']
   onCreatePage: () => Promise<PageRecord>
@@ -280,6 +290,8 @@ interface AppRoutesProps {
   onChangeDataTableIcon: (databaseId: string, icon: string | null) => Promise<void>
   onChangeDataTableCover: (databaseId: string, cover: string | null) => Promise<void>
   onRestoreMissingDataTable: (pageId: string, databaseId: string) => Promise<DataTableRecord | null>
+  onUpdateMindmapSnapshot: (mindmapId: string, snapshot: unknown) => Promise<void>
+  onRestoreMissingMindmap: (pageId: string, mindmapId: string) => Promise<MindmapRecord | null>
 
   onTogglePageFullWidth: (pageId: string, isFullWidth: boolean) => Promise<void>
   onTogglePageSmallText: (pageId: string, isSmallText: boolean) => Promise<void>
@@ -331,6 +343,7 @@ interface AppRoutesProps {
 function AppRoutes({
   boards,
   dataTables,
+  mindmaps,
   pages,
   currentPageId,
   onCreatePage,
@@ -346,6 +359,8 @@ function AppRoutes({
   onChangeDataTableIcon,
   onChangeDataTableCover,
   onRestoreMissingDataTable,
+  onUpdateMindmapSnapshot,
+  onRestoreMissingMindmap,
 
   onTogglePageFullWidth,
   onTogglePageSmallText,
@@ -375,6 +390,7 @@ function AppRoutes({
 }: AppRoutesProps) {
   const navigate = useNavigate()
   const isWhiteboardRoute = useMatch('/pages/:pageId/boards/:boardId') !== null
+  const isMindmapRoute = useMatch('/pages/:pageId/mindmaps/:mindmapId') !== null
   const [isSearchOpen, setIsSearchOpen] = useState(false)
 
   async function handleCreatePage() {
@@ -410,7 +426,7 @@ function AppRoutes({
 
   return (
     <AppShell
-      hideSidebar={isWhiteboardRoute}
+      hideSidebar={isWhiteboardRoute || isMindmapRoute}
       sidebar={
         <SidebarTree
           pages={pages}
@@ -461,6 +477,7 @@ function AppRoutes({
               <PageRoute
                 boards={boards}
                 dataTables={dataTables}
+                mindmaps={mindmaps}
                 pages={pages}
                 currentPageId={currentPageId}
                 onRoutePageChange={onRoutePageChange}
@@ -492,6 +509,7 @@ function AppRoutes({
                 onUpdateDataTableSnapshot={onUpdateDataTableSnapshot}
                 onRestoreMissingBoard={onRestoreMissingBoard}
                 onRestoreMissingDataTable={onRestoreMissingDataTable}
+                onRestoreMissingMindmap={onRestoreMissingMindmap}
               />
             }
           />
@@ -547,6 +565,18 @@ function AppRoutes({
               />
             }
           />
+          <Route
+            path="/pages/:pageId/mindmaps/:mindmapId"
+            element={
+              <MindmapRoute
+                pages={pages}
+                mindmaps={mindmaps}
+                currentPageId={currentPageId}
+                onRoutePageChange={onRoutePageChange}
+                onRestoreMissingMindmap={onRestoreMissingMindmap}
+              />
+            }
+          />
         </Routes>
       </AppErrorBoundary>
     </AppShell>
@@ -556,6 +586,7 @@ function AppRoutes({
 interface PageRouteProps {
   boards: BoardRecord[]
   dataTables: DataTableRecord[]
+  mindmaps: MindmapRecord[]
   pages: PageRecord[]
   currentPageId: string | null
   onRoutePageChange: (pageId: string) => Promise<void>
@@ -607,11 +638,13 @@ interface PageRouteProps {
   onUpdateDataTableSnapshot: (databaseId: string, snapshot: unknown) => Promise<void>
   onRestoreMissingBoard: (pageId: string, boardId: string) => Promise<BoardRecord | null>
   onRestoreMissingDataTable: (pageId: string, databaseId: string) => Promise<DataTableRecord | null>
+  onRestoreMissingMindmap: (pageId: string, mindmapId: string) => Promise<MindmapRecord | null>
 }
 
 function PageRoute({
   boards,
   dataTables,
+  mindmaps,
   pages,
   currentPageId,
   onRoutePageChange,
@@ -643,6 +676,7 @@ function PageRoute({
   onUpdateDataTableSnapshot,
   onRestoreMissingBoard,
   onRestoreMissingDataTable,
+  onRestoreMissingMindmap,
 }: PageRouteProps) {
   const { pageId } = useParams()
   const navigate = useNavigate()
@@ -734,6 +768,7 @@ function PageRoute({
           allPages={pages}
           boards={boards}
           dataTables={dataTables}
+          mindmaps={mindmaps}
           onUpdateBlock={(blockId, nextBlock) => {
             void onUpdateBlock(page.id, blockId, nextBlock)
           }}
@@ -779,8 +814,15 @@ function PageRoute({
               navigate(`/pages/${page.id}/data-tables/${dataTable.id}`)
             }
           }}
-
-
+          onOpenMindmap={(mindmapId) => {
+            navigate(`/pages/${page.id}/mindmaps/${mindmapId}`)
+          }}
+          onRestoreMindmap={async (mindmapId) => {
+            const mindmap = await onRestoreMissingMindmap(page.id, mindmapId)
+            if (mindmap) {
+              navigate(`/pages/${page.id}/mindmaps/${mindmap.id}`)
+            }
+          }}
         />
       </div>
       {outlineVisible ? <PageOutline blocks={page.blocks} /> : null}
@@ -1169,6 +1211,72 @@ function BoardRoute({
         />
       ) : null}
     </WhiteboardPage>
+  )
+}
+
+interface MindmapRouteProps {
+  pages: PageRecord[]
+  mindmaps: MindmapRecord[]
+  currentPageId: string | null
+  onRoutePageChange: (pageId: string) => Promise<void>
+  onRestoreMissingMindmap: (pageId: string, mindmapId: string) => Promise<MindmapRecord | null>
+}
+
+function MindmapRoute({
+  pages,
+  mindmaps,
+  currentPageId,
+  onRoutePageChange,
+  onRestoreMissingMindmap,
+}: MindmapRouteProps) {
+  const { pageId, mindmapId } = useParams()
+  const navigate = useNavigate()
+  const page = pages.find((item) => item.id === pageId)
+  const mindmap = mindmaps.find((item) => item.id === mindmapId) ?? null
+
+  useEffect(() => {
+    if (!page || currentPageId === page.id) {
+      return
+    }
+
+    void onRoutePageChange(page.id)
+  }, [currentPageId, onRoutePageChange, page])
+
+  if (!page) {
+    return <div className="page-empty">{uiCopy.app.pageNotFound}</div>
+  }
+
+  const routePageId = page.id
+
+  async function handleRestoreMissingMindmap() {
+    if (!mindmapId) {
+      return
+    }
+
+    const nextMindmap = await onRestoreMissingMindmap(routePageId, mindmapId)
+    if (nextMindmap) {
+      navigate(`/pages/${routePageId}/mindmaps/${nextMindmap.id}`, { replace: true })
+    }
+  }
+
+  return (
+    <MindmapPage page={page} mindmap={mindmap} onBack={() => navigate(`/pages/${routePageId}`)}>
+      {mindmap ? (
+        <div className="mindmap-route-surface" data-mindmap-id={mindmap.id} />
+      ) : (
+        <div className="mindmap-route-missing-actions">
+          <button
+            type="button"
+            className="mindmap-route-recover"
+            onClick={() => {
+              void handleRestoreMissingMindmap()
+            }}
+          >
+            恢复导图
+          </button>
+        </div>
+      )}
+    </MindmapPage>
   )
 }
 

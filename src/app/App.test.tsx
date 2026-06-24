@@ -142,4 +142,46 @@ describe('App', () => {
     expect(container.querySelector('.page-panel-focus')).toBeNull()
     expect(within(sidebar).getByText('快速开始')).toBeInTheDocument()
   })
+  it('hides the sidebar on mindmap pages', async () => {
+    const pageId = 'page_mindmap'
+    const mindmapId = 'mindmap_strategy'
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [
+        {
+          id: mindmapId,
+          title: '策略导图',
+          snapshot: { title: '策略导图' },
+          createdAt: '2026-06-24T00:00:00.000Z',
+          updatedAt: '2026-06-24T00:00:00.000Z',
+        },
+      ],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: '产品规划',
+          icon: null,
+          cover: null,
+          blocks: [{ id: 'block_mindmap', type: 'mindmap', mindmapId }],
+          createdAt: '2026-06-24T00:00:00.000Z',
+          updatedAt: '2026-06-24T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+
+    const { container } = render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={[`/pages/${pageId}/mindmaps/${mindmapId}`]}
+      />,
+    )
+
+    await screen.findByRole('button', { name: '返回页面' })
+
+    expect(screen.queryByRole('complementary', { name: '侧边栏' })).not.toBeInTheDocument()
+    expect(container.querySelector('.page-panel-focus')).not.toBeNull()
+  })
 })

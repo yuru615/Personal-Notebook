@@ -6,6 +6,7 @@ import type {
   BlockType,
   BoardRecord,
   DataTableRecord,
+  MindmapRecord,
   PageRecord,
   TextBlockStyle,
 } from '../../domain/types'
@@ -24,6 +25,7 @@ import { ListBlock } from './blocks/ListBlock'
 import { ParagraphBlock } from './blocks/ParagraphBlock'
 import { TableBlock } from './blocks/TableBlock'
 import { TodoBlock } from './blocks/TodoBlock'
+import { MindmapBlock } from './blocks/MindmapBlock'
 import { WhiteboardBlock } from './blocks/WhiteboardBlock'
 import { getSlashMenuOptions, SlashMenu } from './SlashMenu'
 import type { ReorderPosition } from '../../utils/reorder'
@@ -47,6 +49,7 @@ interface BlockEditorProps {
   allPages: PageRecord[]
   boards?: BoardRecord[]
   dataTables?: DataTableRecord[]
+  mindmaps?: MindmapRecord[]
   allowedBlockTypes?: BlockType[]
   onUpdateBlock: (blockId: string, nextBlock: BlockRecord) => void
   onInsert?: (type: BlockType) => Promise<string | null> | string | null | void
@@ -67,6 +70,8 @@ interface BlockEditorProps {
   onOpenDataTable?: (databaseId: string) => void
   onRestoreDataTable?: (databaseId: string) => void
   onUpdateDataTableSnapshot?: (databaseId: string, snapshot: unknown) => void
+  onOpenMindmap?: (mindmapId: string) => void
+  onRestoreMindmap?: (mindmapId: string) => void
 }
 
 export function BlockEditor({
@@ -74,6 +79,7 @@ export function BlockEditor({
   allPages,
   boards = [],
   dataTables = [],
+  mindmaps = [],
   allowedBlockTypes,
   onUpdateBlock,
   onInsert,
@@ -90,10 +96,13 @@ export function BlockEditor({
   onOpenDataTable,
   onRestoreDataTable,
   onUpdateDataTableSnapshot,
+  onOpenMindmap,
+  onRestoreMindmap,
 }: BlockEditorProps) {
   const childPageTitleMap = Object.fromEntries(allPages.map((item) => [item.id, item.title]))
   const boardMap = new Map(boards.map((board) => [board.id, board]))
   const dataTableMap = new Map(dataTables.map((dataTable) => [dataTable.id, dataTable]))
+  const mindmapMap = new Map(mindmaps.map((mindmap) => [mindmap.id, mindmap]))
   const draggingBlockId = useRef<string | null>(null)
   const pendingFocusBlockId = useRef<FocusRequest | null>(null)
   const scrollFrameId = useRef<number | null>(null)
@@ -843,6 +852,21 @@ export function BlockEditor({
                 isMissing={!dataTable}
                 onOpen={() => onOpenDataTable?.(block.databaseId)}
                 onRecover={!dataTable ? () => onRestoreDataTable?.(block.databaseId) : undefined}
+              />,
+            )
+          }
+          case 'mindmap': {
+            const mindmap = mindmapMap.get(block.mindmapId)
+
+            return renderBlockRow(
+              block,
+              <MindmapBlock
+                title={mindmap?.title ?? '导图不存在'}
+                updatedLabel={mindmap ? formatCanvasUpdatedLabel(mindmap.updatedAt) : '引用已丢失'}
+                previewUrl={null}
+                isMissing={!mindmap}
+                onOpen={() => onOpenMindmap?.(block.mindmapId)}
+                onRecover={!mindmap ? () => onRestoreMindmap?.(block.mindmapId) : undefined}
               />,
             )
           }
