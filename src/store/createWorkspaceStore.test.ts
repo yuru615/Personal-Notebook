@@ -10,6 +10,7 @@ function createWorkspace(): WorkspaceSnapshot {
   return {
     boards: [],
     dataTables: [],
+    mindmaps: [],
     pages: [
       {
         id: 'page_1',
@@ -210,5 +211,81 @@ describe('createWorkspaceStore data tables', () => {
       icon: null,
       cover: null,
     })
+  })
+})
+
+describe('createWorkspaceStore mindmaps', () => {
+  it('creates a mindmap asset when inserting a mindmap block', async () => {
+    const repository = createMemoryRepository(createWorkspace())
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const block = await store.getState().insertBlock('page_1', 'mindmap')
+    const state = store.getState()
+
+    expect(block).toMatchObject({
+      type: 'mindmap',
+      mindmapId: expect.stringMatching(/^mindmap_/),
+    })
+    expect(state.pages[0]?.blocks).toMatchObject([
+      {
+        type: 'mindmap',
+        mindmapId: (block as { mindmapId: string }).mindmapId,
+      },
+    ])
+    expect(state.mindmaps).toHaveLength(1)
+    expect(state.mindmaps[0]?.id).toBe((block as { mindmapId: string }).mindmapId)
+  })
+
+  it('duplicates a mindmap block by cloning the underlying record', async () => {
+    const repository = createMemoryRepository(createWorkspace())
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const block = await store.getState().insertBlock('page_1', 'mindmap')
+    await store.getState().duplicateBlock('page_1', (block as { id: string }).id)
+
+    const state = store.getState()
+    expect(state.pages[0]?.blocks).toHaveLength(2)
+    expect(state.mindmaps).toHaveLength(2)
+    expect(state.pages[0]?.blocks[1]).toMatchObject({
+      type: 'mindmap',
+      mindmapId: state.mindmaps[1]?.id,
+    })
+    expect(state.mindmaps[1]?.id).not.toBe((block as { mindmapId: string }).mindmapId)
+    expect(state.mindmaps[1]?.snapshot).toEqual(state.mindmaps[0]?.snapshot)
+    expect(state.mindmaps[1]?.title).toContain('副本')
+  })
+
+  it('includes mindmaps in exported workspace json', async () => {
+    const repository = createMemoryRepository(createWorkspace())
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    await store.getState().insertBlock('page_1', 'mindmap')
+
+    const payload = JSON.parse(await store.getState().exportJson()) as { mindmaps?: unknown[] }
+
+    expect(payload.mindmaps).toHaveLength(1)
+  })
+
+  it('restores a missing mindmap record with the same id', async () => {
+    const repository = createMemoryRepository(createWorkspace())
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const block = await store.getState().insertBlock('page_1', 'mindmap')
+    const mindmapId = (block as { mindmapId: string }).mindmapId
+
+    store.setState((state) => ({
+      ...state,
+      mindmaps: [],
+    }))
+
+    const restored = await store.getState().restoreMissingMindmapReference('page_1', mindmapId)
+
+    expect(restored).toMatchObject({ id: mindmapId })
+    expect(store.getState().mindmaps).toHaveLength(1)
+    expect(store.getState().mindmaps[0]?.id).toBe(mindmapId)
   })
 })
