@@ -1,4 +1,5 @@
 import { createDefaultAppState } from '../components/dataTable/domain/factory'
+import { createEmptyMindmapSnapshot, extractMindmapTitle } from '../components/mindmap/mindmapModel'
 import type {
   BlockRecord,
   BlockType,
@@ -7,6 +8,9 @@ import type {
   DataTableBlock,
   DataTableId,
   DataTableRecord,
+  MindmapBlock,
+  MindmapId,
+  MindmapRecord,
   WhiteboardBlock,
 } from '../domain/types'
 import { createEmptyBoardSnapshot } from '../components/whiteboard/whiteboardModel'
@@ -56,12 +60,33 @@ export function createDataTableBlock(
   }
 }
 
+export function createMindmapRecord(now = new Date().toISOString()): MindmapRecord {
+  const snapshot = createEmptyMindmapSnapshot()
+
+  return {
+    id: createId('mindmap'),
+    title: extractMindmapTitle(snapshot),
+    snapshot,
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+export function createMindmapBlock(mindmapId: MindmapId): MindmapBlock {
+  return {
+    id: createId('block'),
+    type: 'mindmap',
+    mindmapId,
+  }
+}
+
 export function createBlock(
   type: BlockType,
   options?: {
     boardId?: BoardId
     databaseId?: DataTableId
     dataTableDisplayMode?: DataTableBlock['displayMode']
+    mindmapId?: MindmapId
   },
 ): BlockRecord {
   switch (type) {
@@ -97,5 +122,11 @@ export function createBlock(
         options.databaseId,
         type === 'data_table_inline' ? 'inline' : options.dataTableDisplayMode,
       )
+    case 'mindmap':
+      if (!options?.mindmapId) {
+        throw new Error('Mindmap block requires mindmapId')
+      }
+
+      return createMindmapBlock(options.mindmapId)
   }
 }

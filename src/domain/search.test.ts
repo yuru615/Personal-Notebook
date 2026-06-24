@@ -49,6 +49,16 @@ const pages: PageRecord[] = [
     createdAt: now,
     updatedAt: now,
   },
+  {
+    id: 'page-d',
+    parentId: null,
+    title: 'Visual Thinking',
+    icon: null,
+    cover: null,
+    blocks: [{ id: 'block-d1', type: 'mindmap', mindmapId: 'mindmap-1' }],
+    createdAt: now,
+    updatedAt: now,
+  },
 ]
 
 const boards: BoardRecord[] = [
@@ -151,6 +161,12 @@ describe('searchPages', () => {
       pageId: 'page-c',
       title: 'Canvas Structure',
       excerpt: 'Whiteboard layout notes',
+    })
+
+    expect(searchPages(pages, '导图')[0]).toMatchObject({
+      pageId: 'page-d',
+      title: 'Visual Thinking',
+      excerpt: '导图',
     })
   })
 

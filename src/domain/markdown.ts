@@ -145,7 +145,9 @@ function blockToMarkdown(
         boardLinks.get(block.boardId) ?? '#'
       })`
     case 'data_table':
-      return '[数据表格](#)'
+      return '[\u6570\u636e\u8868\u683c](#)'
+    case 'mindmap':
+      return '[\u5bfc\u56fe](#)'
   }
 }
 
