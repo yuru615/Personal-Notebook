@@ -168,9 +168,6 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onRestoreMissingDataTable={(pageId, databaseId) =>
         store.getState().restoreMissingDataTableReference(pageId, databaseId)
       }
-      onUpdateMindmapSnapshot={(mindmapId, snapshot) =>
-        store.getState().updateMindmapSnapshot(mindmapId, snapshot)
-      }
       onRestoreMissingMindmap={(pageId, mindmapId) =>
         store.getState().restoreMissingMindmapReference(pageId, mindmapId)
       }
@@ -290,7 +287,6 @@ interface AppRoutesProps {
   onChangeDataTableIcon: (databaseId: string, icon: string | null) => Promise<void>
   onChangeDataTableCover: (databaseId: string, cover: string | null) => Promise<void>
   onRestoreMissingDataTable: (pageId: string, databaseId: string) => Promise<DataTableRecord | null>
-  onUpdateMindmapSnapshot: (mindmapId: string, snapshot: unknown) => Promise<void>
   onRestoreMissingMindmap: (pageId: string, mindmapId: string) => Promise<MindmapRecord | null>
 
   onTogglePageFullWidth: (pageId: string, isFullWidth: boolean) => Promise<void>
@@ -359,7 +355,6 @@ function AppRoutes({
   onChangeDataTableIcon,
   onChangeDataTableCover,
   onRestoreMissingDataTable,
-  onUpdateMindmapSnapshot,
   onRestoreMissingMindmap,
 
   onTogglePageFullWidth,

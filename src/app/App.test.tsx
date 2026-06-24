@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceSnapshot } from '../domain/types'
 import { createDefaultAppState } from '../components/dataTable/domain/factory'
@@ -183,5 +184,51 @@ describe('App', () => {
 
     expect(screen.queryByRole('complementary', { name: '侧边栏' })).not.toBeInTheDocument()
     expect(container.querySelector('.page-panel-focus')).not.toBeNull()
+  })
+  it('opens the mindmap route when clicking a mindmap card from the page editor', async () => {
+    const user = userEvent.setup()
+    const pageId = 'page_product'
+    const mindmapId = 'mindmap_strategy'
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [
+        {
+          id: mindmapId,
+          title: '策略导图',
+          snapshot: { title: '策略导图' },
+          createdAt: '2026-06-24T00:00:00.000Z',
+          updatedAt: '2026-06-24T00:00:00.000Z',
+        },
+      ],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: '产品规划',
+          icon: null,
+          cover: null,
+          blocks: [{ id: 'block_mindmap', type: 'mindmap', mindmapId }],
+          createdAt: '2026-06-24T00:00:00.000Z',
+          updatedAt: '2026-06-24T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+
+    const { container } = render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={[`/pages/${pageId}`]}
+      />,
+    )
+
+    await user.click(await screen.findByRole('button', { name: '打开导图 策略导图' }))
+
+    await screen.findByRole('button', { name: '返回页面' })
+
+    expect(screen.queryByRole('complementary', { name: '侧边栏' })).not.toBeInTheDocument()
+    expect(container.querySelector('.page-panel-focus')).not.toBeNull()
+    expect(container.querySelector(`[data-mindmap-id="${mindmapId}"]`)).not.toBeNull()
   })
 })
