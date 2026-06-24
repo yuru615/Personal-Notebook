@@ -5,6 +5,29 @@
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>mindmap-web</title>
+    <script>
+      ;(() => {
+        const fixedKey = 'mindmap-web.document.v1'
+        const scopedKey = new URLSearchParams(window.location.search).get('storageKey')
+        if (!scopedKey || scopedKey === fixedKey) {
+          return
+        }
+
+        const { getItem, setItem, removeItem } = Storage.prototype
+
+        Storage.prototype.getItem = function (key) {
+          return getItem.call(this, key === fixedKey ? scopedKey : key)
+        }
+
+        Storage.prototype.setItem = function (key, value) {
+          return setItem.call(this, key === fixedKey ? scopedKey : key, value)
+        }
+
+        Storage.prototype.removeItem = function (key) {
+          return removeItem.call(this, key === fixedKey ? scopedKey : key)
+        }
+      })()
+    </script>
     <script type="module" crossorigin src="./assets/index-C6JP4z8p.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/index-y0sdhTii.css">
   </head>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { MINDMAP_STORAGE_KEY } from './mindmapModel'
 
 interface MindmapFrameProps {
@@ -8,6 +8,7 @@ interface MindmapFrameProps {
 }
 
 export function MindmapFrame({ mindmapId, snapshot, onSnapshotChange }: MindmapFrameProps) {
+  const scopedStorageKey = `${MINDMAP_STORAGE_KEY}:${mindmapId}`
   const [iframeVersion, setIframeVersion] = useState(0)
   const snapshotRef = useRef(snapshot)
   const onSnapshotChangeRef = useRef(onSnapshotChange)
@@ -18,18 +19,18 @@ export function MindmapFrame({ mindmapId, snapshot, onSnapshotChange }: MindmapF
   snapshotRef.current = snapshot
   onSnapshotChangeRef.current = onSnapshotChange
 
-  function writeSnapshotToStorage(nextSnapshot: unknown) {
+  const writeSnapshotToStorage = useCallback((nextSnapshot: unknown) => {
     const nextSnapshotKey = JSON.stringify(nextSnapshot)
     snapshotKeyRef.current = nextSnapshotKey
-    window.localStorage.setItem(MINDMAP_STORAGE_KEY, nextSnapshotKey)
-  }
+    window.localStorage.setItem(scopedStorageKey, nextSnapshotKey)
+  }, [scopedStorageKey])
 
   useEffect(() => {
     mindmapIdRef.current = mindmapId
     writeSnapshotToStorage(snapshotRef.current)
 
     function readStoredSnapshot() {
-      const rawValue = window.localStorage.getItem(MINDMAP_STORAGE_KEY)
+      const rawValue = window.localStorage.getItem(scopedStorageKey)
       if (!rawValue) {
         return snapshotRef.current
       }
@@ -48,7 +49,7 @@ export function MindmapFrame({ mindmapId, snapshot, onSnapshotChange }: MindmapF
     }
 
     function handleStorage(event: StorageEvent) {
-      if (event.key !== MINDMAP_STORAGE_KEY || event.newValue === null) {
+      if (event.key !== scopedStorageKey || event.newValue === null) {
         return
       }
 
@@ -69,7 +70,7 @@ export function MindmapFrame({ mindmapId, snapshot, onSnapshotChange }: MindmapF
       window.removeEventListener('beforeunload', flushStoredSnapshot)
       flushStoredSnapshot()
     }
-  }, [mindmapId])
+  }, [mindmapId, scopedStorageKey, writeSnapshotToStorage])
 
   useEffect(() => {
     const nextSnapshotKey = JSON.stringify(snapshot)
@@ -96,15 +97,15 @@ export function MindmapFrame({ mindmapId, snapshot, onSnapshotChange }: MindmapF
       return
     }
 
-    window.localStorage.setItem(MINDMAP_STORAGE_KEY, nextSnapshotKey)
+    window.localStorage.setItem(scopedStorageKey, nextSnapshotKey)
     setIframeVersion((value) => value + 1)
-  }, [mindmapId, snapshot])
+  }, [mindmapId, scopedStorageKey, snapshot, writeSnapshotToStorage])
 
   return (
     <iframe
       key={`${mindmapId}:${iframeVersion}`}
       title="Mindmap"
-      src="/mindmap-web/index.html"
+      src={`/mindmap-web/index.html?storageKey=${encodeURIComponent(scopedStorageKey)}`}
       className="mindmap-route-surface"
       data-mindmap-id={mindmapId}
       style={{ width: '100%', minHeight: '100vh', border: 0 }}

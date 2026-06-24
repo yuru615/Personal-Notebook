@@ -2,6 +2,10 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MINDMAP_STORAGE_KEY } from './mindmapModel'
 
+function getScopedStorageKey(mindmapId: string) {
+  return `${MINDMAP_STORAGE_KEY}:${mindmapId}`
+}
+
 describe('MindmapFrame', () => {
   beforeEach(() => {
     window.localStorage.clear()
@@ -19,7 +23,9 @@ describe('MindmapFrame', () => {
       />,
     )
 
-    expect(window.localStorage.getItem(MINDMAP_STORAGE_KEY)).toBe(JSON.stringify(snapshot))
+    expect(window.localStorage.getItem(getScopedStorageKey('mindmap-1'))).toBe(
+      JSON.stringify(snapshot),
+    )
   })
 
   it('forwards storage updates through the snapshot callback', async () => {
@@ -38,7 +44,7 @@ describe('MindmapFrame', () => {
 
     window.dispatchEvent(
       new StorageEvent('storage', {
-        key: MINDMAP_STORAGE_KEY,
+        key: getScopedStorageKey('mindmap-1'),
         newValue: JSON.stringify(nextSnapshot),
         storageArea: window.localStorage,
       }),
@@ -61,7 +67,7 @@ describe('MindmapFrame', () => {
       />,
     )
 
-    window.localStorage.setItem(MINDMAP_STORAGE_KEY, JSON.stringify(nextSnapshot))
+    window.localStorage.setItem(getScopedStorageKey('mindmap-1'), JSON.stringify(nextSnapshot))
     window.dispatchEvent(new Event('beforeunload'))
 
     expect(onSnapshotChange).toHaveBeenCalledWith(nextSnapshot)
@@ -74,7 +80,7 @@ describe('MindmapFrame', () => {
     const snapshotB = { title: 'Mindmap B', nodes: {} }
     const seenStorageValues: Array<string | null> = []
     const onSnapshotChange = vi.fn((nextSnapshot: unknown) => {
-      seenStorageValues.push(window.localStorage.getItem(MINDMAP_STORAGE_KEY))
+      seenStorageValues.push(window.localStorage.getItem(getScopedStorageKey('mindmap-a')))
       return nextSnapshot
     })
     const { rerender } = render(
@@ -85,7 +91,7 @@ describe('MindmapFrame', () => {
       />,
     )
 
-    window.localStorage.setItem(MINDMAP_STORAGE_KEY, JSON.stringify(latestSnapshotA))
+    window.localStorage.setItem(getScopedStorageKey('mindmap-a'), JSON.stringify(latestSnapshotA))
 
     rerender(
       <MindmapFrame
@@ -99,7 +105,9 @@ describe('MindmapFrame', () => {
       expect(onSnapshotChange).toHaveBeenCalledWith(latestSnapshotA)
     })
     expect(seenStorageValues[0]).toBe(JSON.stringify(latestSnapshotA))
-    expect(window.localStorage.getItem(MINDMAP_STORAGE_KEY)).toBe(JSON.stringify(snapshotB))
+    expect(window.localStorage.getItem(getScopedStorageKey('mindmap-b'))).toBe(
+      JSON.stringify(snapshotB),
+    )
   })
 
   it('rebuilds the iframe when the host pushes a new snapshot for the same mindmap', async () => {
@@ -124,8 +132,53 @@ describe('MindmapFrame', () => {
     )
 
     await waitFor(() => {
-      expect(window.localStorage.getItem(MINDMAP_STORAGE_KEY)).toBe(JSON.stringify(snapshotB))
+      expect(window.localStorage.getItem(getScopedStorageKey('mindmap-a'))).toBe(
+        JSON.stringify(snapshotB),
+      )
       expect(screen.getByTitle('Mindmap')).not.toBe(firstFrame)
     })
+  })
+
+  it('ignores storage updates from a different scoped key', async () => {
+    const { MindmapFrame } = await import('./MindmapFrame')
+    const snapshot = { title: 'Strategy map', nodes: {} }
+    const otherSnapshot = { title: 'Other map', nodes: { root: { id: 'other' } } }
+    const onSnapshotChange = vi.fn()
+
+    render(
+      <MindmapFrame
+        mindmapId="mindmap-1"
+        snapshot={snapshot}
+        onSnapshotChange={onSnapshotChange}
+      />,
+    )
+
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: getScopedStorageKey('mindmap-2'),
+        newValue: JSON.stringify(otherSnapshot),
+        storageArea: window.localStorage,
+      }),
+    )
+
+    expect(onSnapshotChange).not.toHaveBeenCalled()
+  })
+
+  it('passes the scoped key to the iframe host page', async () => {
+    const { MindmapFrame } = await import('./MindmapFrame')
+    const snapshot = { title: 'Strategy map', nodes: {} }
+
+    render(
+      <MindmapFrame
+        mindmapId="mindmap-1"
+        snapshot={snapshot}
+        onSnapshotChange={() => undefined}
+      />,
+    )
+
+    expect(screen.getByTitle('Mindmap')).toHaveAttribute(
+      'src',
+      `/mindmap-web/index.html?storageKey=${encodeURIComponent(getScopedStorageKey('mindmap-1'))}`,
+    )
   })
 })
