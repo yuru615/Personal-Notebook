@@ -2,6 +2,7 @@ export type PageId = string
 export type BlockId = string
 export type BoardId = string
 export type DataTableId = string
+export type MindmapId = string
 
 export type BlockType =
   | 'paragraph'
@@ -17,6 +18,7 @@ export type BlockType =
   | 'whiteboard'
   | 'data_table'
   | 'data_table_inline'
+  | 'mindmap'
 
 export type TextColor = 'gray' | 'brown' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'pink' | 'red'
 export type BlockBackgroundColor =
@@ -132,6 +134,11 @@ export interface DataTableBlock extends BlockBase {
   displayMode?: 'inline'
 }
 
+export interface MindmapBlock extends BlockBase {
+  type: 'mindmap'
+  mindmapId: MindmapId
+}
+
 export type PageFontFamily = 'default' | 'serif' | 'mono'
 
 export type BlockRecord =
@@ -147,6 +154,7 @@ export type BlockRecord =
   | TableBlock
   | WhiteboardBlock
   | DataTableBlock
+  | MindmapBlock
 
 export interface BoardRecord {
   id: BoardId
@@ -161,6 +169,14 @@ export interface DataTableRecord {
   title: string
   icon?: string | null
   cover?: string | null
+  snapshot: unknown
+  createdAt: string
+  updatedAt: string
+}
+
+export interface MindmapRecord {
+  id: MindmapId
+  title: string
   snapshot: unknown
   createdAt: string
   updatedAt: string
@@ -188,6 +204,7 @@ export interface WorkspaceSettings {
 export interface WorkspaceSnapshot {
   boards: BoardRecord[]
   dataTables?: DataTableRecord[]
+  mindmaps?: MindmapRecord[]
   pages: PageRecord[]
   settings: WorkspaceSettings
 }

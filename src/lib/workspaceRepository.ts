@@ -34,8 +34,10 @@ function toSettingsRow(snapshot: WorkspaceSnapshot): WorkspaceSettingsRow {
 export function createDexieWorkspaceRepository(): WorkspaceRepository {
   return {
     async load() {
-      const [boards, pages, settings] = await Promise.all([
+      const [boards, dataTables, mindmaps, pages, settings] = await Promise.all([
         db.boards.toArray(),
+        db.dataTables.toArray(),
+        db.mindmaps.toArray(),
         db.pages.toArray(),
         db.settings.get(SETTINGS_ID),
       ])
@@ -46,7 +48,8 @@ export function createDexieWorkspaceRepository(): WorkspaceRepository {
 
       return {
         boards,
-        dataTables: await db.dataTables.toArray(),
+        dataTables,
+        mindmaps,
         pages,
         settings: {
           lastOpenedPageId: settings.lastOpenedPageId,
@@ -58,17 +61,20 @@ export function createDexieWorkspaceRepository(): WorkspaceRepository {
       await this.replace({
         ...snapshot,
         dataTables: snapshot.dataTables ?? (await db.dataTables.toArray()),
+        mindmaps: snapshot.mindmaps ?? (await db.mindmaps.toArray()),
       })
     },
 
     async replace(snapshot) {
-      await db.transaction('rw', db.boards, db.dataTables, db.pages, db.settings, async () => {
+      await db.transaction('rw', db.boards, db.dataTables, db.mindmaps, db.pages, db.settings, async () => {
         await db.boards.clear()
         await db.dataTables.clear()
+        await db.mindmaps.clear()
         await db.pages.clear()
         await db.settings.clear()
         await db.boards.bulkPut(snapshot.boards)
         await db.dataTables.bulkPut(snapshot.dataTables ?? [])
+        await db.mindmaps.bulkPut(snapshot.mindmaps ?? [])
         await db.pages.bulkPut(snapshot.pages)
         await db.settings.put(toSettingsRow(snapshot))
       })

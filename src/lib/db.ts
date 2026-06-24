@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie'
-import type { BoardRecord, DataTableRecord, PageRecord, WorkspaceSettings } from '../domain/types'
+import type { BoardRecord, DataTableRecord, MindmapRecord, PageRecord, WorkspaceSettings } from '../domain/types'
 
 export type WorkspaceSettingsRow = WorkspaceSettings & {
   id: string
@@ -8,6 +8,7 @@ export type WorkspaceSettingsRow = WorkspaceSettings & {
 class WorkspaceDatabase extends Dexie {
   boards!: Table<BoardRecord, string>
   dataTables!: Table<DataTableRecord, string>
+  mindmaps!: Table<MindmapRecord, string>
   pages!: Table<PageRecord, string>
   settings!: Table<WorkspaceSettingsRow, string>
 
@@ -34,6 +35,14 @@ class WorkspaceDatabase extends Dexie {
     this.version(7).stores({
       boards: 'id',
       dataTables: 'id',
+      pages: 'id, parentId, updatedAt',
+      settings: 'id',
+    })
+
+    this.version(8).stores({
+      boards: 'id',
+      dataTables: 'id',
+      mindmaps: 'id',
       pages: 'id, parentId, updatedAt',
       settings: 'id',
     })

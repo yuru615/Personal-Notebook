@@ -22,6 +22,7 @@ function createSnapshot(): WorkspaceSnapshot {
       },
     ],
     dataTables: [],
+    mindmaps: [],
     pages: [
       {
         id: 'page_1',
@@ -53,6 +54,7 @@ describe('createDexieWorkspaceRepository', () => {
     await db.pages.clear()
     await db.boards.clear()
     await db.dataTables.clear()
+    await db.mindmaps.clear()
     await db.settings.clear()
   })
 
@@ -73,6 +75,7 @@ describe('createDexieWorkspaceRepository', () => {
     const emptySnapshot: WorkspaceSnapshot = {
       boards: [],
       dataTables: [],
+      mindmaps: [],
       pages: [],
       settings: {
         lastOpenedPageId: null,
@@ -130,6 +133,7 @@ describe('createDexieWorkspaceRepository', () => {
     await expect(repository.load()).resolves.toEqual({
       boards: [],
       dataTables: [],
+      mindmaps: [],
       pages: [
         {
           id: 'page_legacy',
@@ -145,6 +149,20 @@ describe('createDexieWorkspaceRepository', () => {
       settings: {
         lastOpenedPageId: 'page_legacy',
       },
+    })
+  })
+
+  it('loads legacy persisted data without mindmaps as an empty mindmaps array', async () => {
+    const repository = createDexieWorkspaceRepository()
+    const snapshot = createSnapshot()
+
+    await repository.replace(snapshot)
+
+    await db.mindmaps.clear()
+
+    await expect(repository.load()).resolves.toEqual({
+      ...snapshot,
+      mindmaps: [],
     })
   })
 })
