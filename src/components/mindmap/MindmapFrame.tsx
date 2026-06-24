@@ -26,7 +26,7 @@ export function MindmapFrame({ mindmapId, snapshot, onSnapshotChange }: MindmapF
 
   useEffect(() => {
     mindmapIdRef.current = mindmapId
-    writeSnapshotToStorage(snapshot)
+    writeSnapshotToStorage(snapshotRef.current)
 
     function readStoredSnapshot() {
       const rawValue = window.localStorage.getItem(MINDMAP_STORAGE_KEY)

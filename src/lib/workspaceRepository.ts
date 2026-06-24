@@ -66,7 +66,7 @@ export function createDexieWorkspaceRepository(): WorkspaceRepository {
     },
 
     async replace(snapshot) {
-      await db.transaction('rw', db.boards, db.dataTables, db.mindmaps, db.pages, db.settings, async () => {
+      await db.transaction('rw', [db.boards, db.dataTables, db.mindmaps, db.pages, db.settings], async () => {
         await db.boards.clear()
         await db.dataTables.clear()
         await db.mindmaps.clear()

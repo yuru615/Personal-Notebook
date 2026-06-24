@@ -182,9 +182,9 @@ describe('createDexieWorkspaceRepository', () => {
       mindmaps: [persistedMindmap],
     })
 
-    const { mindmaps: _mindmaps, ...legacySnapshot } = createSnapshot()
     const nextSnapshot: WorkspaceSnapshot = {
-      ...legacySnapshot,
+      ...createSnapshot(),
+      mindmaps: undefined,
       settings: {
         lastOpenedPageId: null,
       },
