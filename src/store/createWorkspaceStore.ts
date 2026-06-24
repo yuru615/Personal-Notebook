@@ -1445,12 +1445,27 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
     updateMindmapSnapshot: async (mindmapId: string, snapshot: unknown) => {
       const state = get()
+      const currentMindmap = state.mindmaps.find((mindmap) => mindmap.id === mindmapId)
+
+      if (!currentMindmap) {
+        return
+      }
+
+      const nextTitle = extractMindmapTitle(snapshot as { title?: unknown })
+      const nextSnapshot = structuredClone(snapshot)
+      if (
+        currentMindmap.title === nextTitle &&
+        JSON.stringify(currentMindmap.snapshot) === JSON.stringify(nextSnapshot)
+      ) {
+        return
+      }
+
       const nextMindmaps = state.mindmaps.map((mindmap) =>
         mindmap.id === mindmapId
           ? {
               ...mindmap,
-              title: extractMindmapTitle(snapshot as { title?: unknown }),
-              snapshot: structuredClone(snapshot),
+              title: nextTitle,
+              snapshot: nextSnapshot,
               updatedAt: new Date().toISOString(),
             }
           : mindmap,
@@ -1756,6 +1771,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       let didInsert = false
       let nextBoards = state.boards
       let nextDataTables = state.dataTables
+      let nextMindmaps = state.mindmaps
 
       const nextPages = state.pages.map((page) => {
         if (page.id !== pageId) {

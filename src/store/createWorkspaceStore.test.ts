@@ -4,6 +4,37 @@ import { createMemoryRepository } from '../test/memoryRepository'
 import { createWorkspaceStore } from './createWorkspaceStore'
 import type { WorkspaceSnapshot } from '../domain/types'
 
+function createCountingRepository(initialSnapshot: WorkspaceSnapshot | null = null) {
+  let snapshot = initialSnapshot ? structuredClone(initialSnapshot) : null
+  let saveCalls = 0
+  let replaceCalls = 0
+
+  return {
+    repository: {
+      async load() {
+        return snapshot ? structuredClone(snapshot) : null
+      },
+      async save(nextSnapshot: WorkspaceSnapshot) {
+        saveCalls += 1
+        snapshot = structuredClone(nextSnapshot)
+      },
+      async replace(nextSnapshot: WorkspaceSnapshot) {
+        replaceCalls += 1
+        snapshot = structuredClone(nextSnapshot)
+      },
+    },
+    getSnapshot() {
+      return snapshot ? structuredClone(snapshot) : null
+    },
+    getSaveCalls() {
+      return saveCalls
+    },
+    getReplaceCalls() {
+      return replaceCalls
+    },
+  }
+}
+
 function createWorkspace(): WorkspaceSnapshot {
   const now = '2026-06-22T00:00:00.000Z'
 
@@ -287,5 +318,88 @@ describe('createWorkspaceStore mindmaps', () => {
     expect(restored).toMatchObject({ id: mindmapId })
     expect(store.getState().mindmaps).toHaveLength(1)
     expect(store.getState().mindmaps[0]?.id).toBe(mindmapId)
+  })
+
+  it('creates a mindmap asset when inserting a mindmap block after another block', async () => {
+    const repository = createMemoryRepository(createWorkspace())
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    await store.getState().insertParagraphBlock('page_1', 'alpha')
+    const afterBlockId = store.getState().pages[0]?.blocks[0]?.id
+    const block = await store.getState().insertBlockAfter('page_1', afterBlockId!, 'mindmap')
+    const state = store.getState()
+
+    expect(block).toMatchObject({
+      type: 'mindmap',
+      mindmapId: expect.stringMatching(/^mindmap_/),
+    })
+    expect(state.pages[0]?.blocks[1]).toMatchObject({
+      id: (block as { id: string }).id,
+      type: 'mindmap',
+      mindmapId: (block as { mindmapId: string }).mindmapId,
+    })
+    expect(state.mindmaps).toHaveLength(1)
+  })
+
+  it('turns a block into a mindmap and preserves the block id', async () => {
+    const repository = createMemoryRepository(createWorkspace())
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    await store.getState().insertParagraphBlock('page_1', 'alpha')
+    const sourceBlockId = store.getState().pages[0]?.blocks[0]?.id
+
+    await store.getState().turnBlockInto('page_1', sourceBlockId!, 'mindmap')
+
+    const state = store.getState()
+    expect(state.pages[0]?.blocks[0]).toMatchObject({
+      id: sourceBlockId,
+      type: 'mindmap',
+      mindmapId: expect.stringMatching(/^mindmap_/),
+    })
+    expect(state.mindmaps).toHaveLength(1)
+    expect(state.mindmaps[0]?.id).toBe(
+      (state.pages[0]?.blocks[0] as { mindmapId: string }).mindmapId,
+    )
+  })
+
+  it('does not persist a mindmap snapshot update when the snapshot is unchanged', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+    const block = await store.getState().insertBlock('page_1', 'mindmap')
+    const mindmapId = (block as { mindmapId: string }).mindmapId
+    const saveCallsBefore = counted.getSaveCalls()
+    const snapshotBefore = structuredClone(store.getState().mindmaps[0]?.snapshot)
+    const updatedAtBefore = store.getState().mindmaps[0]?.updatedAt
+
+    await store.getState().updateMindmapSnapshot(mindmapId, snapshotBefore)
+
+    expect(counted.getSaveCalls()).toBe(saveCallsBefore)
+    expect(store.getState().mindmaps[0]?.updatedAt).toBe(updatedAtBefore)
+    expect(counted.getSnapshot()?.mindmaps?.[0]?.snapshot).toEqual(snapshotBefore)
+  })
+
+  it('preserves mindmaps through undo and redo', async () => {
+    const repository = createMemoryRepository(createWorkspace())
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const block = await store.getState().insertBlock('page_1', 'mindmap')
+    const mindmapId = (block as { mindmapId: string }).mindmapId
+
+    await store.getState().undo()
+    expect(store.getState().mindmaps).toHaveLength(0)
+    expect(store.getState().pages[0]?.blocks).toHaveLength(0)
+
+    await store.getState().redo()
+    expect(store.getState().mindmaps).toHaveLength(1)
+    expect(store.getState().mindmaps[0]?.id).toBe(mindmapId)
+    expect(store.getState().pages[0]?.blocks[0]).toMatchObject({
+      type: 'mindmap',
+      mindmapId,
+    })
   })
 })
