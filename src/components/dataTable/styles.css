@@ -2305,6 +2305,10 @@ button {
   vertical-align: middle;
 }
 
+.database-table:not(.is-wrapped) td {
+  white-space: nowrap;
+}
+
 .database-table.is-wrapped td {
   height: auto;
   min-height: 44px;
@@ -3062,6 +3066,11 @@ button {
 }
 
 .database-table:not(.is-wrapped) .cell-option-trigger {
+  width: max-content;
+  min-width: 100%;
+}
+
+.database-table:not(.is-wrapped) .cell-date-trigger {
   width: max-content;
   min-width: 100%;
 }

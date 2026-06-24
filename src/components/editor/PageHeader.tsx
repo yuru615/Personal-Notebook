@@ -25,6 +25,24 @@ const pageIconOptions = [
   '\u{1F3AF}',
   '\u{1F4DA}',
   '\u{1F516}',
+  '\u{1F9E0}',
+  '\u{1F4CA}',
+  '\u{1F4C8}',
+  '\u{1F9ED}',
+  '\u{1F9EA}',
+  '\u{1F50D}',
+  '\u{1F9E9}',
+  '\u{1F680}',
+  '\u{1F5D3}\uFE0F',
+  '\u{1F9F0}',
+  '\u{1F3F7}\uFE0F',
+  '\u{1F4AC}',
+  '\u{1F331}',
+  '\u{1F525}',
+  '\u2699\uFE0F',
+  '\u{1F9FE}',
+  '\u{1F5C3}\uFE0F',
+  '\u{1F3C6}',
 ]
 
 const defaultPageIcon = '\u{1F4C4}'
@@ -36,6 +54,14 @@ const pageCoverOptions = [
   { id: 'sand', label: '\u6696\u6c99' },
   { id: 'berry', label: '\u8393\u679c' },
   { id: 'slate', label: '\u77f3\u58a8' },
+  { id: 'aurora', label: '\u6781\u5149' },
+  { id: 'mint', label: '\u8584\u8377' },
+  { id: 'lavender', label: '\u96fe\u7d2b' },
+  { id: 'sky', label: '\u6674\u7a7a' },
+  { id: 'coral', label: '\u73ca\u745a' },
+  { id: 'amber', label: '\u7425\u73c0' },
+  { id: 'night', label: '\u591c\u822a' },
+  { id: 'paper', label: '\u7eb8\u7eb9' },
 ] as const
 
 export function PageHeader({

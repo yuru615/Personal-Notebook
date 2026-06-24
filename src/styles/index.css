@@ -497,6 +497,63 @@ a {
     linear-gradient(120deg, #e4e9f0 0%, #d5dce7 44%, #f2f5f9 100%);
 }
 
+.page-cover-aurora,
+.page-cover-swatch-aurora {
+  background:
+    radial-gradient(circle at 18% 30%, rgba(125, 211, 252, 0.46), transparent 36%),
+    radial-gradient(circle at 72% 24%, rgba(196, 181, 253, 0.4), transparent 34%),
+    linear-gradient(120deg, #d9fbe8 0%, #c8e8ff 50%, #f0ddff 100%);
+}
+
+.page-cover-mint,
+.page-cover-swatch-mint {
+  background:
+    linear-gradient(135deg, rgba(21, 128, 61, 0.12), rgba(45, 212, 191, 0.1)),
+    linear-gradient(120deg, #dff8ea 0%, #c9f1df 44%, #f1fbf5 100%);
+}
+
+.page-cover-lavender,
+.page-cover-swatch-lavender {
+  background:
+    linear-gradient(135deg, rgba(124, 58, 237, 0.14), rgba(244, 114, 182, 0.08)),
+    linear-gradient(120deg, #eee4ff 0%, #dfd3fb 46%, #fbeaf5 100%);
+}
+
+.page-cover-sky,
+.page-cover-swatch-sky {
+  background:
+    radial-gradient(circle at 70% 22%, rgba(255, 255, 255, 0.9), transparent 18%),
+    linear-gradient(120deg, #d9f1ff 0%, #bfe2ff 48%, #edf8ff 100%);
+}
+
+.page-cover-coral,
+.page-cover-swatch-coral {
+  background:
+    linear-gradient(135deg, rgba(225, 83, 97, 0.14), rgba(251, 146, 60, 0.1)),
+    linear-gradient(120deg, #ffe0de 0%, #ffc9c4 43%, #ffe9dc 100%);
+}
+
+.page-cover-amber,
+.page-cover-swatch-amber {
+  background:
+    linear-gradient(135deg, rgba(202, 138, 4, 0.16), rgba(234, 179, 8, 0.08)),
+    linear-gradient(120deg, #fff0bd 0%, #f7d889 45%, #fff5d6 100%);
+}
+
+.page-cover-night,
+.page-cover-swatch-night {
+  background:
+    radial-gradient(circle at 78% 28%, rgba(191, 219, 254, 0.34), transparent 20%),
+    linear-gradient(120deg, #1f2937 0%, #334155 46%, #5b6472 100%);
+}
+
+.page-cover-paper,
+.page-cover-swatch-paper {
+  background:
+    linear-gradient(135deg, rgba(120, 113, 108, 0.08), rgba(214, 211, 209, 0.16)),
+    repeating-linear-gradient(0deg, #faf8f3 0 12px, #f3efe7 12px 13px);
+}
+
 .page-header-top {
   display: flex;
   align-items: center;
@@ -586,6 +643,8 @@ a {
   box-shadow:
     0 18px 40px rgba(15, 23, 42, 0.12),
     0 2px 8px rgba(15, 23, 42, 0.04);
+  max-height: min(72vh, 620px);
+  overflow: auto;
 }
 
 .page-icon-popover {
@@ -603,6 +662,8 @@ a {
   box-shadow:
     0 18px 40px rgba(15, 23, 42, 0.12),
     0 2px 8px rgba(15, 23, 42, 0.04);
+  max-height: min(72vh, 520px);
+  overflow: auto;
 }
 
 .page-cover-remove,

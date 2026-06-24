@@ -92,6 +92,29 @@ describe('PageHeader', () => {
     expect(onChangeCover).toHaveBeenCalledWith('ocean')
   })
 
+  it('includes expanded cover and icon choices', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <PageHeader
+        page={page}
+        onRename={vi.fn()}
+        onChangeIcon={vi.fn()}
+        onChangeCover={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '添加封面' }))
+
+    expect(screen.getByRole('button', { name: '极光' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '夜航' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '添加图标' }))
+
+    expect(screen.getByRole('button', { name: '🧠' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '📊' })).toBeInTheDocument()
+  })
+
   it('removes the current page cover from the picker', async () => {
     const user = userEvent.setup()
     const onChangeCover = vi.fn()

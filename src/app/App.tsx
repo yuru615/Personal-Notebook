@@ -415,6 +415,7 @@ function AppRoutes({
         <SidebarTree
           pages={pages}
           boards={boards}
+          dataTables={dataTables}
           currentPageId={currentPageId}
           onCreatePage={() => {
             void handleCreatePage()

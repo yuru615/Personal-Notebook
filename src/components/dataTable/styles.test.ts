@@ -95,6 +95,10 @@ describe('data table styles', () => {
   it('only wraps multi-select chips when table cell wrapping is enabled', () => {
     expect(getRuleBody('.database-table')).toContain('table-layout: auto')
     expect(getRuleBody('.database-table.is-wrapped')).toContain('table-layout: fixed')
+    expect(getRuleBody('.database-table:not(.is-wrapped) td')).toContain('white-space: nowrap')
+    expect(getRuleBody('.database-table:not(.is-wrapped) .cell-date-trigger')).toContain(
+      'width: max-content',
+    )
     expect(getRuleBody('.database-table:not(.is-wrapped) .cell-option-chip-list')).toContain(
       'flex-wrap: nowrap',
     )

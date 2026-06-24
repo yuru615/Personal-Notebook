@@ -108,4 +108,67 @@ describe('SidebarTree', () => {
     )
     expect(screen.queryByRole('link', { name: 'Orphan Board' })).not.toBeInTheDocument()
   })
+
+  it('renders referenced data tables under their source page', () => {
+    const databasePages = [
+      {
+        id: 'page_parent',
+        title: 'Project',
+        parentId: null,
+        icon: 'P',
+        cover: null,
+        createdAt: '',
+        updatedAt: '',
+        blocks: [
+          {
+            id: 'block-database',
+            type: 'data_table',
+            databaseId: 'database_project',
+          },
+        ],
+      },
+    ]
+    const dataTables = [
+      {
+        id: 'database_project',
+        title: 'Project database',
+        icon: 'D',
+        cover: null,
+        snapshot: null,
+        createdAt: '',
+        updatedAt: '',
+      },
+      {
+        id: 'database_orphan',
+        title: 'Orphan database',
+        icon: null,
+        cover: null,
+        snapshot: null,
+        createdAt: '',
+        updatedAt: '',
+      },
+    ]
+
+    render(
+      <MemoryRouter>
+        <SidebarTree
+          pages={databasePages as never}
+          dataTables={dataTables as never}
+          currentPageId="page_parent"
+          onCreatePage={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    const pageLink = screen.getByRole('link', { name: 'Project' })
+    const databaseLink = screen.getByRole('link', { name: 'Project database' })
+
+    expect(databaseLink).toHaveAttribute(
+      'href',
+      '/pages/page_parent/data-tables/database_project',
+    )
+    expect(databaseLink).toHaveStyle({ paddingLeft: '26px' })
+    expect(pageLink.compareDocumentPosition(databaseLink)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(screen.queryByRole('link', { name: 'Orphan database' })).not.toBeInTheDocument()
+  })
 })

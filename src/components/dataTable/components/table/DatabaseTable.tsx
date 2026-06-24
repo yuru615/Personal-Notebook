@@ -166,6 +166,8 @@ export default function DatabaseTable({
     startX: number;
     startWidth: number;
   } | null>(null);
+  const suppressColumnMenuClickRef = useRef(false);
+  const suppressColumnMenuClickTimerRef = useRef<number | null>(null);
   const [columnMenuPosition, setColumnMenuPosition] = useState({
     top: 0,
     left: 0,
@@ -224,6 +226,14 @@ export default function DatabaseTable({
       }
 
       resizeSessionRef.current = null;
+      suppressColumnMenuClickRef.current = true;
+      if (suppressColumnMenuClickTimerRef.current) {
+        window.clearTimeout(suppressColumnMenuClickTimerRef.current);
+      }
+      suppressColumnMenuClickTimerRef.current = window.setTimeout(() => {
+        suppressColumnMenuClickRef.current = false;
+        suppressColumnMenuClickTimerRef.current = null;
+      }, 0);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
     };
@@ -234,10 +244,26 @@ export default function DatabaseTable({
     return () => {
       window.removeEventListener("mousemove", handleResizeMove);
       window.removeEventListener("mouseup", handleResizeEnd);
+      if (suppressColumnMenuClickTimerRef.current) {
+        window.clearTimeout(suppressColumnMenuClickTimerRef.current);
+      }
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
     };
   }, [onColumnWidthChange]);
+
+  const consumeSuppressedColumnMenuClick = () => {
+    if (!suppressColumnMenuClickRef.current) {
+      return false;
+    }
+
+    suppressColumnMenuClickRef.current = false;
+    if (suppressColumnMenuClickTimerRef.current) {
+      window.clearTimeout(suppressColumnMenuClickTimerRef.current);
+      suppressColumnMenuClickTimerRef.current = null;
+    }
+    return true;
+  };
 
   const setHeaderRef = useCallback(
     (propertyId: string, element: HTMLTableCellElement | null) => {
@@ -338,6 +364,10 @@ export default function DatabaseTable({
     event: ReactMouseEvent<HTMLTableCellElement>,
     propertyId: string,
   ) => {
+    if (consumeSuppressedColumnMenuClick()) {
+      return;
+    }
+
     const target = event.target;
 
     if (
@@ -567,7 +597,14 @@ export default function DatabaseTable({
                     }
                     aria-label={`${property.name} 列菜单`}
                     aria-expanded={activeColumnMenuPropertyId === property.id}
-                    onClick={() => onToggleColumnMenu?.(property.id)}
+                    onClick={(event) => {
+                      if (consumeSuppressedColumnMenuClick()) {
+                        event.stopPropagation();
+                        return;
+                      }
+
+                      onToggleColumnMenu?.(property.id);
+                    }}
                   >
                     <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
                   </button>

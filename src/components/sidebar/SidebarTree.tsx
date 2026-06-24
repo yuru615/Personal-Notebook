@@ -1,14 +1,16 @@
 import { useMemo, useRef } from 'react'
 import { NavLink } from 'react-router-dom'
-import type { BoardRecord, PageId, PageRecord } from '../../domain/types'
+import type { BoardRecord, DataTableRecord, PageId, PageRecord } from '../../domain/types'
 import { uiCopy } from '../../ui/copy'
 import { buildVisiblePageItems } from '../../utils/pageTree'
 
 const RECENT_WHITEBOARDS_LABEL = '\u6700\u8fd1\u767d\u677f'
+const DATA_TABLE_ICON = '\u25a6'
 
 interface SidebarTreeProps {
   pages: PageRecord[]
   boards?: BoardRecord[]
+  dataTables?: DataTableRecord[]
   currentPageId: PageId | null
   onCreatePage: () => void
   onSearch?: () => void
@@ -18,6 +20,7 @@ interface SidebarTreeProps {
 export function SidebarTree({
   pages,
   boards = [],
+  dataTables = [],
   currentPageId,
   onCreatePage,
   onSearch,
@@ -25,6 +28,10 @@ export function SidebarTree({
 }: SidebarTreeProps) {
   const visiblePages = useMemo(() => buildVisiblePageItems(pages, {}), [pages])
   const recentBoards = useMemo(() => buildRecentBoards(pages, boards), [boards, pages])
+  const dataTablesByPageId = useMemo(
+    () => buildDataTablesByPageId(pages, dataTables),
+    [dataTables, pages],
+  )
   const draggingPageId = useRef<string | null>(null)
 
   return (
@@ -94,6 +101,20 @@ export function SidebarTree({
               </span>
               <span className="sidebar-tree-label">{page.title}</span>
             </NavLink>
+            {(dataTablesByPageId.get(page.id) ?? []).map((dataTable) => (
+              <div key={`${page.id}-${dataTable.id}`} className="sidebar-tree-row">
+                <NavLink
+                  to={`/pages/${page.id}/data-tables/${dataTable.id}`}
+                  className={({ isActive }) => getSidebarItemClassName(isActive)}
+                  style={{ paddingLeft: `${10 + (depth + 1) * 16}px` }}
+                >
+                  <span className="sidebar-tree-icon" aria-hidden="true">
+                    {dataTable.icon ?? DATA_TABLE_ICON}
+                  </span>
+                  <span className="sidebar-tree-label">{dataTable.title}</span>
+                </NavLink>
+              </div>
+            ))}
           </div>
         ))}
       </nav>
@@ -123,6 +144,32 @@ function buildRecentBoards(pages: PageRecord[], boards: BoardRecord[]) {
       board,
       pageId: pageIdsByBoardId.get(board.id) ?? pages[0]?.id ?? '',
     }))
+}
+
+function buildDataTablesByPageId(pages: PageRecord[], dataTables: DataTableRecord[]) {
+  const dataTableById = new Map(dataTables.map((dataTable) => [dataTable.id, dataTable]))
+  const result = new Map<PageId, DataTableRecord[]>()
+
+  for (const page of pages) {
+    const seenOnPage = new Set<string>()
+
+    for (const block of page.blocks) {
+      if (block.type !== 'data_table' || seenOnPage.has(block.databaseId)) {
+        continue
+      }
+
+      const dataTable = dataTableById.get(block.databaseId)
+
+      if (!dataTable) {
+        continue
+      }
+
+      seenOnPage.add(block.databaseId)
+      result.set(page.id, [...(result.get(page.id) ?? []), dataTable])
+    }
+  }
+
+  return result
 }
 
 function getUpdatedAt(value: string) {
