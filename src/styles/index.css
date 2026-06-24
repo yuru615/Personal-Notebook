@@ -2662,6 +2662,11 @@ a {
   background: #ffffff;
 }
 
+.mindmap-page-active {
+  height: 100vh;
+  overflow: hidden;
+}
+
 .mindmap-page-topbar {
   position: fixed;
   top: 12px;
@@ -2714,7 +2719,7 @@ a {
 }
 
 .mindmap-page-surface {
-  min-height: 100vh;
+  height: 100%;
 }
 
 .mindmap-page-empty {
@@ -2741,8 +2746,9 @@ a {
 }
 
 .mindmap-route-surface {
-  min-height: 100vh;
-  padding-top: 64px;
+  display: block;
+  height: 100%;
+  min-height: 0;
 }
 
 .mindmap-route-recover {

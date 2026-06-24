@@ -108,7 +108,7 @@ export function MindmapFrame({ mindmapId, snapshot, onSnapshotChange }: MindmapF
       src={`/mindmap-web/index.html?storageKey=${encodeURIComponent(scopedStorageKey)}`}
       className="mindmap-route-surface"
       data-mindmap-id={mindmapId}
-      style={{ width: '100%', minHeight: '100vh', border: 0 }}
+      style={{ width: '100%', height: '100%', border: 0 }}
     />
   )
 }

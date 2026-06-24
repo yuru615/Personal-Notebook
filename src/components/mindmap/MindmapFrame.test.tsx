@@ -181,4 +181,21 @@ describe('MindmapFrame', () => {
       `/mindmap-web/index.html?storageKey=${encodeURIComponent(getScopedStorageKey('mindmap-1'))}`,
     )
   })
+
+  it('lets the iframe fill the route surface instead of forcing viewport height', async () => {
+    const { MindmapFrame } = await import('./MindmapFrame')
+
+    render(
+      <MindmapFrame
+        mindmapId="mindmap-1"
+        snapshot={{ title: 'Strategy map', nodes: {} }}
+        onSnapshotChange={() => undefined}
+      />,
+    )
+
+    expect(screen.getByTitle('Mindmap')).toHaveStyle({
+      width: '100%',
+      height: '100%',
+    })
+  })
 })

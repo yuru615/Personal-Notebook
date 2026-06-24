@@ -91,8 +91,8 @@ const options: SlashMenuOption[] = [
   },
   {
     type: 'mindmap',
-    label: '导图',
-    description: '插入一个可点击进入的导图卡片',
+    label: '思维导图',
+    description: '插入一个可点击进入的思维导图卡片',
     icon: '◎',
     group: 'page_data',
   },
