@@ -165,4 +165,36 @@ describe('createDexieWorkspaceRepository', () => {
       mindmaps: [],
     })
   })
+
+  it('preserves persisted mindmaps when saving a legacy snapshot without mindmaps', async () => {
+    const repository = createDexieWorkspaceRepository()
+    const now = '2026-06-14T00:00:00.000Z'
+    const persistedMindmap = {
+      id: 'mindmap_1',
+      title: '产品规划',
+      snapshot: { id: 'doc-root', title: '产品规划' },
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    await repository.replace({
+      ...createSnapshot(),
+      mindmaps: [persistedMindmap],
+    })
+
+    const { mindmaps: _mindmaps, ...legacySnapshot } = createSnapshot()
+    const nextSnapshot: WorkspaceSnapshot = {
+      ...legacySnapshot,
+      settings: {
+        lastOpenedPageId: null,
+      },
+    }
+
+    await repository.save(nextSnapshot)
+
+    await expect(repository.load()).resolves.toEqual({
+      ...nextSnapshot,
+      mindmaps: [persistedMindmap],
+    })
+  })
 })
