@@ -300,6 +300,41 @@ describe('createWorkspaceStore mindmaps', () => {
     expect(payload.mindmaps).toHaveLength(1)
   })
 
+  it('exports and imports mindmap blocks with their records', async () => {
+    const sourceStore = createWorkspaceStore(createMemoryRepository(createWorkspace()))
+    await sourceStore.getState().bootstrap()
+    const block = await sourceStore.getState().insertBlock('page_1', 'mindmap')
+    const mindmapId = (block as { mindmapId: string }).mindmapId
+    const snapshot = structuredClone(sourceStore.getState().mindmaps[0]!.snapshot) as {
+      title: string
+      updatedAt: string
+    }
+    snapshot.title = 'Project Map'
+    snapshot.updatedAt = '2026-06-23T00:00:00.000Z'
+    await sourceStore.getState().updateMindmapSnapshot(mindmapId, snapshot)
+
+    const payload = JSON.parse(await sourceStore.getState().exportJson()) as unknown
+    const targetStore = createWorkspaceStore(createMemoryRepository(createWorkspace()))
+    await targetStore.getState().bootstrap()
+    await targetStore.getState().importJson(payload)
+
+    expect(targetStore.getState().pages[0]?.blocks).toMatchObject([
+      {
+        type: 'mindmap',
+        mindmapId,
+      },
+    ])
+    expect(targetStore.getState().mindmaps).toMatchObject([
+      {
+        id: mindmapId,
+        title: 'Project Map',
+        snapshot: {
+          title: 'Project Map',
+        },
+      },
+    ])
+  })
+
   it('restores a missing mindmap record with the same id', async () => {
     const repository = createMemoryRepository(createWorkspace())
     const store = createWorkspaceStore(repository)
@@ -380,6 +415,47 @@ describe('createWorkspaceStore mindmaps', () => {
     expect(counted.getSaveCalls()).toBe(saveCallsBefore)
     expect(store.getState().mindmaps[0]?.updatedAt).toBe(updatedAtBefore)
     expect(counted.getSnapshot()?.mindmaps?.[0]?.snapshot).toEqual(snapshotBefore)
+  })
+
+  it('updates a mindmap snapshot and preserves it through undo and redo', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+    const block = await store.getState().insertBlock('page_1', 'mindmap')
+    const mindmapId = (block as { mindmapId: string }).mindmapId
+    const before = store.getState().mindmaps[0]!
+    const nextSnapshot = structuredClone(before.snapshot) as {
+      title: string
+      updatedAt: string
+      nodes: Record<string, { text: string }>
+    }
+    nextSnapshot.title = 'Client Strategy'
+    nextSnapshot.updatedAt = '2026-06-23T10:00:00.000Z'
+    nextSnapshot.nodes['node-root'] = {
+      ...nextSnapshot.nodes['node-root'],
+      text: 'Updated Root',
+    }
+
+    await store.getState().updateMindmapSnapshot(mindmapId, nextSnapshot)
+
+    const afterUpdate = store.getState().mindmaps[0]!
+    expect(counted.getSaveCalls()).toBeGreaterThan(1)
+    expect(afterUpdate.title).toBe('Client Strategy')
+    expect(afterUpdate.snapshot).toEqual(nextSnapshot)
+    expect(afterUpdate.updatedAt).not.toBe(before.updatedAt)
+
+    await store.getState().undo()
+    const afterUndo = store.getState().mindmaps[0]!
+    expect(afterUndo.title).toBe(before.title)
+    expect(afterUndo.snapshot).toEqual(before.snapshot)
+    expect(afterUndo.updatedAt).toBe(before.updatedAt)
+
+    await store.getState().redo()
+    const afterRedo = store.getState().mindmaps[0]!
+    expect(afterRedo.title).toBe('Client Strategy')
+    expect(afterRedo.snapshot).toEqual(nextSnapshot)
+    expect(afterRedo.updatedAt).toBe(afterUpdate.updatedAt)
   })
 
   it('preserves mindmaps through undo and redo', async () => {

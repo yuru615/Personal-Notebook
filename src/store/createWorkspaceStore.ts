@@ -717,7 +717,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         if (persistVersion === nonPageAssetsPersistVersion) {
           set({ saveStatus: 'error' })
         }
-        throw new Error('Failed to persist canvas changes')
+        throw new Error('Failed to persist workspace assets')
       }
     }
 
@@ -1459,6 +1459,12 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       ) {
         return
       }
+      const now = new Date()
+      const currentUpdatedAt = Date.parse(currentMindmap.updatedAt)
+      const nextUpdatedAt =
+        Number.isNaN(currentUpdatedAt) || now.getTime() > currentUpdatedAt
+          ? now.toISOString()
+          : new Date(currentUpdatedAt + 1).toISOString()
 
       const nextMindmaps = state.mindmaps.map((mindmap) =>
         mindmap.id === mindmapId
@@ -1466,7 +1472,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
               ...mindmap,
               title: nextTitle,
               snapshot: nextSnapshot,
-              updatedAt: new Date().toISOString(),
+              updatedAt: nextUpdatedAt,
             }
           : mindmap,
       )
