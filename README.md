@@ -64,6 +64,18 @@ npm run test:watch
 - `npm run preview`：预览生产构建结果。
 - `npm run test:watch`：以 watch 模式运行 Vitest。
 
+## GitHub Pages 部署
+
+仓库已包含 GitHub Pages 工作流：`.github/workflows/pages.yml`。推送到 `main` 后，GitHub Actions 会安装依赖、执行 `npm run build`，并发布 `dist` 静态产物。
+
+首次启用时，在 GitHub 仓库页面进入 `Settings` → `Pages`，将 `Build and deployment` 的 `Source` 设为 `GitHub Actions`。工作流成功后，项目站点地址通常是：
+
+```text
+https://yuru615.github.io/Personal-Notebook/
+```
+
+应用数据仍保存在访问该站点的浏览器 IndexedDB 中，不会同步到 GitHub 或其他设备。更换浏览器、设备或清理站点数据前，请先用应用内 JSON 导出备份。
+
 运行单个测试文件示例：
 
 ```bash
