@@ -52,17 +52,6 @@ type AppState = ReturnType<WorkspaceStore['getState']>
 const DUPLICATE_BOARD_LABEL = '创建副本'
 const WHITEBOARD_MENU_LABEL = '白板菜单'
 
-function getRouterBasename(baseUrl: string) {
-  if (!baseUrl || baseUrl === '/' || baseUrl === './') {
-    return undefined
-  }
-
-  const normalizedBaseUrl = baseUrl.startsWith('/') ? baseUrl : `/${baseUrl}`
-  return normalizedBaseUrl.endsWith('/')
-    ? normalizedBaseUrl.slice(0, -1)
-    : normalizedBaseUrl
-}
-
 function isEditableShortcutTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {
     return false
@@ -277,7 +266,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
     return <MemoryRouter initialEntries={initialEntries}>{router}</MemoryRouter>
   }
 
-  return <BrowserRouter basename={getRouterBasename(import.meta.env.BASE_URL)}>{router}</BrowserRouter>
+  return <BrowserRouter>{router}</BrowserRouter>
 }
 
 interface AppRoutesProps {

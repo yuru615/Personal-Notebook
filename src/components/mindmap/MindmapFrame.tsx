@@ -7,13 +7,6 @@ interface MindmapFrameProps {
   onSnapshotChange: (snapshot: unknown) => void | Promise<void>
 }
 
-function buildMindmapHostSrc(storageKey: string) {
-  const baseUrl = import.meta.env.BASE_URL || '/'
-  const normalizedBaseUrl = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`
-
-  return `${normalizedBaseUrl}mindmap-web/index.html?storageKey=${encodeURIComponent(storageKey)}`
-}
-
 export function MindmapFrame({ mindmapId, snapshot, onSnapshotChange }: MindmapFrameProps) {
   const scopedStorageKey = `${MINDMAP_STORAGE_KEY}:${mindmapId}`
   const [iframeVersion, setIframeVersion] = useState(0)
@@ -112,7 +105,7 @@ export function MindmapFrame({ mindmapId, snapshot, onSnapshotChange }: MindmapF
     <iframe
       key={`${mindmapId}:${iframeVersion}`}
       title="Mindmap"
-      src={buildMindmapHostSrc(scopedStorageKey)}
+      src={`/mindmap-web/index.html?storageKey=${encodeURIComponent(scopedStorageKey)}`}
       className="mindmap-route-surface"
       data-mindmap-id={mindmapId}
       style={{ width: '100%', height: '100%', border: 0 }}
