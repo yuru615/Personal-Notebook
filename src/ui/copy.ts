@@ -18,6 +18,7 @@ export const uiCopy = {
   },
   app: {
     loading: '正在加载...',
+    bootstrapError: '数据加载失败，请关闭其他 Personal Notebook 窗口后重试。',
     pageNotFound: '页面不存在',
     renderError: '页面出了点问题，请返回侧边栏重新打开。',
   },

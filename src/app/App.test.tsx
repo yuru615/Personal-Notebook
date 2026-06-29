@@ -1,8 +1,10 @@
+import { StrictMode } from 'react'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceSnapshot } from '../domain/types'
 import { createDefaultAppState } from '../components/dataTable/domain/factory'
+import type { WorkspaceRepository } from '../lib/workspaceRepository'
 import { createMemoryRepository } from '../test/memoryRepository'
 import { App } from './App'
 
@@ -15,6 +17,33 @@ describe('App', () => {
 
   afterEach(() => {
     scrollTo.mockRestore()
+  })
+
+  it('bootstraps an empty repository once when StrictMode replays effects', async () => {
+    let snapshot: WorkspaceSnapshot | null = null
+    let replaceCalls = 0
+    const repository = {
+      async load() {
+        return snapshot ? structuredClone(snapshot) : null
+      },
+      async save(nextSnapshot) {
+        snapshot = structuredClone(nextSnapshot)
+      },
+      async replace(nextSnapshot) {
+        replaceCalls += 1
+        snapshot = structuredClone(nextSnapshot)
+      },
+    } satisfies WorkspaceRepository
+
+    render(
+      <StrictMode>
+        <App repository={repository} />
+      </StrictMode>,
+    )
+
+    await screen.findByDisplayValue('快速开始')
+
+    expect(replaceCalls).toBe(1)
   })
 
   it('focuses the paragraph editor after exiting an empty list item', async () => {

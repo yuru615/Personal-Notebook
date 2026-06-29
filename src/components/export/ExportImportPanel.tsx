@@ -21,8 +21,8 @@ interface ExportImportPanelProps {
   onToggleOutlineVisible: (value: boolean) => void
   onExportJson: () => void | Promise<void>
   onExportMarkdown: () => void | Promise<void>
-  onImportJson: (file: File) => void | Promise<void>
-  onImportMarkdown: (file: File) => void | Promise<void>
+  onImportJson: () => void | Promise<void>
+  onImportMarkdown: () => void | Promise<void>
   onCleanupOrphanBoards: () => void | Promise<void>
   onCleanupOrphanDataTables: () => void | Promise<void>
 }
@@ -74,6 +74,16 @@ export function ExportImportPanel({
   function handleExportMarkdown() {
     closeMenu()
     void onExportMarkdown()
+  }
+
+  function handleImportJson() {
+    closeMenu()
+    void onImportJson()
+  }
+
+  function handleImportMarkdown() {
+    closeMenu()
+    void onImportMarkdown()
   }
 
   function handleCleanupOrphanBoards() {
@@ -166,47 +176,12 @@ export function ExportImportPanel({
             <button type="button" className="page-menu-action" onClick={handleExportMarkdown}>
               <span className="page-menu-item-label">{uiCopy.export.markdown}</span>
             </button>
-            <label className="page-menu-action page-menu-file">
+            <button type="button" className="page-menu-action" onClick={handleImportJson}>
               <span className="page-menu-item-label">{uiCopy.export.import}</span>
-              <input
-                type="file"
-                accept=".json,application/json"
-                className="import-input"
-                onChange={(event) => {
-                  const file = event.target.files?.[0]
-
-                  if (!file) {
-                    return
-                  }
-
-                  if (window.confirm(uiCopy.export.importConfirm)) {
-                    closeMenu()
-                    void onImportJson(file)
-                  }
-
-                  event.target.value = ''
-                }}
-              />
-            </label>
-            <label className="page-menu-action page-menu-file">
+            </button>
+            <button type="button" className="page-menu-action" onClick={handleImportMarkdown}>
               <span className="page-menu-item-label">{IMPORT_MARKDOWN_LABEL}</span>
-              <input
-                type="file"
-                accept=".zip,application/zip"
-                className="import-input"
-                onChange={(event) => {
-                  const file = event.target.files?.[0]
-
-                  if (!file) {
-                    return
-                  }
-
-                  closeMenu()
-                  void onImportMarkdown(file)
-                  event.target.value = ''
-                }}
-              />
-            </label>
+            </button>
             <button type="button" className="page-menu-action" onClick={handleCleanupOrphanBoards}>
               <span className="page-menu-item-label">{CLEANUP_ORPHAN_WHITEBOARDS_LABEL}</span>
             </button>

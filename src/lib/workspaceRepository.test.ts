@@ -1,8 +1,13 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { createSeedWorkspace } from '../domain/seed'
-import { db } from './db'
-import { createDexieWorkspaceRepository, ensureSnapshot } from './workspaceRepository'
-import type { WorkspaceSnapshot } from '../domain/types'
+import type { DataTableRecord, MindmapRecord, WorkspaceSnapshot } from '../domain/types'
+import { createSqliteTestDatabase } from '../test/sqliteTestDatabase'
+import { createSqliteWorkspaceRepository, ensureSnapshot } from './workspaceRepository'
+
+function createRepository() {
+  const database = createSqliteTestDatabase()
+  return createSqliteWorkspaceRepository({ loadDatabase: async () => database })
+}
 
 function createSnapshot(): WorkspaceSnapshot {
   const now = '2026-06-14T00:00:00.000Z'
@@ -21,8 +26,26 @@ function createSnapshot(): WorkspaceSnapshot {
         updatedAt: now,
       },
     ],
-    dataTables: [],
-    mindmaps: [],
+    dataTables: [
+      {
+        id: 'database_1',
+        title: '项目库',
+        icon: null,
+        cover: null,
+        snapshot: { records: [] },
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+    mindmaps: [
+      {
+        id: 'mindmap_1',
+        title: '产品规划',
+        snapshot: { id: 'doc-root', title: '产品规划' },
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
     pages: [
       {
         id: 'page_1',
@@ -49,17 +72,9 @@ function createSnapshot(): WorkspaceSnapshot {
   }
 }
 
-describe('createDexieWorkspaceRepository', () => {
-  beforeEach(async () => {
-    await db.pages.clear()
-    await db.boards.clear()
-    await db.dataTables.clear()
-    await db.mindmaps.clear()
-    await db.settings.clear()
-  })
-
+describe('createSqliteWorkspaceRepository', () => {
   it('seeds empty storage through the bootstrap helper', async () => {
-    const repository = createDexieWorkspaceRepository()
+    const repository = createRepository()
     const seed = createSeedWorkspace()
 
     expect(await repository.load()).toBeNull()
@@ -71,7 +86,7 @@ describe('createDexieWorkspaceRepository', () => {
   })
 
   it('preserves an explicitly empty persisted workspace', async () => {
-    const repository = createDexieWorkspaceRepository()
+    const repository = createRepository()
     const emptySnapshot: WorkspaceSnapshot = {
       boards: [],
       dataTables: [],
@@ -89,20 +104,22 @@ describe('createDexieWorkspaceRepository', () => {
     expect(await repository.load()).toEqual(emptySnapshot)
   })
 
-  it('replaces stored data', async () => {
-    const repository = createDexieWorkspaceRepository()
+  it('replaces stored data and removes records that no longer exist', async () => {
+    const repository = createRepository()
     const original = createSnapshot()
     const next: WorkspaceSnapshot = {
-      ...original,
-      settings: {
-        lastOpenedPageId: null,
-      },
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
       pages: [
         {
           ...original.pages[0],
           title: 'Updated',
         },
       ],
+      settings: {
+        lastOpenedPageId: null,
+      },
     }
 
     await repository.save(original)
@@ -111,80 +128,39 @@ describe('createDexieWorkspaceRepository', () => {
     expect(await repository.load()).toEqual(next)
   })
 
-  it('loads legacy persisted data without boards as an empty boards array', async () => {
-    const repository = createDexieWorkspaceRepository()
-    const now = '2026-06-14T00:00:00.000Z'
-
-    await db.pages.put({
-      id: 'page_legacy',
-      parentId: null,
-      title: 'Legacy',
-      icon: null,
-      cover: null,
-      blocks: [{ id: 'block_legacy', type: 'paragraph', text: 'legacy' }],
-      createdAt: now,
-      updatedAt: now,
-    })
-    await db.settings.put({
-      id: 'workspace',
-      lastOpenedPageId: 'page_legacy',
-    })
-
-    await expect(repository.load()).resolves.toEqual({
-      boards: [],
-      dataTables: [],
-      mindmaps: [],
-      pages: [
-        {
-          id: 'page_legacy',
-          parentId: null,
-          title: 'Legacy',
-          icon: null,
-          cover: null,
-          blocks: [{ id: 'block_legacy', type: 'paragraph', text: 'legacy' }],
-          createdAt: now,
-          updatedAt: now,
-        },
-      ],
-      settings: {
-        lastOpenedPageId: 'page_legacy',
-      },
-    })
-  })
-
-  it('loads legacy persisted data without mindmaps as an empty mindmaps array', async () => {
-    const repository = createDexieWorkspaceRepository()
+  it('preserves page order when data is loaded back from SQLite', async () => {
+    const repository = createRepository()
     const snapshot = createSnapshot()
-
-    await repository.replace(snapshot)
-
-    await db.mindmaps.clear()
-
-    await expect(repository.load()).resolves.toEqual({
-      ...snapshot,
-      mindmaps: [],
-    })
-  })
-
-  it('preserves persisted mindmaps when saving a legacy snapshot without mindmaps', async () => {
-    const repository = createDexieWorkspaceRepository()
-    const now = '2026-06-14T00:00:00.000Z'
-    const persistedMindmap = {
-      id: 'mindmap_1',
-      title: '产品规划',
-      snapshot: { id: 'doc-root', title: '产品规划' },
-      createdAt: now,
-      updatedAt: now,
+    const nextPage = {
+      ...snapshot.pages[0],
+      id: 'page_2',
+      title: 'Second page',
     }
 
     await repository.replace({
-      ...createSnapshot(),
-      mindmaps: [persistedMindmap],
+      ...snapshot,
+      pages: [nextPage, snapshot.pages[0]],
     })
 
+    expect((await repository.load())?.pages.map((page) => page.id)).toEqual([
+      'page_2',
+      'page_1',
+    ])
+  })
+
+  it('preserves persisted data tables and mindmaps when saving a legacy snapshot', async () => {
+    const repository = createRepository()
+    const snapshot = createSnapshot()
+    const persistedDataTable = snapshot.dataTables?.[0] as DataTableRecord
+    const persistedMindmap = snapshot.mindmaps?.[0] as MindmapRecord
+
+    await repository.replace(snapshot)
+
     const nextSnapshot: WorkspaceSnapshot = {
-      ...createSnapshot(),
+      boards: snapshot.boards,
+      dataTables: undefined,
       mindmaps: undefined,
+      pages: snapshot.pages,
       settings: {
         lastOpenedPageId: null,
       },
@@ -194,6 +170,7 @@ describe('createDexieWorkspaceRepository', () => {
 
     await expect(repository.load()).resolves.toEqual({
       ...nextSnapshot,
+      dataTables: [persistedDataTable],
       mindmaps: [persistedMindmap],
     })
   })

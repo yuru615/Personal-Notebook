@@ -56,8 +56,8 @@ describe('ExportImportPanel', () => {
     expect(screen.getByText(uiCopy.export.section)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: uiCopy.export.json })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: uiCopy.export.markdown })).toBeInTheDocument()
-    expect(screen.getByLabelText(uiCopy.export.import)).toBeInTheDocument()
-    expect(screen.getByLabelText(IMPORT_MARKDOWN_LABEL)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: uiCopy.export.import })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: IMPORT_MARKDOWN_LABEL })).toBeInTheDocument()
     expect(screen.getByLabelText(uiCopy.export.reversible)).toBeInTheDocument()
   })
 
@@ -74,39 +74,28 @@ describe('ExportImportPanel', () => {
     expect(screen.queryByRole('button', { name: uiCopy.export.markdown })).not.toBeInTheDocument()
   })
 
-  it('uploads a json file after confirmation from the menu', async () => {
+  it('requests a json import from the menu', async () => {
     const user = userEvent.setup()
     const onImportJson = vi.fn()
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
 
     renderPanel({ onImportJson })
 
     await user.click(screen.getByRole('button', { name: uiCopy.page.menu }))
+    await user.click(screen.getByRole('button', { name: uiCopy.export.import }))
 
-    const input = screen.getByLabelText(uiCopy.export.import) as HTMLInputElement
-    const file = new File(['{"pages":[]}'], 'backup.json', { type: 'application/json' })
-
-    await user.upload(input, file)
-
-    expect(confirmSpy).toHaveBeenCalled()
-    expect(onImportJson).toHaveBeenCalledWith(file)
-    confirmSpy.mockRestore()
+    expect(onImportJson).toHaveBeenCalledTimes(1)
   })
 
-  it('uploads a markdown page package from the menu', async () => {
+  it('requests a markdown page package import from the menu', async () => {
     const user = userEvent.setup()
     const onImportMarkdown = vi.fn()
 
     renderPanel({ onImportMarkdown })
 
     await user.click(screen.getByRole('button', { name: uiCopy.page.menu }))
+    await user.click(screen.getByRole('button', { name: IMPORT_MARKDOWN_LABEL }))
 
-    const input = screen.getByLabelText(IMPORT_MARKDOWN_LABEL) as HTMLInputElement
-    const file = new File(['zip'], 'page-package.zip', { type: 'application/zip' })
-
-    await user.upload(input, file)
-
-    expect(onImportMarkdown).toHaveBeenCalledWith(file)
+    expect(onImportMarkdown).toHaveBeenCalledTimes(1)
   })
 
   it('toggles adaptive content width from the page menu', async () => {

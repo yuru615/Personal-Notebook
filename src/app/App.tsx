@@ -1,6 +1,6 @@
 ﻿import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
-  BrowserRouter,
+  HashRouter,
   MemoryRouter,
   Navigate,
   Route,
@@ -38,9 +38,15 @@ import type {
   SaveStatus,
 } from '../domain/types'
 import {
-  createDexieWorkspaceRepository,
+  createSqliteWorkspaceRepository,
   type WorkspaceRepository,
 } from '../lib/workspaceRepository'
+import {
+  openBinaryFile,
+  openTextFile,
+  saveBinaryFile,
+  saveTextFile,
+} from '../lib/fileAccess'
 import { createWorkspaceStore } from '../store/createWorkspaceStore'
 import { uiCopy } from '../ui/copy'
 import { sanitizeFileNameSegment } from '../utils/fileName'
@@ -51,6 +57,8 @@ type AppState = ReturnType<WorkspaceStore['getState']>
 
 const DUPLICATE_BOARD_LABEL = '创建副本'
 const WHITEBOARD_MENU_LABEL = '白板菜单'
+const JSON_FILE_FILTER = [{ name: 'JSON', extensions: ['json'] }]
+const ZIP_FILE_FILTER = [{ name: 'ZIP', extensions: ['zip'] }]
 
 function isEditableShortcutTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {
@@ -72,24 +80,39 @@ interface AppProps {
 
 export function App({ repository, store: injectedStore, initialEntries }: AppProps = {}) {
   const [store] = useState(
-    () => injectedStore ?? createWorkspaceStore(repository ?? createDexieWorkspaceRepository()),
+    () => injectedStore ?? createWorkspaceStore(repository ?? createSqliteWorkspaceRepository()),
   )
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState)
   const [isBootstrapped, setIsBootstrapped] = useState(false)
+  const [bootstrapError, setBootstrapError] = useState<unknown>(null)
+  const bootstrapPromiseRef = useRef<Promise<void> | null>(null)
   const [reversibleExport, setReversibleExport] = useState(false)
   const setCurrentPage = store.getState().setCurrentPage
 
   useEffect(() => {
-    let isMounted = true
+    let isActive = true
 
-    void store.getState().bootstrap().finally(() => {
-      if (isMounted) {
-        setIsBootstrapped(true)
-      }
-    })
+    bootstrapPromiseRef.current ??= store.getState().bootstrap()
+
+    void bootstrapPromiseRef.current
+      .then(() => {
+        if (isActive) {
+          setBootstrapError(null)
+        }
+      })
+      .catch((error) => {
+        if (isActive) {
+          setBootstrapError(error)
+        }
+      })
+      .finally(() => {
+        if (isActive) {
+          setIsBootstrapped(true)
+        }
+      })
 
     return () => {
-      isMounted = false
+      isActive = false
     }
   }, [store])
 
@@ -130,6 +153,10 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
 
   if (!isBootstrapped) {
     return <div className="page-empty">{uiCopy.app.loading}</div>
+  }
+
+  if (bootstrapError) {
+    return <div className="page-empty">{uiCopy.app.bootstrapError}</div>
   }
 
   const router = (
@@ -221,10 +248,11 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onToggleReversibleExport={setReversibleExport}
       onExportJson={async () => {
         const payload = await store.getState().exportJson()
-        downloadBlob(
-          new Blob([payload], { type: 'application/json;charset=utf-8' }),
-          '鐭ヨ瘑搴撳浠?json',
-        )
+        await saveTextFile({
+          defaultPath: 'personal-notebook-backup.json',
+          contents: payload,
+          filters: JSON_FILE_FILTER,
+        })
       }}
       onExportMarkdown={async (page) => {
         const { buildMarkdownZip } = await import('../domain/markdown')
@@ -235,11 +263,25 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
           reversible: reversibleExport,
         })
 
-        downloadBlob(blob, `${sanitizeFileName(page.title)}.zip`)
+        await saveBinaryFile({
+          defaultPath: `${sanitizeFileName(page.title)}.zip`,
+          contents: blob,
+          filters: ZIP_FILE_FILTER,
+        })
       }}
-      onImportJson={async (file) => {
+      onImportJson={async () => {
+        const file = await openTextFile({ filters: JSON_FILE_FILTER })
+
+        if (!file) {
+          return store.getState().currentPageId
+        }
+
+        if (!window.confirm(uiCopy.export.importConfirm)) {
+          return store.getState().currentPageId
+        }
+
         try {
-          const payload = JSON.parse(await file.text()) as unknown
+          const payload = JSON.parse(file.contents) as unknown
           await store.getState().importJson(payload)
           return store.getState().currentPageId
         } catch {
@@ -247,10 +289,16 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
           return store.getState().currentPageId
         }
       }}
-      onImportMarkdown={async (file) => {
+      onImportMarkdown={async () => {
+        const file = await openBinaryFile({ filters: ZIP_FILE_FILTER })
+
+        if (!file) {
+          return store.getState().currentPageId
+        }
+
         try {
           const { importMarkdownZip } = await import('../domain/markdown')
-          const payload = await importMarkdownZip(file)
+          const payload = await importMarkdownZip(toFile(file, 'application/zip'))
           return await store.getState().importPagePackage(payload)
         } catch {
           window.alert('导入失败，请检查页面包格式。')
@@ -266,7 +314,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
     return <MemoryRouter initialEntries={initialEntries}>{router}</MemoryRouter>
   }
 
-  return <BrowserRouter>{router}</BrowserRouter>
+  return <HashRouter>{router}</HashRouter>
 }
 
 interface AppRoutesProps {
@@ -335,8 +383,8 @@ interface AppRoutesProps {
   onToggleReversibleExport: (value: boolean) => void
   onExportJson: () => Promise<void>
   onExportMarkdown: (page: PageRecord) => Promise<void>
-  onImportJson: (file: File) => Promise<string | null>
-  onImportMarkdown: (file: File) => Promise<string | null>
+  onImportJson: () => Promise<string | null>
+  onImportMarkdown: () => Promise<string | null>
   onCleanupOrphanBoards: () => Promise<void>
   onCleanupOrphanDataTables: () => Promise<void>
 }
@@ -633,8 +681,8 @@ interface PageRouteProps {
   onToggleReversibleExport: (value: boolean) => void
   onExportJson: () => Promise<void>
   onExportMarkdown: (page: PageRecord) => Promise<void>
-  onImportJson: (file: File) => Promise<string | null>
-  onImportMarkdown: (file: File) => Promise<string | null>
+  onImportJson: () => Promise<string | null>
+  onImportMarkdown: () => Promise<string | null>
   onCleanupOrphanBoards: () => Promise<void>
   onCleanupOrphanDataTables: () => Promise<void>
   onUpdateDataTableSnapshot: (databaseId: string, snapshot: unknown) => Promise<void>
@@ -751,12 +799,12 @@ function PageRoute({
             }}
             onExportJson={() => void onExportJson()}
             onExportMarkdown={() => void onExportMarkdown(page)}
-            onImportJson={async (file) => {
-              const nextPageId = await onImportJson(file)
+            onImportJson={async () => {
+              const nextPageId = await onImportJson()
               navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
             }}
-            onImportMarkdown={async (file) => {
-              const nextPageId = await onImportMarkdown(file)
+            onImportMarkdown={async () => {
+              const nextPageId = await onImportMarkdown()
               navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
             }}
             onCleanupOrphanBoards={() => void onCleanupOrphanBoards()}
@@ -999,7 +1047,7 @@ interface BoardRouteProps {
 interface WhiteboardRouteMenuProps {
   onDuplicate: () => void
   onExport: () => void
-  onImport: (file: File) => void
+  onImport: () => void
 }
 
 function WhiteboardRouteMenu({ onDuplicate, onExport, onImport }: WhiteboardRouteMenuProps) {
@@ -1055,26 +1103,16 @@ function WhiteboardRouteMenu({ onDuplicate, onExport, onImport }: WhiteboardRout
               >
                 <span className="page-menu-item-label">导出白板</span>
               </button>
-              <label className="page-menu-action page-menu-file">
+              <button
+                type="button"
+                className="page-menu-action"
+                onClick={() => {
+                  setOpen(false)
+                  onImport()
+                }}
+              >
                 <span className="page-menu-item-label">导入白板</span>
-                <input
-                  className="import-input"
-                  type="file"
-                  accept=".json,application/json"
-                  aria-label="导入白板文件"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0]
-                    event.target.value = ''
-
-                    if (!file) {
-                      return
-                    }
-
-                    setOpen(false)
-                    onImport(file)
-                  }}
-                />
-              </label>
+              </button>
             </div>
           </div>
         ) : null}
@@ -1113,13 +1151,19 @@ function BoardRoute({
 
   const routePageId = page.id
 
-  async function handleImportBoard(file: File) {
+  async function handleImportBoard() {
     if (!board) {
       return
     }
 
+    const file = await openTextFile({ filters: JSON_FILE_FILTER })
+
+    if (!file) {
+      return
+    }
+
     try {
-      const payload = normalizeBoardImportPayload(JSON.parse(await file.text()) as unknown)
+      const payload = normalizeBoardImportPayload(JSON.parse(file.contents) as unknown)
       await onImportBoard(board.id, payload)
     } catch {
       window.alert('导入失败，请检查白板文件格式。')
@@ -1167,25 +1211,21 @@ function BoardRoute({
               void handleDuplicateBoard()
             }}
             onExport={() => {
-              downloadBlob(
-                new Blob(
-                  [
-                    JSON.stringify(
-                      {
-                        title: board.title,
-                        snapshot: board.snapshot,
-                      },
-                      null,
-                      2,
-                    ),
-                  ],
-                  { type: 'application/json;charset=utf-8' },
+              void saveTextFile({
+                defaultPath: `${sanitizeFileName(board.title)}.whiteboard.json`,
+                contents: JSON.stringify(
+                  {
+                    title: board.title,
+                    snapshot: board.snapshot,
+                  },
+                  null,
+                  2,
                 ),
-                `${sanitizeFileName(board.title)}.whiteboard.json`,
-              )
+                filters: JSON_FILE_FILTER,
+              })
             }}
-            onImport={(file) => {
-              void handleImportBoard(file)
+            onImport={() => {
+              void handleImportBoard()
             }}
           />
         ) : (
@@ -1294,15 +1334,18 @@ function MindmapRoute({
 
 export default App
 
-function downloadBlob(blob: Blob, fileName: string) {
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = fileName
-  anchor.click()
-  window.setTimeout(() => {
-    URL.revokeObjectURL(url)
-  }, 0)
+function toFile(
+  openedFile: { name: string; contents: Uint8Array; file?: File },
+  type: string,
+) {
+  return openedFile.file
+    ?? new File([toOwnedArrayBuffer(openedFile.contents)], openedFile.name, { type })
+}
+
+function toOwnedArrayBuffer(bytes: Uint8Array) {
+  const copy = new Uint8Array(bytes.byteLength)
+  copy.set(bytes)
+  return copy.buffer
 }
 
 function sanitizeFileName(value: string) {

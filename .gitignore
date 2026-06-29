@@ -7,28 +7,51 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies
 node_modules
+
+# Build outputs
 dist
 dist-ssr
+src-tauri/target
+
+# Test and coverage outputs
 coverage
+playwright-report
+test-results
+
+# Tool caches
 .vite
+.cache
+.eslintcache
 *.tsbuildinfo
+
+# Local env and secrets
 *.local
 .env
 .env.*
 !.env.example
+*.pem
+*.p12
+*.pfx
+*.key
+*.mobileprovision
 
 # Local tooling and generated artifacts
 .playwright-cli
 .superpowers
 output
 .worktrees
+tmp
+temp
 
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
 .idea
 .DS_Store
+Thumbs.db
+Desktop.ini
 *.suo
 *.ntvs*
 *.njsproj
