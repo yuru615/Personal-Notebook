@@ -1,5 +1,6 @@
 ﻿import type { KeyboardEvent, ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
+import { Suspense, lazy } from 'react'
 import { getTextBlockStyle, isTextStyleableBlock } from '../../domain/blockTextStyle'
 import type {
   BlockRecord,
@@ -21,7 +22,6 @@ import { useFloatingMenuLayout } from './floatingMenu'
 import { ChildPageBlock } from './blocks/ChildPageBlock'
 import { CodeBlock } from './blocks/CodeBlock'
 import { DataTableBlock } from './blocks/DataTableBlock'
-import { EmbeddedDataTableBlock } from './blocks/EmbeddedDataTableBlock'
 import { ListBlock } from './blocks/ListBlock'
 import { ParagraphBlock } from './blocks/ParagraphBlock'
 import { TableBlock } from './blocks/TableBlock'
@@ -30,6 +30,12 @@ import { MindmapBlock } from './blocks/MindmapBlock'
 import { WhiteboardBlock } from './blocks/WhiteboardBlock'
 import { getSlashMenuOptions, SlashMenu } from './SlashMenu'
 import type { ReorderPosition } from '../../utils/reorder'
+
+const EmbeddedDataTableBlock = lazy(() =>
+  import('./blocks/EmbeddedDataTableBlock').then((module) => ({
+    default: module.EmbeddedDataTableBlock,
+  })),
+)
 
 interface DropTarget {
   blockId: string
@@ -831,14 +837,18 @@ export function BlockEditor({
             if (block.displayMode === 'inline' && dataTable) {
               return renderBlockRow(
                 block,
-                <EmbeddedDataTableBlock
-                  dataTable={dataTable}
-                  basePath={`/pages/${page.id}/data-tables/${block.databaseId}`}
-                  onOpen={() => onOpenDataTable?.(block.databaseId)}
-                  onChange={(snapshot) => {
-                    onUpdateDataTableSnapshot?.(block.databaseId, snapshot)
-                  }}
-                />,
+                <Suspense
+                  fallback={<div className="data-table-embed" aria-busy="true" />}
+                >
+                  <EmbeddedDataTableBlock
+                    dataTable={dataTable}
+                    basePath={`/pages/${page.id}/data-tables/${block.databaseId}`}
+                    onOpen={() => onOpenDataTable?.(block.databaseId)}
+                    onChange={(snapshot) => {
+                      onUpdateDataTableSnapshot?.(block.databaseId, snapshot)
+                    }}
+                  />
+                </Suspense>,
               )
             }
 

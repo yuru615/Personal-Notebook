@@ -554,7 +554,7 @@ describe('BlockEditor', () => {
     expect(screen.getByRole('button', { name: '打开数据表格 项目数据库' })).toBeInTheDocument()
   })
 
-  it('renders an inline data table block', () => {
+  it('renders an inline data table block', async () => {
     const dataTablePage = {
       ...page,
       blocks: [
@@ -585,8 +585,8 @@ describe('BlockEditor', () => {
       </MemoryRouter>,
     )
 
-    expect(screen.getByRole('button', { name: '打开整页' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '项目数据表' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '打开整页' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '项目数据表' })).toBeInTheDocument()
   })
 
   it('shows record and property counts on a data table card', () => {

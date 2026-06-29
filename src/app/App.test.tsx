@@ -297,7 +297,7 @@ describe('App', () => {
     const sidebar = await screen.findByRole('complementary', { name: '侧边栏' })
 
     expect(sidebar).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '页面菜单' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '页面菜单' })).toBeInTheDocument()
     expect(container.querySelector('.page-panel-focus')).toBeNull()
     expect(within(sidebar).getByText('快速开始')).toBeInTheDocument()
   })

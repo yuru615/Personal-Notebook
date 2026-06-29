@@ -1,4 +1,5 @@
 ﻿import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { Suspense, lazy } from 'react'
 import {
   HashRouter,
   MemoryRouter,
@@ -10,7 +11,6 @@ import {
   useParams,
 } from 'react-router-dom'
 import { BlockEditor } from '../components/editor/BlockEditor'
-import { DataTablePage } from '../components/dataTable/DataTablePage'
 import { PageHeader } from '../components/editor/PageHeader'
 import { PageOutline } from '../components/editor/PageOutline'
 import { MindmapFrame } from '../components/mindmap/MindmapFrame'
@@ -25,7 +25,6 @@ import {
   PageBreadcrumbs,
   type PageBreadcrumbItem,
 } from '../components/shared/PageBreadcrumbs'
-import { WhiteboardCanvas } from '../components/whiteboard/WhiteboardCanvas'
 import { isWhiteboardSnapshot } from '../components/whiteboard/whiteboardModel'
 import { WhiteboardPage } from '../components/whiteboard/WhiteboardPage'
 import type {
@@ -60,6 +59,16 @@ const DUPLICATE_BOARD_LABEL = '创建副本'
 const WHITEBOARD_MENU_LABEL = '白板菜单'
 const JSON_FILE_FILTER = [{ name: 'JSON', extensions: ['json'] }]
 const ZIP_FILE_FILTER = [{ name: 'ZIP', extensions: ['zip'] }]
+const DataTablePage = lazy(() =>
+  import('../components/dataTable/DataTablePage').then((module) => ({
+    default: module.DataTablePage,
+  })),
+)
+const WhiteboardCanvas = lazy(() =>
+  import('../components/whiteboard/WhiteboardCanvas').then((module) => ({
+    default: module.WhiteboardCanvas,
+  })),
+)
 
 function isEditableShortcutTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {
@@ -1050,69 +1059,71 @@ function DataTableRoute({
   }
 
   return (
-    <DataTablePage
-      page={page}
-      dataTable={dataTable}
-      saveStatus={saveStatus}
-      route={route}
-      basePath={basePath}
-      breadcrumbs={breadcrumbs}
-      headerActions={
-        <ExportImportPanel
-          status={saveStatus}
-          reversible={reversibleExport}
-          adaptiveWidth={page.isFullWidth === true}
-          smallText={page.isSmallText === true}
-          fontFamily={page.fontFamily ?? 'default'}
-          outlineVisible={outlineVisible}
-          onToggleReversible={onToggleReversibleExport}
-          onToggleAdaptiveWidth={(value) => {
-            void onTogglePageFullWidth(page.id, value)
-          }}
-          onToggleSmallText={(value) => {
-            void onTogglePageSmallText(page.id, value)
-          }}
-          onToggleFontFamily={(value) => {
-            void onTogglePageFontFamily(page.id, value)
-          }}
-          onToggleOutlineVisible={(value) => {
-            void onTogglePageOutlineVisible(page.id, value)
-          }}
-          onExportJson={() => void onExportJson()}
-          onExportMarkdown={() => void onExportMarkdown(page)}
-          onImportJson={async () => {
-            const nextPageId = await onImportJson()
-            navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
-          }}
-          onImportMarkdown={async () => {
-            const nextPageId = await onImportMarkdown()
-            navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
-          }}
-          onCleanupOrphanBoards={() => void onCleanupOrphanBoards()}
-          onCleanupOrphanDataTables={() => void onCleanupOrphanDataTables()}
-        />
-      }
-      onChange={(snapshot) => {
-        if (dataTable) {
-          void onUpdateDataTableSnapshot(dataTable.id, snapshot)
+    <Suspense fallback={<div className="page-empty">{uiCopy.app.loading}</div>}>
+      <DataTablePage
+        page={page}
+        dataTable={dataTable}
+        saveStatus={saveStatus}
+        route={route}
+        basePath={basePath}
+        breadcrumbs={breadcrumbs}
+        headerActions={
+          <ExportImportPanel
+            status={saveStatus}
+            reversible={reversibleExport}
+            adaptiveWidth={page.isFullWidth === true}
+            smallText={page.isSmallText === true}
+            fontFamily={page.fontFamily ?? 'default'}
+            outlineVisible={outlineVisible}
+            onToggleReversible={onToggleReversibleExport}
+            onToggleAdaptiveWidth={(value) => {
+              void onTogglePageFullWidth(page.id, value)
+            }}
+            onToggleSmallText={(value) => {
+              void onTogglePageSmallText(page.id, value)
+            }}
+            onToggleFontFamily={(value) => {
+              void onTogglePageFontFamily(page.id, value)
+            }}
+            onToggleOutlineVisible={(value) => {
+              void onTogglePageOutlineVisible(page.id, value)
+            }}
+            onExportJson={() => void onExportJson()}
+            onExportMarkdown={() => void onExportMarkdown(page)}
+            onImportJson={async () => {
+              const nextPageId = await onImportJson()
+              navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
+            }}
+            onImportMarkdown={async () => {
+              const nextPageId = await onImportMarkdown()
+              navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
+            }}
+            onCleanupOrphanBoards={() => void onCleanupOrphanBoards()}
+            onCleanupOrphanDataTables={() => void onCleanupOrphanDataTables()}
+          />
         }
-      }}
-      onRename={(title) => {
-        if (dataTable) {
-          void onRenameDataTable(dataTable.id, title)
-        }
-      }}
-      onChangeIcon={(icon) => {
-        if (dataTable) {
-          void onChangeDataTableIcon(dataTable.id, icon)
-        }
-      }}
-      onChangeCover={(cover) => {
-        if (dataTable) {
-          void onChangeDataTableCover(dataTable.id, cover)
-        }
-      }}
-    />
+        onChange={(snapshot) => {
+          if (dataTable) {
+            void onUpdateDataTableSnapshot(dataTable.id, snapshot)
+          }
+        }}
+        onRename={(title) => {
+          if (dataTable) {
+            void onRenameDataTable(dataTable.id, title)
+          }
+        }}
+        onChangeIcon={(icon) => {
+          if (dataTable) {
+            void onChangeDataTableIcon(dataTable.id, icon)
+          }
+        }}
+        onChangeCover={(cover) => {
+          if (dataTable) {
+            void onChangeDataTableCover(dataTable.id, cover)
+          }
+        }}
+      />
+    </Suspense>
   )
 }
 
@@ -1328,13 +1339,15 @@ function BoardRoute({
       }
     >
       {board ? (
-        <WhiteboardCanvas
-          key={board.id}
-          board={board}
-          onChange={(snapshot) => {
-            void onUpdateBoardSnapshot(board.id, snapshot)
-          }}
-        />
+        <Suspense fallback={<div className="page-empty">{uiCopy.app.loading}</div>}>
+          <WhiteboardCanvas
+            key={board.id}
+            board={board}
+            onChange={(snapshot) => {
+              void onUpdateBoardSnapshot(board.id, snapshot)
+            }}
+          />
+        </Suspense>
       ) : null}
     </WhiteboardPage>
   )
