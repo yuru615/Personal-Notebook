@@ -198,6 +198,13 @@ async function toUint8Array(contents: Blob | Uint8Array) {
   return new Uint8Array(await contents.arrayBuffer())
 }
 
+export function openedBinaryFileToFile(openedFile: OpenedBinaryFile, type: string) {
+  return (
+    openedFile.file ??
+    new File([toOwnedArrayBuffer(openedFile.contents)], openedFile.name, { type })
+  )
+}
+
 function toOwnedArrayBuffer(bytes: Uint8Array) {
   const copy = new Uint8Array(bytes.byteLength)
   copy.set(bytes)

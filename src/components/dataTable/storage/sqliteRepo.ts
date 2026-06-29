@@ -1,15 +1,12 @@
 import {
-  ensurePersonalNotebookSchema,
   getPersonalNotebookDatabase,
+  getReadyDatabase,
   type PersonalNotebookDatabase,
+  type RecordJsonRow,
 } from "../../../lib/sqliteDatabase";
 import type { AppState } from "../domain/types";
 
 export const APP_KEY = "singleton";
-
-interface RecordJsonRow {
-  record_json: string;
-}
 
 interface CreateSqliteAppStateRepositoryOptions {
   loadDatabase?: () => Promise<PersonalNotebookDatabase>;
@@ -18,15 +15,9 @@ interface CreateSqliteAppStateRepositoryOptions {
 export function createSqliteAppStateRepository({
   loadDatabase = getPersonalNotebookDatabase,
 }: CreateSqliteAppStateRepositoryOptions = {}) {
-  async function getReadyDatabase() {
-    const database = await loadDatabase();
-    await ensurePersonalNotebookSchema(database);
-    return database;
-  }
-
   return {
     async loadAppState() {
-      const database = await getReadyDatabase();
+      const database = await getReadyDatabase(loadDatabase);
       const rows = await database.select<RecordJsonRow[]>(
         "SELECT record_json FROM standalone_data_table_state WHERE id = $1",
         [APP_KEY],
@@ -40,7 +31,7 @@ export function createSqliteAppStateRepository({
     },
 
     async saveAppState(state: AppState) {
-      const database = await getReadyDatabase();
+      const database = await getReadyDatabase(loadDatabase);
       await database.execute(
         `INSERT INTO standalone_data_table_state (id, record_json)
           VALUES ($1, $2)
@@ -50,7 +41,7 @@ export function createSqliteAppStateRepository({
     },
 
     async clearAppState() {
-      const database = await getReadyDatabase();
+      const database = await getReadyDatabase(loadDatabase);
       await database.execute("DELETE FROM standalone_data_table_state WHERE id = $1", [
         APP_KEY,
       ]);

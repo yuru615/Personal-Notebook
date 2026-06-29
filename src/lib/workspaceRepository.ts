@@ -8,9 +8,10 @@ import type {
   WorkspaceSnapshot,
 } from '../domain/types'
 import {
-  ensurePersonalNotebookSchema,
   getPersonalNotebookDatabase,
+  getReadyDatabase,
   type PersonalNotebookDatabase,
+  type RecordJsonRow,
 } from './sqliteDatabase'
 
 export interface WorkspaceRepository {
@@ -37,22 +38,12 @@ interface CreateSqliteWorkspaceRepositoryOptions {
   loadDatabase?: () => Promise<PersonalNotebookDatabase>
 }
 
-interface RecordJsonRow {
-  record_json: string
-}
-
 const SETTINGS_ID = 'workspace'
 
 export function createSqliteWorkspaceRepository({
   loadDatabase = getPersonalNotebookDatabase,
 }: CreateSqliteWorkspaceRepositoryOptions = {}): WorkspaceRepository {
   let writeQueue: Promise<void> = Promise.resolve()
-
-  async function getReadyDatabase() {
-    const database = await loadDatabase()
-    await ensurePersonalNotebookSchema(database)
-    return database
-  }
 
   async function loadSnapshot(database: PersonalNotebookDatabase) {
     const settingsRows = await database.select<RecordJsonRow[]>(
@@ -86,9 +77,9 @@ export function createSqliteWorkspaceRepository({
       await database.execute('DELETE FROM pages')
       await database.execute('DELETE FROM settings')
 
-      await insertBoards(database, snapshot.boards)
-      await insertDataTables(database, snapshot.dataTables ?? [])
-      await insertMindmaps(database, snapshot.mindmaps ?? [])
+      await insertRecords(database, 'boards', snapshot.boards)
+      await insertRecords(database, 'data_tables', snapshot.dataTables ?? [])
+      await insertRecords(database, 'mindmaps', snapshot.mindmaps ?? [])
       await insertPages(database, snapshot.pages)
       await database.execute('INSERT INTO settings (id, record_json) VALUES ($1, $2)', [
         SETTINGS_ID,
@@ -111,26 +102,26 @@ export function createSqliteWorkspaceRepository({
   return {
     async load() {
       await writeQueue
-      const database = await getReadyDatabase()
+      const database = await getReadyDatabase(loadDatabase)
       return loadSnapshot(database)
     },
 
     async save(snapshot) {
       return queueWrite(async () => {
-        const database = await getReadyDatabase()
-        const currentSnapshot = await loadSnapshot(database)
+        const database = await getReadyDatabase(loadDatabase)
 
         await replaceSnapshot(database, {
           ...snapshot,
-          dataTables: snapshot.dataTables ?? currentSnapshot?.dataTables ?? [],
-          mindmaps: snapshot.mindmaps ?? currentSnapshot?.mindmaps ?? [],
+          dataTables:
+            snapshot.dataTables ?? (await loadRecords<DataTableRecord>(database, 'data_tables')),
+          mindmaps: snapshot.mindmaps ?? (await loadRecords<MindmapRecord>(database, 'mindmaps')),
         })
       })
     },
 
     async replace(snapshot) {
       return queueWrite(async () => {
-        const database = await getReadyDatabase()
+        const database = await getReadyDatabase(loadDatabase)
         await replaceSnapshot(database, snapshot)
       })
     },
@@ -148,32 +139,15 @@ function parseRecord<T>(row: RecordJsonRow) {
   return JSON.parse(row.record_json) as T
 }
 
-async function insertBoards(database: PersonalNotebookDatabase, boards: BoardRecord[]) {
-  for (const [position, board] of boards.entries()) {
-    await database.execute(
-      'INSERT INTO boards (id, updated_at, position, record_json) VALUES ($1, $2, $3, $4)',
-      [board.id, board.updatedAt, position, JSON.stringify(board)],
-    )
-  }
-}
-
-async function insertDataTables(
+async function insertRecords(
   database: PersonalNotebookDatabase,
-  dataTables: DataTableRecord[],
+  tableName: string,
+  records: { id: string; updatedAt: string }[],
 ) {
-  for (const [position, dataTable] of dataTables.entries()) {
+  for (const [position, record] of records.entries()) {
     await database.execute(
-      'INSERT INTO data_tables (id, updated_at, position, record_json) VALUES ($1, $2, $3, $4)',
-      [dataTable.id, dataTable.updatedAt, position, JSON.stringify(dataTable)],
-    )
-  }
-}
-
-async function insertMindmaps(database: PersonalNotebookDatabase, mindmaps: MindmapRecord[]) {
-  for (const [position, mindmap] of mindmaps.entries()) {
-    await database.execute(
-      'INSERT INTO mindmaps (id, updated_at, position, record_json) VALUES ($1, $2, $3, $4)',
-      [mindmap.id, mindmap.updatedAt, position, JSON.stringify(mindmap)],
+      `INSERT INTO ${tableName} (id, updated_at, position, record_json) VALUES ($1, $2, $3, $4)`,
+      [record.id, record.updatedAt, position, JSON.stringify(record)],
     )
   }
 }

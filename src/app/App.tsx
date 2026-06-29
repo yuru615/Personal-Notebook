@@ -43,6 +43,7 @@ import {
 } from '../lib/workspaceRepository'
 import {
   openBinaryFile,
+  openedBinaryFileToFile,
   openTextFile,
   saveBinaryFile,
   saveTextFile,
@@ -298,7 +299,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
 
         try {
           const { importMarkdownZip } = await import('../domain/markdown')
-          const payload = await importMarkdownZip(toFile(file, 'application/zip'))
+          const payload = await importMarkdownZip(openedBinaryFileToFile(file, 'application/zip'))
           return await store.getState().importPagePackage(payload)
         } catch {
           window.alert('导入失败，请检查页面包格式。')
@@ -1333,20 +1334,6 @@ function MindmapRoute({
 
 
 export default App
-
-function toFile(
-  openedFile: { name: string; contents: Uint8Array; file?: File },
-  type: string,
-) {
-  return openedFile.file
-    ?? new File([toOwnedArrayBuffer(openedFile.contents)], openedFile.name, { type })
-}
-
-function toOwnedArrayBuffer(bytes: Uint8Array) {
-  const copy = new Uint8Array(bytes.byteLength)
-  copy.set(bytes)
-  return copy.buffer
-}
 
 function sanitizeFileName(value: string) {
   return sanitizeFileNameSegment(value, uiCopy.page.untitled)

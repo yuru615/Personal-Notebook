@@ -12,6 +12,10 @@ export interface PersonalNotebookDatabase {
   select<T>(query: string, bindValues?: unknown[]): Promise<T>
 }
 
+export interface RecordJsonRow {
+  record_json: string
+}
+
 let databasePromise: Promise<PersonalNotebookDatabase> | null = null
 const schemaPromises = new WeakMap<PersonalNotebookDatabase, Promise<void>>()
 
@@ -21,6 +25,14 @@ export async function getPersonalNotebookDatabase() {
   }
 
   const database = await databasePromise
+  await ensurePersonalNotebookSchema(database)
+  return database
+}
+
+export async function getReadyDatabase(
+  loadDatabase: () => Promise<PersonalNotebookDatabase> = getPersonalNotebookDatabase,
+) {
+  const database = await loadDatabase()
   await ensurePersonalNotebookSchema(database)
   return database
 }
