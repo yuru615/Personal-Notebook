@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import type { DataTableRecord, PageRecord, SaveStatus } from '../../domain/types'
 import {
   PageBreadcrumbs,
@@ -19,6 +19,7 @@ interface DataTablePageProps {
   route: 'table' | 'record'
   basePath: string
   breadcrumbs?: PageBreadcrumbItem[]
+  headerActions?: ReactNode
   onChange: (snapshot: AppState) => void
   onRename: (title: string) => void
   onChangeIcon: (icon: string | null) => void
@@ -54,6 +55,7 @@ export function DataTablePage({
   route,
   basePath,
   breadcrumbs = [],
+  headerActions,
   onChange,
   onRename,
   onChangeIcon,
@@ -96,6 +98,7 @@ export function DataTablePage({
                 onRename={onRename}
                 onChangeIcon={onChangeIcon}
                 onChangeCover={onChangeCover}
+                actions={headerActions}
               />
             </div>
           ) : null}

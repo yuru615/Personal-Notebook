@@ -122,4 +122,16 @@ describe('data table styles', () => {
     expect(frozenHeader).toContain('z-index: 2')
     expect(frozenHeader).toContain('background: rgb(255, 255, 255)')
   })
+
+  it('keeps embedded frozen tables scrolling horizontally inside the table wrapper', () => {
+    const embeddedFrozenWrapper = getRuleBody('.data-table-embed .table-wrapper.has-frozen-first-column')
+    const embeddedMain = getRuleBody('.data-table-embed .workspace-main')
+    const embeddedShell = getRuleBody('.data-table-embed .database-page-shell')
+    const embeddedPage = getRuleBody('.data-table-embed .database-page')
+
+    expect(embeddedFrozenWrapper).toContain('overflow-x: auto')
+    expect(embeddedMain).toContain('min-width: 0')
+    expect(embeddedShell).toContain('min-width: 0')
+    expect(embeddedPage).toContain('min-width: 0')
+  })
 })

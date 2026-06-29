@@ -68,8 +68,7 @@ function isEditableShortcutTarget(target: EventTarget | null) {
 
   return Boolean(
     target.closest("input:not([readonly]):not([type='checkbox'])") ||
-      target.closest('textarea:not([readonly])') ||
-      target.closest("[contenteditable='true']"),
+      target.closest('textarea:not([readonly])'),
   )
 }
 
@@ -594,6 +593,18 @@ function AppRoutes({
                 onChangeDataTableIcon={onChangeDataTableIcon}
                 onChangeDataTableCover={onChangeDataTableCover}
                 onRestoreMissingDataTable={onRestoreMissingDataTable}
+                onTogglePageFullWidth={onTogglePageFullWidth}
+                onTogglePageSmallText={onTogglePageSmallText}
+                onTogglePageFontFamily={onTogglePageFontFamily}
+                onTogglePageOutlineVisible={onTogglePageOutlineVisible}
+                reversibleExport={reversibleExport}
+                onToggleReversibleExport={onToggleReversibleExport}
+                onExportJson={onExportJson}
+                onExportMarkdown={onExportMarkdown}
+                onImportJson={onImportJson}
+                onImportMarkdown={onImportMarkdown}
+                onCleanupOrphanBoards={onCleanupOrphanBoards}
+                onCleanupOrphanDataTables={onCleanupOrphanDataTables}
               />
             }
           />
@@ -612,6 +623,18 @@ function AppRoutes({
                 onChangeDataTableIcon={onChangeDataTableIcon}
                 onChangeDataTableCover={onChangeDataTableCover}
                 onRestoreMissingDataTable={onRestoreMissingDataTable}
+                onTogglePageFullWidth={onTogglePageFullWidth}
+                onTogglePageSmallText={onTogglePageSmallText}
+                onTogglePageFontFamily={onTogglePageFontFamily}
+                onTogglePageOutlineVisible={onTogglePageOutlineVisible}
+                reversibleExport={reversibleExport}
+                onToggleReversibleExport={onToggleReversibleExport}
+                onExportJson={onExportJson}
+                onExportMarkdown={onExportMarkdown}
+                onImportJson={onImportJson}
+                onImportMarkdown={onImportMarkdown}
+                onCleanupOrphanBoards={onCleanupOrphanBoards}
+                onCleanupOrphanDataTables={onCleanupOrphanDataTables}
               />
             }
           />
@@ -942,6 +965,18 @@ interface DataTableRouteProps {
   onChangeDataTableIcon: (databaseId: string, icon: string | null) => Promise<void>
   onChangeDataTableCover: (databaseId: string, cover: string | null) => Promise<void>
   onRestoreMissingDataTable: (pageId: string, databaseId: string) => Promise<DataTableRecord | null>
+  onTogglePageFullWidth: (pageId: string, isFullWidth: boolean) => Promise<void>
+  onTogglePageSmallText: (pageId: string, isSmallText: boolean) => Promise<void>
+  onTogglePageFontFamily: (pageId: string, fontFamily: PageFontFamily) => Promise<void>
+  onTogglePageOutlineVisible: (pageId: string, showOutline: boolean) => Promise<void>
+  reversibleExport: boolean
+  onToggleReversibleExport: (value: boolean) => void
+  onExportJson: () => Promise<void>
+  onExportMarkdown: (page: PageRecord) => Promise<void>
+  onImportJson: () => Promise<string | null>
+  onImportMarkdown: () => Promise<string | null>
+  onCleanupOrphanBoards: () => Promise<void>
+  onCleanupOrphanDataTables: () => Promise<void>
 }
 
 function DataTableRoute({
@@ -956,6 +991,18 @@ function DataTableRoute({
   onChangeDataTableIcon,
   onChangeDataTableCover,
   onRestoreMissingDataTable,
+  onTogglePageFullWidth,
+  onTogglePageSmallText,
+  onTogglePageFontFamily,
+  onTogglePageOutlineVisible,
+  reversibleExport,
+  onToggleReversibleExport,
+  onExportJson,
+  onExportMarkdown,
+  onImportJson,
+  onImportMarkdown,
+  onCleanupOrphanBoards,
+  onCleanupOrphanDataTables,
 }: DataTableRouteProps) {
   const { pageId, databaseId, recordId } = useParams()
   const navigate = useNavigate()
@@ -987,6 +1034,7 @@ function DataTableRoute({
   }
 
   const basePath = `/pages/${page.id}/data-tables/${databaseId}`
+  const outlineVisible = page.showOutline !== false
   const breadcrumbs: PageBreadcrumbItem[] = [
     ...buildPageBreadcrumbs(pages, page, { linkCurrent: true }),
     {
@@ -1009,6 +1057,41 @@ function DataTableRoute({
       route={route}
       basePath={basePath}
       breadcrumbs={breadcrumbs}
+      headerActions={
+        <ExportImportPanel
+          status={saveStatus}
+          reversible={reversibleExport}
+          adaptiveWidth={page.isFullWidth === true}
+          smallText={page.isSmallText === true}
+          fontFamily={page.fontFamily ?? 'default'}
+          outlineVisible={outlineVisible}
+          onToggleReversible={onToggleReversibleExport}
+          onToggleAdaptiveWidth={(value) => {
+            void onTogglePageFullWidth(page.id, value)
+          }}
+          onToggleSmallText={(value) => {
+            void onTogglePageSmallText(page.id, value)
+          }}
+          onToggleFontFamily={(value) => {
+            void onTogglePageFontFamily(page.id, value)
+          }}
+          onToggleOutlineVisible={(value) => {
+            void onTogglePageOutlineVisible(page.id, value)
+          }}
+          onExportJson={() => void onExportJson()}
+          onExportMarkdown={() => void onExportMarkdown(page)}
+          onImportJson={async () => {
+            const nextPageId = await onImportJson()
+            navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
+          }}
+          onImportMarkdown={async () => {
+            const nextPageId = await onImportMarkdown()
+            navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
+          }}
+          onCleanupOrphanBoards={() => void onCleanupOrphanBoards()}
+          onCleanupOrphanDataTables={() => void onCleanupOrphanDataTables()}
+        />
+      }
       onChange={(snapshot) => {
         if (dataTable) {
           void onUpdateDataTableSnapshot(dataTable.id, snapshot)

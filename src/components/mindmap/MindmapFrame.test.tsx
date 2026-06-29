@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { MINDMAP_STORAGE_KEY } from './mindmapModel'
+import { MINDMAP_STORAGE_KEY, createEmptyMindmapSnapshot } from './mindmapModel'
 
 function getScopedStorageKey(mindmapId: string) {
   return `${MINDMAP_STORAGE_KEY}:${mindmapId}`
@@ -26,6 +26,82 @@ describe('MindmapFrame', () => {
     expect(window.localStorage.getItem(getScopedStorageKey('mindmap-1'))).toBe(
       JSON.stringify(snapshot),
     )
+  })
+
+  it('centers a pristine new mindmap before opening the hosted iframe', async () => {
+    const { MindmapFrame } = await import('./MindmapFrame')
+    const snapshot = createEmptyMindmapSnapshot({ themeId: 'mint' })
+    const innerWidth = window.innerWidth
+    const innerHeight = window.innerHeight
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 })
+
+    try {
+      render(
+        <MindmapFrame
+          mindmapId="mindmap-1"
+          snapshot={snapshot}
+          onSnapshotChange={() => undefined}
+        />,
+      )
+
+      const storedSnapshot = JSON.parse(
+        window.localStorage.getItem(getScopedStorageKey('mindmap-1')) ?? 'null',
+      ) as { viewport: { x: number; y: number; scale: number } }
+
+      expect(storedSnapshot.viewport).toEqual({
+        x: 426,
+        y: 258,
+        scale: 1,
+      })
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: innerWidth })
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: innerHeight })
+    }
+  })
+
+  it('primes hosted storage before the iframe src is attached', async () => {
+    const { MindmapFrame } = await import('./MindmapFrame')
+    const snapshot = createEmptyMindmapSnapshot({ themeId: 'sunset' })
+    const seenStorageValues: Array<string | null> = []
+    const originalSetAttribute = HTMLIFrameElement.prototype.setAttribute
+
+    HTMLIFrameElement.prototype.setAttribute = function (name: string, value: string) {
+      if (name === 'src') {
+        seenStorageValues.push(window.localStorage.getItem(getScopedStorageKey('mindmap-1')))
+      }
+
+      return originalSetAttribute.call(this, name, value)
+    }
+
+    try {
+      render(
+        <MindmapFrame
+          mindmapId="mindmap-1"
+          snapshot={snapshot}
+          onSnapshotChange={() => undefined}
+        />,
+      )
+    } finally {
+      HTMLIFrameElement.prototype.setAttribute = originalSetAttribute
+    }
+
+    expect(seenStorageValues[0]).not.toBeNull()
+    expect(
+      JSON.parse(seenStorageValues[0] ?? 'null') as {
+        themeId?: string
+        nodes?: Record<string, { style?: { branchColor?: string } }>
+      },
+    ).toMatchObject({
+      themeId: 'sunset',
+      nodes: {
+        'node-root': {
+          style: {
+            branchColor: '#ea580c',
+          },
+        },
+      },
+    })
   })
 
   it('forwards storage updates through the snapshot callback', async () => {

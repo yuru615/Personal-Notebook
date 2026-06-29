@@ -11,6 +11,7 @@ import type {
   TextBlockStyle,
 } from '../../domain/types'
 import { uiCopy } from '../../ui/copy'
+import { buildMindmapPreviewSvgDataUrl } from '../mindmap/mindmapPreview'
 import { buildWhiteboardPreviewSvgDataUrl } from '../whiteboard/whiteboardPreview'
 import { EmptyBlockRow } from './EmptyBlockRow'
 import { BlockFrame } from './BlockFrame'
@@ -863,7 +864,7 @@ export function BlockEditor({
               <MindmapBlock
                 title={mindmap?.title ?? '导图不存在'}
                 updatedLabel={mindmap ? formatCanvasUpdatedLabel(mindmap.updatedAt) : '引用已丢失'}
-                previewUrl={null}
+                previewUrl={mindmap ? buildMindmapPreviewSvgDataUrl(mindmap.snapshot) : null}
                 isMissing={!mindmap}
                 onOpen={() => onOpenMindmap?.(block.mindmapId)}
                 onRecover={!mindmap ? () => onRestoreMindmap?.(block.mindmapId) : undefined}

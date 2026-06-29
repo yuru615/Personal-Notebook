@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { MINDMAP_STORAGE_KEY } from './mindmapModel'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { MINDMAP_STORAGE_KEY, prepareMindmapSnapshotForHost } from './mindmapModel'
 
 interface MindmapFrameProps {
   mindmapId: string
@@ -9,14 +9,23 @@ interface MindmapFrameProps {
 
 export function MindmapFrame({ mindmapId, snapshot, onSnapshotChange }: MindmapFrameProps) {
   const scopedStorageKey = `${MINDMAP_STORAGE_KEY}:${mindmapId}`
+  const hostedSnapshot = useMemo(
+    () =>
+      prepareMindmapSnapshotForHost(snapshot, {
+        width: typeof window === 'undefined' ? 0 : window.innerWidth,
+        height: typeof window === 'undefined' ? 0 : window.innerHeight,
+      }),
+    [snapshot],
+  )
   const [iframeVersion, setIframeVersion] = useState(0)
-  const snapshotRef = useRef(snapshot)
+  const [primedScopedStorageKey, setPrimedScopedStorageKey] = useState<string | null>(null)
+  const snapshotRef = useRef(hostedSnapshot)
   const onSnapshotChangeRef = useRef(onSnapshotChange)
   const mindmapIdRef = useRef(mindmapId)
-  const snapshotKeyRef = useRef(JSON.stringify(snapshot))
+  const snapshotKeyRef = useRef(JSON.stringify(hostedSnapshot))
   const lastIframeSnapshotKeyRef = useRef<string | null>(null)
 
-  snapshotRef.current = snapshot
+  snapshotRef.current = hostedSnapshot
   onSnapshotChangeRef.current = onSnapshotChange
 
   const writeSnapshotToStorage = useCallback((nextSnapshot: unknown) => {
@@ -24,6 +33,11 @@ export function MindmapFrame({ mindmapId, snapshot, onSnapshotChange }: MindmapF
     snapshotKeyRef.current = nextSnapshotKey
     window.localStorage.setItem(scopedStorageKey, nextSnapshotKey)
   }, [scopedStorageKey])
+
+  useLayoutEffect(() => {
+    writeSnapshotToStorage(snapshotRef.current)
+    setPrimedScopedStorageKey(scopedStorageKey)
+  }, [scopedStorageKey, writeSnapshotToStorage])
 
   useEffect(() => {
     mindmapIdRef.current = mindmapId
@@ -73,15 +87,15 @@ export function MindmapFrame({ mindmapId, snapshot, onSnapshotChange }: MindmapF
   }, [mindmapId, scopedStorageKey, writeSnapshotToStorage])
 
   useEffect(() => {
-    const nextSnapshotKey = JSON.stringify(snapshot)
+    const nextSnapshotKey = JSON.stringify(hostedSnapshot)
     const mindmapChanged = mindmapIdRef.current !== mindmapId
     const snapshotChanged = snapshotKeyRef.current !== nextSnapshotKey
 
-    snapshotRef.current = snapshot
+    snapshotRef.current = hostedSnapshot
 
     if (mindmapChanged) {
       mindmapIdRef.current = mindmapId
-      writeSnapshotToStorage(snapshot)
+      writeSnapshotToStorage(hostedSnapshot)
       lastIframeSnapshotKeyRef.current = null
       return
     }
@@ -99,7 +113,11 @@ export function MindmapFrame({ mindmapId, snapshot, onSnapshotChange }: MindmapF
 
     window.localStorage.setItem(scopedStorageKey, nextSnapshotKey)
     setIframeVersion((value) => value + 1)
-  }, [mindmapId, scopedStorageKey, snapshot, writeSnapshotToStorage])
+  }, [hostedSnapshot, mindmapId, scopedStorageKey, writeSnapshotToStorage])
+
+  if (primedScopedStorageKey !== scopedStorageKey) {
+    return null
+  }
 
   return (
     <iframe

@@ -33,4 +33,24 @@ describe('editor menu layering', () => {
     expect(zIndex(editorStyles, '.slash-menu')).toBeGreaterThan(highestDataTableMenu)
     expect(zIndex(editorStyles, '.block-menu')).toBeGreaterThan(highestDataTableMenu)
   })
+
+  it('keeps data table route header popovers above data table toolbar menus', () => {
+    const highestDataTableMenu = Math.max(
+      zIndex(dataTableStyles, '.database-toolbar-floating-layer'),
+      zIndex(dataTableStyles, '.database-view-create-menu'),
+      zIndex(dataTableStyles, '.view-tab-menu'),
+      zIndex(dataTableStyles, '.view-options-view-menu-shell .view-tab-menu'),
+      zIndex(dataTableStyles, '.notion-select-floating-layer'),
+    )
+
+    expect(zIndex(editorStyles, '.data-table-route-page-header .page-cover-popover')).toBeGreaterThan(
+      highestDataTableMenu,
+    )
+    expect(zIndex(editorStyles, '.data-table-route-page-header .page-icon-popover')).toBeGreaterThan(
+      highestDataTableMenu,
+    )
+    expect(zIndex(editorStyles, '.data-table-route-page-header .page-menu-popover')).toBeGreaterThan(
+      highestDataTableMenu,
+    )
+  })
 })
