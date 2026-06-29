@@ -1,6 +1,6 @@
 [package]
 name = "personal-notebook"
-version = "0.0.0"
+version = "0.0.1"
 description = "A local-first personal notebook desktop app."
 authors = ["Personal Notebook"]
 edition = "2021"
