@@ -4485,10 +4485,20 @@ button {
 .data-table-embed .workspace-main,
 .data-table-embed .database-page-shell {
   min-height: auto;
+  min-width: 0;
+}
+
+.data-table-embed .workspace-main {
+  min-width: 0;
+}
+
+.data-table-embed .database-page-shell {
+  min-width: 0;
 }
 
 .data-table-embed .database-page {
   max-width: none;
+  min-width: 0;
   padding: 28px 18px 18px;
 }
 
@@ -4512,6 +4522,11 @@ button {
 
 .data-table-embed .table-wrapper {
   max-height: none;
+  overflow-x: auto;
+}
+
+.data-table-embed .table-wrapper.has-frozen-first-column {
+  overflow-x: auto;
 }
 
 .database-table-load-more-row td {

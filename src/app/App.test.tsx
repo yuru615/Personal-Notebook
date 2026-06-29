@@ -6,6 +6,31 @@ import { createDefaultAppState } from '../components/dataTable/domain/factory'
 import { createMemoryRepository } from '../test/memoryRepository'
 import { App } from './App'
 
+function findTextNode(element: Node): Text {
+  if (element.nodeType === Node.TEXT_NODE) {
+    return element as Text
+  }
+
+  for (const child of Array.from(element.childNodes)) {
+    const textNode = findTextNode(child)
+    if (textNode) {
+      return textNode
+    }
+  }
+
+  throw new Error('Expected a text node')
+}
+
+function selectEditableText(element: HTMLElement, start: number, end: number) {
+  const textNode = findTextNode(element)
+  const range = document.createRange()
+  range.setStart(textNode, start)
+  range.setEnd(textNode, end)
+  window.getSelection()?.removeAllRanges()
+  window.getSelection()?.addRange(range)
+  fireEvent.mouseUp(element)
+}
+
 describe('App', () => {
   let scrollTo: ReturnType<typeof vi.spyOn>
 
@@ -15,6 +40,109 @@ describe('App', () => {
 
   afterEach(() => {
     scrollTo.mockRestore()
+  })
+
+  it('uses workspace undo inside the focused rich text editor after a floating toolbar bold action', async () => {
+    const user = userEvent.setup()
+    const pageId = 'page_rich_text_undo'
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: '富文本页面',
+          icon: null,
+          cover: null,
+          isFullWidth: false,
+          isSmallText: false,
+          fontFamily: 'default',
+          showOutline: true,
+          blocks: [{ id: 'block_1', type: 'paragraph', text: 'hello world' }],
+          createdAt: '2026-06-29T00:00:00.000Z',
+          updatedAt: '2026-06-29T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+
+    render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={[`/pages/${pageId}`]}
+      />,
+    )
+
+    const editor = await screen.findByRole('textbox', { name: '输入正文' })
+    editor.focus()
+    selectEditableText(editor, 6, 11)
+    const toolbar = screen.getByRole('toolbar')
+    await user.click(within(toolbar).getByText('B'))
+
+    await waitFor(() => {
+      expect(editor.innerHTML).toContain('<strong>')
+    })
+
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
+
+    await waitFor(() => {
+      expect(editor.innerHTML).not.toContain('<strong>')
+    })
+  })
+
+  it('uses workspace undo after a floating toolbar color action while the editor stays focused', async () => {
+    const user = userEvent.setup()
+    const pageId = 'page_rich_text_color_undo'
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: '富文本页面',
+          icon: null,
+          cover: null,
+          isFullWidth: false,
+          isSmallText: false,
+          fontFamily: 'default',
+          showOutline: true,
+          blocks: [{ id: 'block_1', type: 'paragraph', text: 'hello world' }],
+          createdAt: '2026-06-29T00:00:00.000Z',
+          updatedAt: '2026-06-29T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+
+    render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={[`/pages/${pageId}`]}
+      />,
+    )
+
+    const editor = await screen.findByRole('textbox', { name: '输入正文' })
+    editor.focus()
+    selectEditableText(editor, 6, 11)
+
+    const toolbar = screen.getByRole('toolbar')
+    const colorButton = toolbar.querySelector('.inline-format-toolbar-color')
+    expect(colorButton).not.toBeNull()
+
+    await user.click(colorButton as HTMLButtonElement)
+    await user.click(screen.getByRole('button', { name: '文字颜色：蓝色' }))
+
+    await waitFor(() => {
+      expect(editor.innerHTML).toContain('data-rich-text-color="blue"')
+    })
+
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
+
+    await waitFor(() => {
+      expect(editor.innerHTML).not.toContain('data-rich-text-color="blue"')
+    })
   })
 
   it('focuses the paragraph editor after exiting an empty list item', async () => {
@@ -140,6 +268,7 @@ describe('App', () => {
     const sidebar = await screen.findByRole('complementary', { name: '侧边栏' })
 
     expect(sidebar).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '页面菜单' })).toBeInTheDocument()
     expect(container.querySelector('.page-panel-focus')).toBeNull()
     expect(within(sidebar).getByText('快速开始')).toBeInTheDocument()
   })
@@ -230,5 +359,80 @@ describe('App', () => {
     expect(screen.queryByRole('complementary', { name: '侧边栏' })).not.toBeInTheDocument()
     expect(container.querySelector('.page-panel-focus')).not.toBeNull()
     expect(container.querySelector(`[data-mindmap-id="${mindmapId}"]`)).not.toBeNull()
+  })
+
+  it('shows a generated preview on mindmap cards in the page editor', async () => {
+    const pageId = 'page_preview'
+    const mindmapId = 'mindmap_preview'
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [
+        {
+          id: mindmapId,
+          title: '策略导图',
+          snapshot: {
+            title: '策略导图',
+            structure: 'mindmap',
+            rootId: 'node-root',
+            nodes: {
+              'node-root': {
+                id: 'node-root',
+                parentId: null,
+                childIds: ['node-a', 'node-b'],
+                text: '中心主题',
+                collapsed: false,
+                style: { nodeColor: '#ffffff', branchColor: '#0f766e' },
+              },
+              'node-a': {
+                id: 'node-a',
+                parentId: 'node-root',
+                childIds: [],
+                text: '需求梳理',
+                collapsed: false,
+                style: { nodeColor: '#ffffff', branchColor: '#0f766e' },
+              },
+              'node-b': {
+                id: 'node-b',
+                parentId: 'node-root',
+                childIds: [],
+                text: '方案设计',
+                collapsed: false,
+                style: { nodeColor: '#ffffff', branchColor: '#0f766e' },
+              },
+            },
+          },
+          createdAt: '2026-06-24T00:00:00.000Z',
+          updatedAt: '2026-06-24T00:00:00.000Z',
+        },
+      ],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: '产品规划',
+          icon: null,
+          cover: null,
+          blocks: [{ id: 'block_mindmap', type: 'mindmap', mindmapId }],
+          createdAt: '2026-06-24T00:00:00.000Z',
+          updatedAt: '2026-06-24T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+
+    render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={[`/pages/${pageId}`]}
+      />,
+    )
+
+    const card = await screen.findByRole('button', { name: '打开导图 策略导图' })
+    const previewImage = card.querySelector('.canvas-entry-preview-image')
+
+    expect(previewImage).not.toBeNull()
+    expect(previewImage?.getAttribute('src')).toContain('data:image/svg+xml')
+    expect(card).not.toHaveTextContent('空白导图')
   })
 })

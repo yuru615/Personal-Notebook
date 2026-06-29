@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createDefaultAppState } from '../components/dataTable/domain/factory'
 import { createMemoryRepository } from '../test/memoryRepository'
 import { createWorkspaceStore } from './createWorkspaceStore'
@@ -266,6 +266,30 @@ describe('createWorkspaceStore mindmaps', () => {
     ])
     expect(state.mindmaps).toHaveLength(1)
     expect(state.mindmaps[0]?.id).toBe((block as { mindmapId: string }).mindmapId)
+  })
+
+  it('seeds a new mindmap with a random built-in theme', async () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.74)
+    const repository = createMemoryRepository(createWorkspace())
+    const store = createWorkspaceStore(repository)
+
+    try {
+      await store.getState().bootstrap()
+      const block = await store.getState().insertBlock('page_1', 'mindmap')
+      const snapshot = store
+        .getState()
+        .mindmaps.find((mindmap) => mindmap.id === (block as { mindmapId: string }).mindmapId)?.snapshot as
+        | {
+            themeId?: string
+            nodes: Record<string, { style?: { branchColor?: string } }>
+          }
+        | undefined
+
+      expect(snapshot?.themeId).toBe('dusk')
+      expect(snapshot?.nodes['node-root']?.style?.branchColor).toBe('#6d5bd0')
+    } finally {
+      randomSpy.mockRestore()
+    }
   })
 
   it('duplicates a mindmap block by cloning the underlying record', async () => {

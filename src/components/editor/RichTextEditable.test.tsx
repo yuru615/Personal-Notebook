@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RichTextEditable } from './RichTextEditable'
 
@@ -68,10 +69,9 @@ describe('RichTextEditable', () => {
     })
   })
 
-  it('adds a link to selected text', async () => {
+  it('opens a link input popover and applies a link to the selected text', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()
-    vi.spyOn(window, 'prompt').mockReturnValue('https://example.com')
 
     render(
       <RichTextEditable
@@ -86,6 +86,9 @@ describe('RichTextEditable', () => {
     selectText(editor, 2, 4)
 
     await user.click(screen.getByRole('button', { name: '超链接' }))
+    const linkInput = screen.getByRole('textbox', { name: '链接地址' })
+    await user.type(linkInput, 'https://example.com')
+    await user.click(screen.getByRole('button', { name: '确认链接' }))
 
     expect(onChange).toHaveBeenLastCalledWith({
       text: '访问链接',
@@ -94,6 +97,58 @@ describe('RichTextEditable', () => {
         { text: '链接', link: 'https://example.com' },
       ],
     })
+  })
+
+  it('opens the linked URL when ctrl-clicking linked text', () => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
+
+    render(
+      <RichTextEditable
+        ariaLabel="body"
+        className="block-input paragraph-block"
+        value="hello world"
+        richText={[
+          { text: 'hello ' },
+          { text: 'world', link: 'https://example.com' },
+        ]}
+        onChange={vi.fn()}
+      />,
+    )
+
+    const editor = screen.getByRole('textbox', { name: 'body' })
+    const link = editor.querySelector('a')
+
+    expect(link).not.toBeNull()
+
+    fireEvent.click(link as HTMLAnchorElement, { ctrlKey: true })
+
+    expect(openSpy).toHaveBeenCalledWith('https://example.com', '_blank', 'noopener,noreferrer')
+  })
+
+  it('marks the editor as link-open-ready while ctrl-hovering a link', () => {
+    render(
+      <RichTextEditable
+        ariaLabel="body"
+        className="block-input paragraph-block"
+        value="hello world"
+        richText={[
+          { text: 'hello ' },
+          { text: 'world', link: 'https://example.com' },
+        ]}
+        onChange={vi.fn()}
+      />,
+    )
+
+    const editor = screen.getByRole('textbox', { name: 'body' })
+    const link = editor.querySelector('a')
+
+    expect(link).not.toBeNull()
+
+    fireEvent.mouseMove(link as HTMLAnchorElement, { ctrlKey: true })
+    expect(editor).toHaveAttribute('data-link-open-ready', 'true')
+
+    fireEvent.mouseLeave(editor)
+    expect(editor).toHaveAttribute('data-link-open-ready', 'false')
   })
 
   it('applies a text color from the floating toolbar', async () => {
@@ -122,6 +177,44 @@ describe('RichTextEditable', () => {
         { text: 'world', color: 'blue' },
       ],
     })
+  })
+
+  it('reflects the current strike state in the floating toolbar', async () => {
+    const user = userEvent.setup()
+
+    function StrikeHarness() {
+      const [current, setCurrent] = useState({
+        text: 'hello world',
+        richText: undefined as undefined | Array<{ text: string; strike?: true }>,
+      })
+
+      return (
+        <RichTextEditable
+          ariaLabel="body"
+          className="block-input paragraph-block"
+          value={current.text}
+          richText={current.richText}
+          onChange={(next) =>
+            setCurrent({
+              text: next.text,
+              richText: next.richText as typeof current.richText,
+            })
+          }
+        />
+      )
+    }
+
+    render(<StrikeHarness />)
+
+    const editor = screen.getByRole('textbox', { name: 'body' })
+    selectText(editor, 6, 11)
+
+    const strikeButton = screen.getByRole('button', { name: '删除线' })
+    expect(strikeButton).toHaveAttribute('aria-pressed', 'false')
+
+    await user.click(strikeButton)
+
+    expect(screen.getByRole('button', { name: '删除线' })).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('hides the floating toolbar when the user clicks outside the selected text', () => {

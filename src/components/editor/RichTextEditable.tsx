@@ -1,4 +1,4 @@
-import type { CSSProperties, KeyboardEventHandler } from 'react'
+import type { CSSProperties, FormEvent, KeyboardEventHandler, MouseEvent } from 'react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { RichTextSegment, TextColor } from '../../domain/types'
 import {
@@ -36,6 +36,15 @@ interface ToolbarPosition {
   left: number
 }
 
+interface ActiveSelectionMarks {
+  bold: boolean
+  italic: boolean
+  underline: boolean
+  strike: boolean
+  link?: string
+  color?: TextColor
+}
+
 const textColorOptions: Array<{ value: TextColor; label: string }> = [
   { value: 'gray', label: '灰色' },
   { value: 'brown', label: '棕色' },
@@ -47,6 +56,13 @@ const textColorOptions: Array<{ value: TextColor; label: string }> = [
   { value: 'pink', label: '粉色' },
   { value: 'red', label: '红色' },
 ]
+
+const emptyActiveSelectionMarks: ActiveSelectionMarks = {
+  bold: false,
+  italic: false,
+  underline: false,
+  strike: false,
+}
 
 function escapeHtml(value: string): string {
   return value
@@ -176,6 +192,41 @@ function hasRichTextMarks(segments: RichTextSegment[]) {
   )
 }
 
+function segmentsEqual(left: RichTextSegment[], right: RichTextSegment[]) {
+  const normalizedLeft = normalizeRichText(left)
+  const normalizedRight = normalizeRichText(right)
+
+  if (normalizedLeft.length !== normalizedRight.length) {
+    return false
+  }
+
+  return normalizedLeft.every((segment, index) => {
+    const other = normalizedRight[index]
+    return (
+      segment.text === other.text &&
+      segment.bold === other.bold &&
+      segment.italic === other.italic &&
+      segment.underline === other.underline &&
+      segment.strike === other.strike &&
+      segment.link === other.link &&
+      segment.color === other.color
+    )
+  })
+}
+
+function getLinkTarget(target: EventTarget | null) {
+  if (!(target instanceof Node)) {
+    return null
+  }
+
+  const element =
+    target instanceof HTMLAnchorElement
+      ? target
+      : target.parentElement?.closest('a[href]')
+
+  return element instanceof HTMLAnchorElement ? element : null
+}
+
 function toChangePayload(segments: RichTextSegment[]): RichTextEditableChange {
   const normalized = normalizeRichText(segments)
   return {
@@ -253,6 +304,59 @@ function selectedSegmentsAllHaveMark(
   return hasSelectedText
 }
 
+function getSelectedSegments(segments: RichTextSegment[], selection: SelectionOffsets) {
+  const selected: RichTextSegment[] = []
+  let offset = 0
+
+  for (const segment of normalizeRichText(segments)) {
+    const segmentStart = offset
+    const segmentEnd = offset + segment.text.length
+    offset = segmentEnd
+
+    if (segmentEnd <= selection.start || segmentStart >= selection.end) {
+      continue
+    }
+
+    selected.push(segment)
+  }
+
+  return selected
+}
+
+function getActiveSelectionMarks(
+  segments: RichTextSegment[],
+  selection: SelectionOffsets | null,
+): ActiveSelectionMarks {
+  if (!selection) {
+    return emptyActiveSelectionMarks
+  }
+
+  const normalized = normalizeRichText(segments)
+  const selected = getSelectedSegments(normalized, selection)
+
+  if (selected.length === 0) {
+    return emptyActiveSelectionMarks
+  }
+
+  const firstLink = selected[0]?.link
+  const firstColor = selected[0]?.color
+
+  return {
+    bold: selectedSegmentsAllHaveMark(normalized, selection, 'bold'),
+    italic: selectedSegmentsAllHaveMark(normalized, selection, 'italic'),
+    underline: selectedSegmentsAllHaveMark(normalized, selection, 'underline'),
+    strike: selectedSegmentsAllHaveMark(normalized, selection, 'strike'),
+    link:
+      firstLink && selected.every((segment) => segment.link && segment.link === firstLink)
+        ? firstLink
+        : undefined,
+    color:
+      firstColor && selected.every((segment) => segment.color && segment.color === firstColor)
+        ? firstColor
+        : undefined,
+  }
+}
+
 export function RichTextEditable({
   value,
   richText,
@@ -266,21 +370,64 @@ export function RichTextEditable({
   const editableRef = useRef<HTMLDivElement | null>(null)
   const toolbarRef = useRef<HTMLDivElement | null>(null)
   const isFocusedRef = useRef(false)
+  const selectionRef = useRef<SelectionOffsets | null>(null)
+  const ignoreSelectionChangeRef = useRef(false)
+  const isLinkMenuOpenRef = useRef(false)
   const [isEmpty, setIsEmpty] = useState(value.length === 0)
   const [toolbarPosition, setToolbarPosition] = useState<ToolbarPosition | null>(null)
   const [isColorMenuOpen, setIsColorMenuOpen] = useState(false)
+  const [isLinkMenuOpen, setIsLinkMenuOpen] = useState(false)
+  const [linkDraft, setLinkDraft] = useState('')
+  const [hoveredLinkHref, setHoveredLinkHref] = useState<string | null>(null)
+  const [isModifierPressed, setIsModifierPressed] = useState(false)
+  const [activeMarks, setActiveMarks] = useState<ActiveSelectionMarks>(emptyActiveSelectionMarks)
+  const isLinkOpenReady = Boolean(hoveredLinkHref && isModifierPressed)
 
   useLayoutEffect(() => {
     const element = editableRef.current
 
-    if (!element || isFocusedRef.current) {
+    if (!element) {
       return
     }
 
     const segments = getSegments(value, richText)
-    element.innerHTML = richTextToHtml(segments)
-    setIsEmpty(richTextToPlainText(segments).length === 0)
+    const normalizedSegments = normalizeRichText(segments)
+
+    if (isFocusedRef.current) {
+      const currentSegments = readSegmentsFromElement(element)
+      if (segmentsEqual(currentSegments, normalizedSegments)) {
+        setIsEmpty(richTextToPlainText(normalizedSegments).length === 0)
+        return
+      }
+    }
+
+    element.innerHTML = richTextToHtml(normalizedSegments)
+    setIsEmpty(richTextToPlainText(normalizedSegments).length === 0)
   }, [richText, value])
+
+  useEffect(() => {
+    isLinkMenuOpenRef.current = isLinkMenuOpen
+  }, [isLinkMenuOpen])
+
+  useEffect(() => {
+    function syncModifierState(event: KeyboardEvent) {
+      setIsModifierPressed(event.ctrlKey || event.metaKey)
+    }
+
+    function resetModifierState() {
+      setIsModifierPressed(false)
+    }
+
+    window.addEventListener('keydown', syncModifierState, true)
+    window.addEventListener('keyup', syncModifierState, true)
+    window.addEventListener('blur', resetModifierState)
+
+    return () => {
+      window.removeEventListener('keydown', syncModifierState, true)
+      window.removeEventListener('keyup', syncModifierState, true)
+      window.removeEventListener('blur', resetModifierState)
+    }
+  }, [])
 
   useEffect(() => {
     function hideToolbarForOutsidePointer(event: PointerEvent) {
@@ -299,6 +446,11 @@ export function RichTextEditable({
 
       setToolbarPosition(null)
       setIsColorMenuOpen(false)
+      setIsLinkMenuOpen(false)
+      setLinkDraft('')
+      selectionRef.current = null
+      setActiveMarks(emptyActiveSelectionMarks)
+      setHoveredLinkHref(null)
 
       const selection = window.getSelection()
       if (selection && editable && selection.rangeCount > 0) {
@@ -310,22 +462,48 @@ export function RichTextEditable({
     }
 
     function syncToolbarWithSelection() {
+      if (ignoreSelectionChangeRef.current) {
+        return
+      }
+
       const editable = editableRef.current
       const selection = window.getSelection()
 
       if (!editable || !selection || selection.rangeCount === 0 || selection.isCollapsed) {
+        if (isLinkMenuOpenRef.current && selectionRef.current) {
+          return
+        }
+
         setToolbarPosition(null)
         setIsColorMenuOpen(false)
+        setIsLinkMenuOpen(false)
+        setLinkDraft('')
+        selectionRef.current = null
+        setActiveMarks(emptyActiveSelectionMarks)
+        setHoveredLinkHref(null)
         return
       }
 
       const range = selection.getRangeAt(0)
       if (!editable.contains(range.commonAncestorContainer)) {
+        if (isLinkMenuOpenRef.current && selectionRef.current) {
+          return
+        }
+
         setToolbarPosition(null)
         setIsColorMenuOpen(false)
+        setIsLinkMenuOpen(false)
+        setLinkDraft('')
+        selectionRef.current = null
+        setActiveMarks(emptyActiveSelectionMarks)
+        setHoveredLinkHref(null)
         return
       }
 
+      const nextSelection = getSelectionOffsets(editable)
+      const segments = readSegmentsFromElement(editable)
+      selectionRef.current = nextSelection
+      setActiveMarks(getActiveSelectionMarks(segments, nextSelection))
       setToolbarPosition(getToolbarPosition(editable))
     }
 
@@ -341,15 +519,32 @@ export function RichTextEditable({
   function refreshToolbar() {
     const element = editableRef.current
 
-    if (!element || !getSelectionOffsets(element)) {
-      setToolbarPosition(null)
+    if (!element) {
       return
     }
 
+    const selection = getSelectionOffsets(element)
+    if (!selection) {
+      setToolbarPosition(null)
+      setIsColorMenuOpen(false)
+      setIsLinkMenuOpen(false)
+      setLinkDraft('')
+      selectionRef.current = null
+      setActiveMarks(emptyActiveSelectionMarks)
+      setHoveredLinkHref(null)
+      return
+    }
+
+    const segments = readSegmentsFromElement(element)
+    selectionRef.current = selection
+    setActiveMarks(getActiveSelectionMarks(segments, selection))
     setToolbarPosition(getToolbarPosition(element))
   }
 
-  function commitSegments(segments: RichTextSegment[]) {
+  function commitSegments(
+    segments: RichTextSegment[],
+    selectionToKeep: SelectionOffsets | null = null,
+  ) {
     const element = editableRef.current
     const payload = toChangePayload(segments)
 
@@ -358,6 +553,16 @@ export function RichTextEditable({
     }
 
     setIsEmpty(payload.text.length === 0)
+    selectionRef.current = selectionToKeep
+    setActiveMarks(getActiveSelectionMarks(segments, selectionToKeep))
+
+    if (selectionToKeep && toolbarPosition) {
+      ignoreSelectionChangeRef.current = true
+      queueMicrotask(() => {
+        ignoreSelectionChangeRef.current = false
+      })
+    }
+
     onChange(payload)
   }
 
@@ -371,23 +576,29 @@ export function RichTextEditable({
     const segments = readSegmentsFromElement(element)
     const payload = toChangePayload(segments)
     setIsEmpty(payload.text.length === 0)
+    const selection = getSelectionOffsets(element)
+    selectionRef.current = selection
+    setActiveMarks(getActiveSelectionMarks(segments, selection))
     onChange(payload)
   }
 
-  function applySelectionMark(mark: RichTextMarkPatch) {
+  function applySelectionMark(mark: RichTextMarkPatch, selectionOverride?: SelectionOffsets | null) {
     const element = editableRef.current
 
     if (!element) {
       return
     }
 
-    const selection = getSelectionOffsets(element)
+    const selection = selectionOverride ?? getSelectionOffsets(element) ?? selectionRef.current
     if (!selection) {
       return
     }
 
     const baseSegments = readSegmentsFromElement(element)
-    commitSegments(applyRichTextMark(baseSegments, selection.start, selection.end, mark))
+    commitSegments(
+      applyRichTextMark(baseSegments, selection.start, selection.end, mark),
+      selection,
+    )
   }
 
   function toggleBooleanMark(markName: Exclude<keyof RichTextMarkPatch, 'link' | 'color'>) {
@@ -397,32 +608,89 @@ export function RichTextEditable({
       return
     }
 
-    const selection = getSelectionOffsets(element)
+    const selection = getSelectionOffsets(element) ?? selectionRef.current
     if (!selection) {
       return
     }
 
     const baseSegments = readSegmentsFromElement(element)
-    applySelectionMark({
-      [markName]: selectedSegmentsAllHaveMark(baseSegments, selection, markName)
-        ? undefined
-        : true,
-    })
+    applySelectionMark(
+      {
+        [markName]: selectedSegmentsAllHaveMark(baseSegments, selection, markName)
+          ? undefined
+          : true,
+      },
+      selection,
+    )
   }
 
   function applyLink() {
-    const link = window.prompt('输入链接')
-
-    if (link === null) {
+    const element = editableRef.current
+    if (!element) {
       return
     }
 
-    applySelectionMark({ link: link.trim() || undefined })
+    const selection = getSelectionOffsets(element) ?? selectionRef.current
+    if (!selection) {
+      return
+    }
+
+    selectionRef.current = selection
+    setIsColorMenuOpen(false)
+    setLinkDraft(activeMarks.link ?? '')
+    setIsLinkMenuOpen(true)
+  }
+
+  function closeLinkEditor() {
+    setIsLinkMenuOpen(false)
+    setLinkDraft('')
+  }
+
+  function submitLink(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault()
+
+    const selection = selectionRef.current
+    if (!selection) {
+      return
+    }
+
+    applySelectionMark({ link: linkDraft.trim() || undefined }, selection)
+    closeLinkEditor()
   }
 
   function applyTextColor(color?: TextColor) {
-    applySelectionMark({ color })
+    applySelectionMark({ color }, selectionRef.current)
     setIsColorMenuOpen(false)
+  }
+
+  function handleMouseMove(event: MouseEvent<HTMLDivElement>) {
+    const link = getLinkTarget(event.target)
+    setHoveredLinkHref(link?.getAttribute('href') ?? null)
+    setIsModifierPressed(event.ctrlKey || event.metaKey)
+  }
+
+  function handleMouseLeave() {
+    setHoveredLinkHref(null)
+  }
+
+  function handleMouseDownCapture(event: MouseEvent<HTMLDivElement>) {
+    const link = getLinkTarget(event.target)
+    if (!link || !(event.ctrlKey || event.metaKey)) {
+      return
+    }
+
+    event.preventDefault()
+  }
+
+  function handleClick(event: MouseEvent<HTMLDivElement>) {
+    const link = getLinkTarget(event.target)
+    if (!link || !(event.ctrlKey || event.metaKey)) {
+      return
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+    window.open(link.getAttribute('href') ?? link.href, '_blank', 'noopener,noreferrer')
   }
 
   return (
@@ -436,6 +704,7 @@ export function RichTextEditable({
         className={className}
         style={style}
         data-empty={isEmpty ? 'true' : 'false'}
+        data-link-open-ready={isLinkOpenReady ? 'true' : 'false'}
         data-placeholder={placeholder}
         onFocus={() => {
           isFocusedRef.current = true
@@ -444,6 +713,10 @@ export function RichTextEditable({
           isFocusedRef.current = false
         }}
         onInput={handleInput}
+        onMouseDownCapture={handleMouseDownCapture}
+        onClick={handleClick}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
         onMouseUp={refreshToolbar}
         onKeyUp={refreshToolbar}
         onKeyDown={onKeyDown}
@@ -458,22 +731,45 @@ export function RichTextEditable({
             top: `${Math.max(8, toolbarPosition.top)}px`,
             left: `${toolbarPosition.left}px`,
           }}
-          onMouseDown={(event) => event.preventDefault()}
+          onMouseDown={(event) => {
+            const target = event.target
+            if (target instanceof HTMLElement && target.closest('.inline-link-popover')) {
+              return
+            }
+
+            event.preventDefault()
+          }}
         >
-          <button type="button" aria-label="粗体" onClick={() => toggleBooleanMark('bold')}>
+          <button
+            type="button"
+            aria-label="粗体"
+            aria-pressed={activeMarks.bold}
+            onClick={() => toggleBooleanMark('bold')}
+          >
             B
           </button>
-          <button type="button" aria-label="斜体" onClick={() => toggleBooleanMark('italic')}>
+          <button
+            type="button"
+            aria-label="斜体"
+            aria-pressed={activeMarks.italic}
+            onClick={() => toggleBooleanMark('italic')}
+          >
             I
           </button>
           <button
             type="button"
             aria-label="下划线"
+            aria-pressed={activeMarks.underline}
             onClick={() => toggleBooleanMark('underline')}
           >
             U
           </button>
-          <button type="button" aria-label="删除线" onClick={() => toggleBooleanMark('strike')}>
+          <button
+            type="button"
+            aria-label="删除线"
+            aria-pressed={activeMarks.strike}
+            onClick={() => toggleBooleanMark('strike')}
+          >
             S
           </button>
           <div className="inline-format-color-control">
@@ -482,7 +778,12 @@ export function RichTextEditable({
               aria-label="文字颜色"
               className="inline-format-toolbar-color"
               aria-expanded={isColorMenuOpen}
-              onClick={() => setIsColorMenuOpen((isOpen) => !isOpen)}
+              aria-pressed={Boolean(activeMarks.color)}
+              onClick={() => {
+                setIsLinkMenuOpen(false)
+                setLinkDraft('')
+                setIsColorMenuOpen((isOpen) => !isOpen)
+              }}
             >
               <span className="inline-format-toolbar-color-icon" aria-hidden="true">
                 A
@@ -494,6 +795,7 @@ export function RichTextEditable({
                   type="button"
                   className="inline-color-option"
                   aria-label="文字颜色：默认"
+                  aria-pressed={!activeMarks.color}
                   onClick={() => applyTextColor(undefined)}
                 >
                   <span
@@ -510,6 +812,7 @@ export function RichTextEditable({
                     type="button"
                     className="inline-color-option"
                     aria-label={`文字颜色：${option.label}`}
+                    aria-pressed={activeMarks.color === option.value}
                     onClick={() => applyTextColor(option.value)}
                   >
                     <span
@@ -526,14 +829,44 @@ export function RichTextEditable({
             ) : null}
           </div>
           <span className="inline-format-toolbar-divider" aria-hidden="true" />
-          <button
-            type="button"
-            aria-label="超链接"
-            className="inline-format-toolbar-link"
-            onClick={applyLink}
-          >
-            链接
-          </button>
+          <div className="inline-link-control">
+            <button
+              type="button"
+              aria-label="超链接"
+              aria-expanded={isLinkMenuOpen}
+              aria-pressed={Boolean(activeMarks.link)}
+              className="inline-format-toolbar-link"
+              onClick={applyLink}
+            >
+              链接
+            </button>
+            {isLinkMenuOpen ? (
+              <form
+                className="inline-link-popover"
+                role="dialog"
+                aria-label="编辑链接"
+                onSubmit={submitLink}
+              >
+                <input
+                  type="text"
+                  className="inline-link-input"
+                  aria-label="链接地址"
+                  placeholder="https://example.com"
+                  value={linkDraft}
+                  autoFocus
+                  onChange={(event) => setLinkDraft(event.target.value)}
+                />
+                <div className="inline-link-actions">
+                  <button type="button" className="inline-link-cancel" onClick={closeLinkEditor}>
+                    取消
+                  </button>
+                  <button type="submit" className="inline-link-submit">
+                    确认链接
+                  </button>
+                </div>
+              </form>
+            ) : null}
+          </div>
         </div>
       ) : null}
     </>
