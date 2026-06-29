@@ -2,7 +2,12 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { openExternalLink } from '../../lib/externalLinks'
 import { RichTextEditable } from './RichTextEditable'
+
+vi.mock('../../lib/externalLinks', () => ({
+  openExternalLink: vi.fn(),
+}))
 
 function findTextNode(element: Node): Text {
   if (element.nodeType === Node.TEXT_NODE) {
@@ -100,8 +105,6 @@ describe('RichTextEditable', () => {
   })
 
   it('opens the linked URL when ctrl-clicking linked text', () => {
-    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
-
     render(
       <RichTextEditable
         ariaLabel="body"
@@ -122,7 +125,7 @@ describe('RichTextEditable', () => {
 
     fireEvent.click(link as HTMLAnchorElement, { ctrlKey: true })
 
-    expect(openSpy).toHaveBeenCalledWith('https://example.com', '_blank', 'noopener,noreferrer')
+    expect(vi.mocked(openExternalLink)).toHaveBeenCalledWith('https://example.com')
   })
 
   it('marks the editor as link-open-ready while ctrl-hovering a link', () => {

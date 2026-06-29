@@ -8,6 +8,7 @@ import {
   richTextToPlainText,
   type RichTextMarkPatch,
 } from '../../domain/richText'
+import { openExternalLink } from '../../lib/externalLinks'
 import { textColorValues } from './blockTextStyle'
 
 export interface RichTextEditableChange {
@@ -690,7 +691,7 @@ export function RichTextEditable({
 
     event.preventDefault()
     event.stopPropagation()
-    window.open(link.getAttribute('href') ?? link.href, '_blank', 'noopener,noreferrer')
+    void openExternalLink(link.getAttribute('href') ?? link.href)
   }
 
   return (

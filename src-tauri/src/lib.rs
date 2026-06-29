@@ -1,3 +1,4 @@
+use std::process::Command;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
@@ -8,6 +9,7 @@ const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_SHOW_WINDOW_ID: &str = "show-window";
 const TRAY_HIDE_WINDOW_ID: &str = "hide-window";
 const TRAY_QUIT_APP_ID: &str = "quit-app";
+const ALLOWED_EXTERNAL_URL_SCHEMES: [&str; 3] = ["http://", "https://", "mailto:"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TrayMenuAction {
@@ -33,6 +35,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
+        .invoke_handler(tauri::generate_handler![open_external_url])
         .setup(|app| {
             setup_tray(app)?;
             Ok(())
@@ -49,6 +52,51 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");
+}
+
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    if !is_allowed_external_url(&url) {
+        return Err("unsupported external URL scheme".to_string());
+    }
+
+    open_external_url_with_system(&url)
+}
+
+fn is_allowed_external_url(url: &str) -> bool {
+    let normalized = url.trim().to_ascii_lowercase();
+    ALLOWED_EXTERNAL_URL_SCHEMES
+        .iter()
+        .any(|scheme| normalized.starts_with(scheme))
+}
+
+fn open_external_url_with_system(url: &str) -> Result<(), String> {
+    let mut command = system_open_command(url);
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("failed to open external URL: {error}"))
+}
+
+#[cfg(target_os = "windows")]
+fn system_open_command(url: &str) -> Command {
+    let mut command = Command::new("explorer.exe");
+    command.arg(url);
+    command
+}
+
+#[cfg(target_os = "macos")]
+fn system_open_command(url: &str) -> Command {
+    let mut command = Command::new("open");
+    command.arg(url);
+    command
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn system_open_command(url: &str) -> Command {
+    let mut command = Command::new("xdg-open");
+    command.arg(url);
+    command
 }
 
 fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
@@ -125,6 +173,35 @@ fn hide_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 mod tests {
     use super::*;
     use tauri::tray::MouseButtonState;
+
+    #[test]
+    fn allows_common_external_url_schemes() {
+        assert!(is_allowed_external_url("https://example.com"));
+        assert!(is_allowed_external_url("http://example.com"));
+        assert!(is_allowed_external_url("mailto:hello@example.com"));
+    }
+
+    #[test]
+    fn rejects_non_external_or_unsafe_url_schemes() {
+        assert!(!is_allowed_external_url("/pages/page-1"));
+        assert!(!is_allowed_external_url("javascript:alert(1)"));
+        assert!(!is_allowed_external_url("file:///C:/secret.txt"));
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn opens_external_urls_with_windows_explorer() {
+        let command = system_open_command("https://example.com");
+
+        assert_eq!(command.get_program(), "explorer.exe");
+        assert_eq!(
+            command
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            vec!["https://example.com"],
+        );
+    }
 
     #[test]
     fn maps_tray_menu_ids_to_actions() {
