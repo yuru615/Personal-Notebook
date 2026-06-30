@@ -37,7 +37,7 @@ import type {
   SaveStatus,
 } from '../domain/types'
 import {
-  createSqliteWorkspaceRepository,
+  createStorageWorkspaceRepository,
   type WorkspaceRepository,
 } from '../lib/workspaceRepository'
 import {
@@ -47,6 +47,7 @@ import {
   saveBinaryFile,
   saveTextFile,
 } from '../lib/fileAccess'
+import { searchWorkspace } from '../lib/storageClient'
 import { createWorkspaceStore } from '../store/createWorkspaceStore'
 import { uiCopy } from '../ui/copy'
 import { sanitizeFileNameSegment } from '../utils/fileName'
@@ -89,7 +90,7 @@ interface AppProps {
 
 export function App({ repository, store: injectedStore, initialEntries }: AppProps = {}) {
   const [store] = useState(
-    () => injectedStore ?? createWorkspaceStore(repository ?? createSqliteWorkspaceRepository()),
+    () => injectedStore ?? createWorkspaceStore(repository ?? createStorageWorkspaceRepository()),
   )
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState)
   const [isBootstrapped, setIsBootstrapped] = useState(false)
@@ -506,6 +507,7 @@ function AppRoutes({
         pages={pages}
         boards={boards}
         dataTables={dataTables}
+        onSearch={searchWorkspace}
         onClose={() => setIsSearchOpen(false)}
         onOpenPage={(pageId) => navigate(`/pages/${pageId}`)}
         onOpenBoard={(pageId, boardId) => navigate(`/pages/${pageId}/boards/${boardId}`)}

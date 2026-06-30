@@ -193,4 +193,37 @@ describe('SearchDialog', () => {
 
     expect(onOpenDataTable).toHaveBeenCalledWith('page-a', 'database-feedback', 'record-a')
   })
+
+  it('can render asynchronous backend search results', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    const onOpenPage = vi.fn()
+    const onSearch = vi.fn().mockResolvedValue([
+      {
+        kind: 'page',
+        pageId: 'page-async',
+        title: 'Async Result',
+        icon: '📄',
+        excerpt: 'Loaded from storage',
+      },
+    ])
+
+    render(
+      <SearchDialog
+        open
+        pages={[]}
+        onClose={onClose}
+        onOpenPage={onOpenPage}
+        onSearch={onSearch}
+      />,
+    )
+
+    await user.type(screen.getByPlaceholderText(searchPlaceholder), 'async')
+
+    const result = await screen.findByRole('button', { name: `${openPageLabel} Async Result` })
+    await user.click(result)
+
+    expect(onSearch).toHaveBeenCalledWith('async')
+    expect(onOpenPage).toHaveBeenCalledWith('page-async')
+  })
 })

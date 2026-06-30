@@ -1,0 +1,230 @@
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSnapshot {
+    pub boards: Vec<BoardRecord>,
+    #[serde(default)]
+    pub data_tables: Vec<DataTableRecord>,
+    #[serde(default)]
+    pub mindmaps: Vec<MindmapRecord>,
+    pub pages: Vec<PageRecord>,
+    pub settings: WorkspaceSettings,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSettings {
+    pub last_opened_page_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageRecord {
+    pub id: String,
+    pub parent_id: Option<String>,
+    pub title: String,
+    pub icon: Option<String>,
+    pub cover: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_full_width: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_small_text: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_family: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_outline: Option<bool>,
+    pub blocks: Vec<Value>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageMeta {
+    pub id: String,
+    pub parent_id: Option<String>,
+    pub title: String,
+    pub icon: Option<String>,
+    pub cover: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_full_width: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_small_text: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_family: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_outline: Option<bool>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadedPage {
+    pub id: String,
+    pub parent_id: Option<String>,
+    pub title: String,
+    pub icon: Option<String>,
+    pub cover: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_full_width: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_small_text: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_family: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_outline: Option<bool>,
+    pub blocks: Vec<Value>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl From<PageRecord> for LoadedPage {
+    fn from(page: PageRecord) -> Self {
+        Self {
+            id: page.id,
+            parent_id: page.parent_id,
+            title: page.title,
+            icon: page.icon,
+            cover: page.cover,
+            is_full_width: page.is_full_width,
+            is_small_text: page.is_small_text,
+            font_family: page.font_family,
+            show_outline: page.show_outline,
+            blocks: page.blocks,
+            created_at: page.created_at,
+            updated_at: page.updated_at,
+        }
+    }
+}
+
+impl From<&PageRecord> for PageMeta {
+    fn from(page: &PageRecord) -> Self {
+        Self {
+            id: page.id.clone(),
+            parent_id: page.parent_id.clone(),
+            title: page.title.clone(),
+            icon: page.icon.clone(),
+            cover: page.cover.clone(),
+            is_full_width: page.is_full_width,
+            is_small_text: page.is_small_text,
+            font_family: page.font_family.clone(),
+            show_outline: page.show_outline,
+            created_at: page.created_at.clone(),
+            updated_at: page.updated_at.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoardRecord {
+    pub id: String,
+    pub title: String,
+    pub snapshot: Value,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DataTableRecord {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub cover: Option<String>,
+    pub snapshot: Value,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MindmapRecord {
+    pub id: String,
+    pub title: String,
+    pub snapshot: Value,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapPayload {
+    pub pages: Vec<PageMeta>,
+    pub boards: Vec<BoardRecord>,
+    pub data_tables: Vec<DataTableRecord>,
+    pub mindmaps: Vec<MindmapRecord>,
+    pub settings: Option<WorkspaceSettings>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveResult {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteResult {
+    pub deleted_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResult {
+    pub kind: String,
+    pub page_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub board_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub database_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub record_id: Option<String>,
+    pub title: String,
+    pub icon: Option<String>,
+    pub excerpt: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteAssetInput {
+    pub name: String,
+    pub mime_type: String,
+    #[serde(with = "serde_bytes_vec")]
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetMeta {
+    pub id: String,
+    pub sha256: String,
+    pub name: String,
+    pub mime_type: String,
+    pub byte_size: i64,
+    pub relative_path: String,
+    pub created_at: String,
+}
+
+mod serde_bytes_vec {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        bytes.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Vec::<u8>::deserialize(deserializer)
+    }
+}

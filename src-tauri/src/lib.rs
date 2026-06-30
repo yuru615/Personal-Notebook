@@ -5,6 +5,8 @@ use tauri::{
     Manager, WindowEvent,
 };
 
+mod storage;
+
 const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_SHOW_WINDOW_ID: &str = "show-window";
 const TRAY_HIDE_WINDOW_ID: &str = "hide-window";
@@ -34,9 +36,30 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_sql::Builder::default().build())
-        .invoke_handler(tauri::generate_handler![open_external_url])
+        .invoke_handler(tauri::generate_handler![
+            open_external_url,
+            storage::commands::bootstrap_workspace,
+            storage::commands::export_workspace_backup,
+            storage::commands::replace_workspace_backup,
+            storage::commands::load_page,
+            storage::commands::save_page,
+            storage::commands::delete_page_branch,
+            storage::commands::save_board,
+            storage::commands::load_board_snapshot,
+            storage::commands::save_mindmap,
+            storage::commands::load_mindmap_snapshot,
+            storage::commands::load_data_table,
+            storage::commands::save_data_table_metadata,
+            storage::commands::save_data_table_record,
+            storage::commands::delete_data_table_record,
+            storage::commands::write_asset,
+            storage::commands::read_asset,
+            storage::commands::cleanup_orphan_assets,
+            storage::commands::search_workspace,
+        ])
         .setup(|app| {
+            let app_data_dir = app.path().app_data_dir()?;
+            app.manage(storage::StorageState::open(app_data_dir)?);
             setup_tray(app)?;
             Ok(())
         })

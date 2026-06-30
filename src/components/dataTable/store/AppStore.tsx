@@ -52,7 +52,7 @@ import type {
   SelectOption,
   SortRule,
 } from "../domain/types";
-import { loadAppState, saveAppState } from "../storage/sqliteRepo";
+import { loadAppState, saveAppState } from "../storage/appStateRepo";
 
 export type SaveStatus = "idle" | "saving" | "saved" | "failed";
 

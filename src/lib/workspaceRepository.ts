@@ -1,18 +1,6 @@
 import { createSeedWorkspace } from '../domain/seed'
-import type {
-  BoardRecord,
-  DataTableRecord,
-  MindmapRecord,
-  PageRecord,
-  WorkspaceSettings,
-  WorkspaceSnapshot,
-} from '../domain/types'
-import {
-  getPersonalNotebookDatabase,
-  getReadyDatabase,
-  type PersonalNotebookDatabase,
-  type RecordJsonRow,
-} from './sqliteDatabase'
+import type { WorkspaceSnapshot } from '../domain/types'
+import { createTauriStorageClient, type WorkspaceStorageClient } from './storageClient'
 
 export interface WorkspaceRepository {
   load(): Promise<WorkspaceSnapshot | null>
@@ -34,64 +22,14 @@ export async function ensureSnapshot(
   return fallback
 }
 
-interface CreateSqliteWorkspaceRepositoryOptions {
-  loadDatabase?: () => Promise<PersonalNotebookDatabase>
+interface CreateStorageWorkspaceRepositoryOptions {
+  client?: WorkspaceStorageClient
 }
 
-const SETTINGS_ID = 'workspace'
-
-export function createSqliteWorkspaceRepository({
-  loadDatabase = getPersonalNotebookDatabase,
-}: CreateSqliteWorkspaceRepositoryOptions = {}): WorkspaceRepository {
+export function createStorageWorkspaceRepository({
+  client = createTauriStorageClient(),
+}: CreateStorageWorkspaceRepositoryOptions = {}): WorkspaceRepository {
   let writeQueue: Promise<void> = Promise.resolve()
-
-  async function loadSnapshot(database: PersonalNotebookDatabase) {
-    const settingsRows = await database.select<RecordJsonRow[]>(
-      'SELECT record_json FROM settings WHERE id = $1',
-      [SETTINGS_ID],
-    )
-
-    if (!settingsRows[0]) {
-      return null
-    }
-
-    return {
-      boards: await loadRecords<BoardRecord>(database, 'boards'),
-      dataTables: await loadRecords<DataTableRecord>(database, 'data_tables'),
-      mindmaps: await loadRecords<MindmapRecord>(database, 'mindmaps'),
-      pages: await loadRecords<PageRecord>(database, 'pages'),
-      settings: parseRecord<WorkspaceSettings>(settingsRows[0]),
-    }
-  }
-
-  async function replaceSnapshot(
-    database: PersonalNotebookDatabase,
-    snapshot: WorkspaceSnapshot,
-  ) {
-    await database.execute('BEGIN IMMEDIATE')
-
-    try {
-      await database.execute('DELETE FROM boards')
-      await database.execute('DELETE FROM data_tables')
-      await database.execute('DELETE FROM mindmaps')
-      await database.execute('DELETE FROM pages')
-      await database.execute('DELETE FROM settings')
-
-      await insertRecords(database, 'boards', snapshot.boards)
-      await insertRecords(database, 'data_tables', snapshot.dataTables ?? [])
-      await insertRecords(database, 'mindmaps', snapshot.mindmaps ?? [])
-      await insertPages(database, snapshot.pages)
-      await database.execute('INSERT INTO settings (id, record_json) VALUES ($1, $2)', [
-        SETTINGS_ID,
-        JSON.stringify(snapshot.settings),
-      ])
-
-      await database.execute('COMMIT')
-    } catch (error) {
-      await database.execute('ROLLBACK').catch(() => undefined)
-      throw error
-    }
-  }
 
   function queueWrite(task: () => Promise<void>) {
     const queuedTask = writeQueue.then(task, task)
@@ -102,63 +40,107 @@ export function createSqliteWorkspaceRepository({
   return {
     async load() {
       await writeQueue
-      const database = await getReadyDatabase(loadDatabase)
-      return loadSnapshot(database)
+      return client.exportWorkspaceBackup()
     },
 
     async save(snapshot) {
       return queueWrite(async () => {
-        const database = await getReadyDatabase(loadDatabase)
-
-        await replaceSnapshot(database, {
+        const persistedSnapshot = await client.exportWorkspaceBackup()
+        const nextSnapshot = {
           ...snapshot,
-          dataTables:
-            snapshot.dataTables ?? (await loadRecords<DataTableRecord>(database, 'data_tables')),
-          mindmaps: snapshot.mindmaps ?? (await loadRecords<MindmapRecord>(database, 'mindmaps')),
-        })
+          dataTables: snapshot.dataTables ?? persistedSnapshot?.dataTables ?? [],
+          mindmaps: snapshot.mindmaps ?? persistedSnapshot?.mindmaps ?? [],
+        }
+
+        if (persistedSnapshot && canSaveIncrementally(persistedSnapshot, nextSnapshot)) {
+          const savedIncrementally = await saveChangedRecords(client, persistedSnapshot, nextSnapshot)
+          if (savedIncrementally) {
+            return
+          }
+        }
+
+        await client.replaceWorkspaceBackup(nextSnapshot)
       })
     },
 
     async replace(snapshot) {
       return queueWrite(async () => {
-        const database = await getReadyDatabase(loadDatabase)
-        await replaceSnapshot(database, snapshot)
+        await client.replaceWorkspaceBackup(snapshot)
       })
     },
   }
 }
 
-async function loadRecords<T>(database: PersonalNotebookDatabase, tableName: string) {
-  const rows = await database.select<RecordJsonRow[]>(
-    `SELECT record_json FROM ${tableName} ORDER BY position ASC`,
+async function saveChangedRecords(
+  client: WorkspaceStorageClient,
+  previous: RequiredWorkspaceSnapshot,
+  next: RequiredWorkspaceSnapshot,
+): Promise<boolean> {
+  const changedPages = changedRecords(previous.pages, next.pages)
+  const changedBoards = changedRecords(previous.boards, next.boards)
+  const changedDataTables = changedRecords(previous.dataTables, next.dataTables)
+  const changedMindmaps = changedRecords(previous.mindmaps, next.mindmaps)
+  const changeCount =
+    changedPages.length +
+    changedBoards.length +
+    changedDataTables.length +
+    changedMindmaps.length
+
+  if (changeCount === 0) {
+    return true
+  }
+
+  if (changeCount > 1) {
+    return false
+  }
+
+  if (changedPages[0]) {
+    await client.savePage(changedPages[0])
+    return true
+  }
+
+  if (changedBoards[0]) {
+    await client.saveBoard(changedBoards[0])
+    return true
+  }
+
+  if (changedDataTables[0]) {
+    await client.saveDataTable(changedDataTables[0])
+    return true
+  }
+
+  if (changedMindmaps[0]) {
+    await client.saveMindmap(changedMindmaps[0])
+  }
+
+  return true
+}
+
+function canSaveIncrementally(
+  previous: WorkspaceSnapshot,
+  next: RequiredWorkspaceSnapshot,
+): previous is RequiredWorkspaceSnapshot {
+  return (
+    Array.isArray(previous.dataTables) &&
+    Array.isArray(previous.mindmaps) &&
+    sameRecordOrder(previous.pages, next.pages) &&
+    sameRecordOrder(previous.boards, next.boards) &&
+    sameRecordOrder(previous.dataTables, next.dataTables) &&
+    sameRecordOrder(previous.mindmaps, next.mindmaps) &&
+    JSON.stringify(previous.settings) === JSON.stringify(next.settings)
   )
-  return rows.map((row) => parseRecord<T>(row))
 }
 
-function parseRecord<T>(row: RecordJsonRow) {
-  return JSON.parse(row.record_json) as T
+function changedRecords<T extends { id: string }>(previous: T[], next: T[]) {
+  const previousById = new Map(previous.map((record) => [record.id, record]))
+  return next.filter((record) => JSON.stringify(previousById.get(record.id)) !== JSON.stringify(record))
 }
 
-async function insertRecords(
-  database: PersonalNotebookDatabase,
-  tableName: string,
-  records: { id: string; updatedAt: string }[],
-) {
-  for (const [position, record] of records.entries()) {
-    await database.execute(
-      `INSERT INTO ${tableName} (id, updated_at, position, record_json) VALUES ($1, $2, $3, $4)`,
-      [record.id, record.updatedAt, position, JSON.stringify(record)],
-    )
-  }
+function sameRecordOrder(left: { id: string }[], right: { id: string }[]) {
+  return (
+    left.length === right.length &&
+    left.every((record, index) => record.id === right[index]?.id)
+  )
 }
 
-async function insertPages(database: PersonalNotebookDatabase, pages: PageRecord[]) {
-  for (const [position, page] of pages.entries()) {
-    await database.execute(
-      `INSERT INTO pages
-        (id, parent_id, updated_at, position, record_json)
-        VALUES ($1, $2, $3, $4, $5)`,
-      [page.id, page.parentId, page.updatedAt, position, JSON.stringify(page)],
-    )
-  }
-}
+type RequiredWorkspaceSnapshot = Required<WorkspaceSnapshot>

@@ -14,6 +14,7 @@ interface SearchDialogProps {
   pages: PageRecord[]
   boards?: BoardRecord[]
   dataTables?: DataTableRecord[]
+  onSearch?: (query: string) => Promise<SearchResult[]>
   onClose: () => void
   onOpenPage: (pageId: string) => void
   onOpenBoard?: (pageId: string, boardId: string) => void
@@ -29,15 +30,17 @@ export function SearchDialog({
   pages,
   boards = [],
   dataTables = [],
+  onSearch,
   onClose,
   onOpenPage,
   onOpenBoard,
   onOpenDataTable,
 }: SearchDialogProps) {
   const [query, setQuery] = useState('')
+  const [asyncResults, setAsyncResults] = useState<SearchResult[]>([])
   const [selectedIndex, setSelectedIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement | null>(null)
-  const results = useMemo(
+  const localResults = useMemo(
     () => [
       ...searchPages(pages, query),
       ...searchBoards(pages, boards, query),
@@ -45,6 +48,7 @@ export function SearchDialog({
     ],
     [boards, dataTables, pages, query],
   )
+  const results = onSearch ? asyncResults : localResults
   const activeIndex = results.length > 0 ? Math.min(selectedIndex, results.length - 1) : -1
   const closeDialog = useCallback(() => {
     setQuery('')
@@ -128,6 +132,40 @@ export function SearchDialog({
       window.removeEventListener('keydown', handleKeyDown)
     }
   }, [closeDialog, open])
+
+  useEffect(() => {
+    if (!open || !onSearch) {
+      setAsyncResults([])
+      return
+    }
+
+    const trimmedQuery = query.trim()
+
+    if (!trimmedQuery) {
+      setAsyncResults([])
+      return
+    }
+
+    let isCurrent = true
+    const timeoutId = window.setTimeout(() => {
+      void onSearch(trimmedQuery)
+        .then((nextResults) => {
+          if (isCurrent) {
+            setAsyncResults(nextResults)
+          }
+        })
+        .catch(() => {
+          if (isCurrent) {
+            setAsyncResults([])
+          }
+        })
+    }, 150)
+
+    return () => {
+      isCurrent = false
+      window.clearTimeout(timeoutId)
+    }
+  }, [onSearch, open, query])
 
   if (!open) {
     return null

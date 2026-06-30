@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code and Codex-style agents when working with this repository.
 
-> 先读 `AGENTS.md` 和 `README.md`，再读本文件。`AGENTS.md` 是通用维护手册；本文件补充更具体的架构脉络、Tauri 桌面边界和执行习惯，避免重复抄命令清单。
+> 先读 `AGENTS.md` 和 `README.md`。`AGENTS.md` 是通用维护手册；本文件只补充更具体的架构脉络、Tauri 桌面边界和执行习惯。
 
 ## 工作方式
 
@@ -10,7 +10,7 @@ This file provides guidance to Claude Code and Codex-style agents when working w
 - 修改前看 `git status --short`。不要覆盖用户未提交改动；相关改动上继续，非相关改动忽略。
 - 保持小步聚焦，不做无关重构、全仓格式化或依赖升级。
 - 编辑文件用现有风格：无分号、单引号、两空格缩进，中文文案尽量集中到 `src/ui/copy.ts` 或相邻既有文案处。
-- 不要直接编辑 `package-lock.json`、`public/mindmap-web/assets/*`、白板 legacy 静态/兼容资产，除非任务明确要求。
+- 不要直接编辑 `package-lock.json`、`public/mindmap-web/assets/*`、白板静态资源，除非任务明确要求。
 - 不要提交或整理 `src-tauri/target/`、`.app`、`.dmg`、`.msi`、NSIS `.exe` 等本地构建产物。
 
 ## 验证策略
@@ -34,24 +34,27 @@ This file provides guidance to Claude Code and Codex-style agents when working w
 
 `WorkspaceSnapshot` 来自 `src/domain/types.ts`，包含 `boards`、`dataTables`、`mindmaps`、`pages`、`settings`。新增字段或块类型时先改领域契约，再补工厂、store、渲染、导入导出、搜索、normalize 和测试。
 
-### 持久化走 SQLite repository
+### 持久化走 Rust storage service
 
-`src/lib/sqliteDatabase.ts` 负责加载 `sqlite:personal-notebook.db`、建表和 schema promise。当前表：
+桌面端业务读写集中在 `src-tauri/src/storage/`。Rust 侧通过 `rusqlite` 独占 SQLite 连接，数据库文件是 `personal-notebook-v2.db`，大文件资产进入 app-managed `personal-notebook-assets-v2/`，SQLite 只保存元数据和引用。前端通过 `src/lib/storageClient.ts` 调 typed Tauri commands，不直接发 SQL。
 
-- `pages`
-- `boards`
-- `data_tables`
-- `mindmaps`
+核心表包括：
+
 - `settings`
-- `standalone_data_table_state`
+- `pages` / `page_contents` / `block_refs`
+- `boards` / `board_snapshots`
+- `mindmaps` / `mindmap_snapshots`
+- `data_tables` 及其 properties/views/records/record pages/blocks
+- `assets` / `asset_refs`
+- `search_documents` / `search_documents_fts`
 
-`src/lib/workspaceRepository.ts` 负责 `load/save/replace`。完整记录存 `record_json`，顺序靠 `position`。`replace` 会清空主工作区表再写回；`save` 兼容旧 snapshot 里缺失的 `dataTables`、`mindmaps`。
+`src/lib/workspaceRepository.ts` 是前端持久化适配层，负责 `load/save/replace` 并尽量把单对象变化映射为 Rust 增量命令；跨对象变化应回退到 Rust 的事务型 `replace_workspace_backup`，避免前端并发拆写造成半成功状态。
 
-`ensureSnapshot` 在首次启动时使用 `src/domain/seed.ts` 写入默认工作区。`bootstrap` 后会跑 normalize，若发生兼容修正会写回数据库。JSON 导入也要经过 normalize。老数据缺字段不能崩。
+`ensureSnapshot` 在首次启动时使用 `src/domain/seed.ts` 写入默认工作区。`bootstrap` 后会跑 normalize，若内容被规范化会写回数据库。JSON 导入也要经过 normalize。
 
 ### 高频资产写入有队列
 
-白板、数据表、思维导图这类非页面资产会高频更新。store 内的 `persistNonPageAssets()` 使用 `nonPageAssetsPersistQueue` 串行化写入，并用 `persistVersion` 避免旧写入把 `saveStatus` 错改回 saved/error。修改 `update*Snapshot` 或新增加类似资产时复用这套路径，不要新开裸 `repository.save`。
+白板、数据表、思维导图这类非页面资产会高频更新。store 内的 `persistNonPageAssets()` 使用 `nonPageAssetsPersistQueue` 串行化写入，并用 `persistVersion` 避免过期写入把 `saveStatus` 错改回 saved/error。修改 `update*Snapshot` 或新增加类似资产时复用这套路径，不要新开裸 `repository.save`。
 
 ### 撤销/重做
 
@@ -68,7 +71,6 @@ store 内维护 `undoStack` / `redoStack`，上限 100，存的是 `WorkspaceSna
 - `devUrl`: `http://localhost:5173`
 - `frontendDist`: `../dist`
 - 默认窗口：1280x800，最小 960x640，`dragDropEnabled: false`
-- SQL preload：`sqlite:personal-notebook.db`
 - bundle 图标：`src-tauri/icons/*`
 
 `src-tauri/tauri.windows.conf.json` 覆盖 Windows 打包，定义 NSIS/MSI、WebView2 download bootstrapper、WiX upgrade code、安装语言、currentUser 安装模式。修改 Windows 安装行为时必须读这个文件和 README 打包说明。
@@ -77,8 +79,8 @@ store 内维护 `undoStack` / `redoStack`，上限 100，存的是 `WorkspaceSna
 
 `src-tauri/src/lib.rs` 做这些事：
 
-- 注册 `tauri-plugin-dialog`、`tauri-plugin-fs`、`tauri-plugin-sql`。
-- 注册 `open_external_url` 命令，只允许 `http://`、`https://`、`mailto:`。
+- 注册 `tauri-plugin-dialog`、`tauri-plugin-fs`，初始化 Rust storage state。
+- 注册 `storage::commands::*` 和 `open_external_url` 命令；外部链接只允许 `http://`、`https://`、`mailto:`。
 - 创建系统托盘，菜单含“显示窗口”“隐藏到托盘”“退出”。
 - 主窗口关闭时 `prevent_close()` 并隐藏窗口；托盘左键点击或双击恢复窗口。
 
@@ -86,7 +88,7 @@ store 内维护 `undoStack` / `redoStack`，上限 100，存的是 `WorkspaceSna
 
 ### Capability
 
-`src-tauri/capabilities/default.json` 限定 `main` 窗口权限。当前允许 core default、dialog default、fs 读写文件、sql select/load/execute。新增插件或命令时不要只改前端，必须同时检查：
+`src-tauri/capabilities/default.json` 限定 `main` 窗口权限。当前允许 core default、dialog default、fs 读写文件和 storage command invoke。新增插件或命令时不要只改前端，必须同时检查：
 
 - Rust 插件注册或 `invoke_handler`
 - capability 权限
@@ -98,15 +100,15 @@ store 内维护 `undoStack` / `redoStack`，上限 100，存的是 `WorkspaceSna
 
 - `src/lib/fileAccess.ts` 是唯一的打开/保存文件适配层。桌面端动态 import Tauri dialog/fs；浏览器环境回退到 file input 和 Blob 下载。
 - `src/lib/externalLinks.ts` 是唯一的外部链接适配层。桌面端 `invoke('open_external_url')`；浏览器环境 `window.open`。
-- `src/lib/sqliteDatabase.ts` 和 repository 是唯一 SQLite 通道。组件不要直接 import `@tauri-apps/plugin-sql`。
+- `src/lib/storageClient.ts` 和 repository 是唯一桌面存储通道。组件不要直接 import Tauri invoke，也不要直接访问 SQLite。
 - `src/app/App.tsx` 默认用 `HashRouter`。不要随意改成 `BrowserRouter`，桌面静态资源和刷新会受影响。
 
 ## 嵌入式子功能
 
 白板、数据表、思维导图都同时支持独立页面和页内块入口。它们与父层的契约是：子功能持有自己的 `snapshot`，父层传入 snapshot，子功能通过 `onSnapshotChange`/`onChange` 回调交回 store，由 `update*Snapshot` action 落库。
 
-- 白板：`src/components/whiteboard`，纯 React/Canvas。`whiteboardModel.ts` 是模型；`legacy/` 与 legacy 测试保留旧格式兼容，不要随手改。
-- 数据表：`src/components/dataTable`，有自己的 `domain/`、`store/AppStore.tsx`、`storage/`、`styles.css`。嵌入工作区的快照是内部 `AppState`；独立数据表子应用状态保存在 SQLite `standalone_data_table_state`。
+- 白板：`src/components/whiteboard`，纯 React/Canvas。`whiteboardModel.ts` 是模型；数据处理代码和相关测试不要随手改。
+- 数据表：`src/components/dataTable`，有自己的 `domain/`、`store/AppStore.tsx`、`storage/`、`styles.css`。嵌入工作区的快照是内部 `AppState`；桌面端经 `src/lib/storageClient.ts`/Rust storage 保存，测试和浏览器轻量路径使用内存 fake。
 - 思维导图：`src/components/mindmap` 通过 iframe 加载 `public/mindmap-web/`。宿主和 iframe 通过按 `mindmapId` scope 的 `localStorage` + `storage` 事件同步，`beforeunload` 时 flush；`mindmapStaticBundle.test.ts` 校验静态 bundle 完整性。
 
 改任一子功能时，同时验证独立页面入口和块入口。
@@ -115,11 +117,11 @@ store 内维护 `undoStack` / `redoStack`，上限 100，存的是 `WorkspaceSna
 
 新增或修改块类型：
 
-`src/domain/types.ts` → `src/utils/blockFactory.ts` → store action 和 `turnBlockInto`/`duplicateBlock` → `src/components/editor` 渲染 → `src/domain/markdown.ts` → `src/domain/search.ts` → normalize 兼容 → 相邻测试。
+`src/domain/types.ts` → `src/utils/blockFactory.ts` → store action 和 `turnBlockInto`/`duplicateBlock` → `src/components/editor` 渲染 → `src/domain/markdown.ts` → `src/domain/search.ts` → normalize → 相邻测试。
 
 修改导入导出：
 
-`src/app/App.tsx` → `src/components/export` → `src/domain/markdown.ts` → `src/lib/fileAccess.ts` → store import/export action → JSON 旧快照兼容测试。桌面端和浏览器回退路径都要考虑。
+`src/app/App.tsx` → `src/components/export` → `src/domain/markdown.ts` → `src/lib/fileAccess.ts` → store import/export action → JSON 备份回归测试。桌面端和浏览器回退路径都要考虑。
 
 修改文件或外部链接：
 
@@ -127,7 +129,7 @@ store 内维护 `undoStack` / `redoStack`，上限 100，存的是 `WorkspaceSna
 
 修改 SQLite schema：
 
-`src/lib/sqliteDatabase.ts` → `src/lib/workspaceRepository.ts` 或子应用 storage repo → `src/test/sqliteTestDatabase.ts` → repository 测试 → JSON 导入/normalize 兼容。
+`src-tauri/src/storage/schema.rs` → `src-tauri/src/storage/models.rs`/`commands.rs` → `src/lib/storageClient.ts`/repository → Rust storage 测试和前端 repository/client 测试 → JSON 导入和 normalize。
 
 修改路由或导航：
 

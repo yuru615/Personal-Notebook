@@ -24,11 +24,6 @@
       "csp": null
     }
   },
-  "plugins": {
-    "sql": {
-      "preload": ["sqlite:personal-notebook.db"]
-    }
-  },
   "bundle": {
     "active": true,
     "targets": "all",

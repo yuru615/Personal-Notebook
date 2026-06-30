@@ -1,12 +1,50 @@
 import { describe, expect, it } from 'vitest'
 import { createSeedWorkspace } from '../domain/seed'
 import type { DataTableRecord, MindmapRecord, WorkspaceSnapshot } from '../domain/types'
-import { createSqliteTestDatabase } from '../test/sqliteTestDatabase'
-import { createSqliteWorkspaceRepository, ensureSnapshot } from './workspaceRepository'
+import type { WorkspaceStorageClient } from './storageClient'
+import { createStorageWorkspaceRepository, ensureSnapshot } from './workspaceRepository'
 
 function createRepository() {
-  const database = createSqliteTestDatabase()
-  return createSqliteWorkspaceRepository({ loadDatabase: async () => database })
+  let snapshot: WorkspaceSnapshot | null = null
+  const calls: string[] = []
+  const client: WorkspaceStorageClient = {
+    async exportWorkspaceBackup() {
+      return snapshot ? structuredClone(snapshot) : null
+    },
+    async replaceWorkspaceBackup(nextSnapshot) {
+      calls.push('replaceWorkspaceBackup')
+      snapshot = structuredClone(nextSnapshot)
+    },
+    async savePage(page) {
+      calls.push(`savePage:${page.id}`)
+      if (!snapshot) {
+        return
+      }
+      snapshot = {
+        ...snapshot,
+        pages: snapshot.pages.map((currentPage) =>
+          currentPage.id === page.id ? structuredClone(page) : currentPage,
+        ),
+      }
+    },
+    async saveBoard(board) {
+      calls.push(`saveBoard:${board.id}`)
+    },
+    async saveDataTable(dataTable) {
+      calls.push(`saveDataTable:${dataTable.id}`)
+    },
+    async saveMindmap(mindmap) {
+      calls.push(`saveMindmap:${mindmap.id}`)
+    },
+    async searchWorkspace() {
+      return []
+    },
+  }
+
+  return {
+    calls,
+    repository: createStorageWorkspaceRepository({ client }),
+  }
 }
 
 function createSnapshot(): WorkspaceSnapshot {
@@ -72,9 +110,9 @@ function createSnapshot(): WorkspaceSnapshot {
   }
 }
 
-describe('createSqliteWorkspaceRepository', () => {
+describe('createStorageWorkspaceRepository', () => {
   it('seeds empty storage through the bootstrap helper', async () => {
-    const repository = createRepository()
+    const { repository } = createRepository()
     const seed = createSeedWorkspace()
 
     expect(await repository.load()).toBeNull()
@@ -86,7 +124,7 @@ describe('createSqliteWorkspaceRepository', () => {
   })
 
   it('preserves an explicitly empty persisted workspace', async () => {
-    const repository = createRepository()
+    const { repository } = createRepository()
     const emptySnapshot: WorkspaceSnapshot = {
       boards: [],
       dataTables: [],
@@ -105,7 +143,7 @@ describe('createSqliteWorkspaceRepository', () => {
   })
 
   it('replaces stored data and removes records that no longer exist', async () => {
-    const repository = createRepository()
+    const { repository } = createRepository()
     const original = createSnapshot()
     const next: WorkspaceSnapshot = {
       boards: [],
@@ -129,7 +167,7 @@ describe('createSqliteWorkspaceRepository', () => {
   })
 
   it('preserves page order when data is loaded back from SQLite', async () => {
-    const repository = createRepository()
+    const { repository } = createRepository()
     const snapshot = createSnapshot()
     const nextPage = {
       ...snapshot.pages[0],
@@ -149,7 +187,7 @@ describe('createSqliteWorkspaceRepository', () => {
   })
 
   it('preserves persisted data tables and mindmaps when saving a legacy snapshot', async () => {
-    const repository = createRepository()
+    const { repository } = createRepository()
     const snapshot = createSnapshot()
     const persistedDataTable = snapshot.dataTables?.[0] as DataTableRecord
     const persistedMindmap = snapshot.mindmaps?.[0] as MindmapRecord
@@ -173,5 +211,56 @@ describe('createSqliteWorkspaceRepository', () => {
       dataTables: [persistedDataTable],
       mindmaps: [persistedMindmap],
     })
+  })
+
+  it('saves a changed page without replacing the whole workspace when ids and settings are stable', async () => {
+    const { calls, repository } = createRepository()
+    const original = createSnapshot()
+    const next: WorkspaceSnapshot = {
+      ...original,
+      pages: [
+        {
+          ...original.pages[0],
+          blocks: [{ id: 'block_1', type: 'paragraph', text: 'updated' }],
+          updatedAt: '2026-06-15T00:00:00.000Z',
+        },
+      ],
+    }
+
+    await repository.replace(original)
+    calls.length = 0
+    await repository.save(next)
+
+    expect(calls).toEqual(['savePage:page_1'])
+    await expect(repository.load()).resolves.toEqual(next)
+  })
+
+  it('falls back to a full replace when one save changes multiple record groups', async () => {
+    const { calls, repository } = createRepository()
+    const original = createSnapshot()
+    const next: WorkspaceSnapshot = {
+      ...original,
+      boards: [
+        {
+          ...original.boards[0],
+          title: 'Updated board',
+          updatedAt: '2026-06-15T00:00:00.000Z',
+        },
+      ],
+      pages: [
+        {
+          ...original.pages[0],
+          blocks: [{ id: 'block_1', type: 'paragraph', text: 'updated' }],
+          updatedAt: '2026-06-15T00:00:00.000Z',
+        },
+      ],
+    }
+
+    await repository.replace(original)
+    calls.length = 0
+    await repository.save(next)
+
+    expect(calls).toEqual(['replaceWorkspaceBackup'])
+    await expect(repository.load()).resolves.toEqual(next)
   })
 })
