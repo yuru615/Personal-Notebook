@@ -6,6 +6,8 @@ import { SaveStatusBadge } from '../shared/SaveStatusBadge'
 const CLEANUP_ORPHAN_WHITEBOARDS_LABEL = '\u6e05\u7406\u5b64\u7acb\u767d\u677f'
 const CLEANUP_ORPHAN_DATA_TABLES_LABEL = '清理孤立数据表格'
 const IMPORT_MARKDOWN_LABEL = '\u5bfc\u5165 Markdown \u9875\u9762\u5305'
+const DANGER_SECTION_LABEL = '\u5371\u9669\u64cd\u4f5c'
+const DELETE_CURRENT_PAGE_LABEL = '\u5220\u9664\u5f53\u524d\u9875\u9762'
 
 interface ExportImportPanelProps {
   status: SaveStatus
@@ -25,6 +27,7 @@ interface ExportImportPanelProps {
   onImportMarkdown: () => void | Promise<void>
   onCleanupOrphanBoards: () => void | Promise<void>
   onCleanupOrphanDataTables: () => void | Promise<void>
+  onDeletePage?: () => void | Promise<void>
 }
 
 export function ExportImportPanel({
@@ -45,6 +48,7 @@ export function ExportImportPanel({
   onImportMarkdown,
   onCleanupOrphanBoards,
   onCleanupOrphanDataTables,
+  onDeletePage,
 }: ExportImportPanelProps) {
   const [open, setOpen] = useState(false)
   const panelRef = useRef<HTMLDivElement | null>(null)
@@ -94,6 +98,11 @@ export function ExportImportPanel({
   function handleCleanupOrphanDataTables() {
     closeMenu()
     void onCleanupOrphanDataTables()
+  }
+
+  function handleDeletePage() {
+    closeMenu()
+    void onDeletePage?.()
   }
 
   const fontOptions: Array<{ value: PageFontFamily; label: string }> = [
@@ -197,6 +206,21 @@ export function ExportImportPanel({
               />
             </label>
           </div>
+          {onDeletePage ? (
+            <>
+              <div className="page-menu-divider" />
+              <div className="page-menu-section">
+                <div className="page-menu-section-title">{DANGER_SECTION_LABEL}</div>
+                <button
+                  type="button"
+                  className="page-menu-action page-menu-action-danger"
+                  onClick={handleDeletePage}
+                >
+                  <span className="page-menu-item-label">{DELETE_CURRENT_PAGE_LABEL}</span>
+                </button>
+              </div>
+            </>
+          ) : null}
         </div>
       ) : null}
     </div>

@@ -61,6 +61,39 @@ function createWorkspace(): WorkspaceSnapshot {
 }
 
 describe('createWorkspaceStore data tables', () => {
+  it('deletes a page branch and moves the current page to the next available page', async () => {
+    const workspace = createWorkspace()
+    workspace.pages = [
+      {
+        ...workspace.pages[0],
+        id: 'page_parent',
+        title: 'Parent',
+      },
+      {
+        ...workspace.pages[0],
+        id: 'page_child',
+        parentId: 'page_parent',
+        title: 'Child',
+      },
+      {
+        ...workspace.pages[0],
+        id: 'page_next',
+        title: 'Next',
+      },
+    ]
+    workspace.settings.lastOpenedPageId = 'page_child'
+    const counted = createCountingRepository(workspace)
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+    await store.getState().deletePage('page_parent')
+
+    expect(store.getState().pages.map((page) => page.id)).toEqual(['page_next'])
+    expect(store.getState().currentPageId).toBe('page_next')
+    expect(store.getState().settings.lastOpenedPageId).toBe('page_next')
+    expect(counted.getSnapshot()?.pages.map((page) => page.id)).toEqual(['page_next'])
+  })
+
   it('creates a data table asset when inserting a data table block', async () => {
     const repository = createMemoryRepository(createWorkspace())
     const store = createWorkspaceStore(repository)

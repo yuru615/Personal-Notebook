@@ -919,6 +919,107 @@ a {
   background: #f3f2ef;
 }
 
+.page-menu-action-danger {
+  color: #b42318;
+}
+
+.page-menu-action-danger:hover {
+  background: #fbe9e7;
+}
+
+.table-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(10px);
+}
+
+.table-confirm-dialog {
+  width: min(420px, calc(100vw - 48px));
+  border: 1px solid rgba(55, 53, 47, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow:
+    rgba(15, 23, 42, 0.18) 0 28px 64px,
+    rgba(15, 23, 42, 0.08) 0 8px 20px;
+}
+
+.table-confirm-header {
+  padding: 16px 18px 0;
+}
+
+.table-confirm-header h2 {
+  margin: 0;
+  color: #37352f;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.table-confirm-body {
+  padding: 10px 18px 0;
+}
+
+.table-confirm-body p {
+  margin: 0;
+  color: #5f5e59;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.table-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 18px;
+}
+
+.table-confirm-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 88px;
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid rgba(55, 53, 47, 0.09);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #37352f;
+  font-size: 13px;
+}
+
+.table-confirm-action:hover,
+.table-confirm-action:focus-visible {
+  background: #f7f6f3;
+}
+
+.table-confirm-action--primary {
+  border-color: rgba(35, 131, 226, 0.2);
+  background: rgba(35, 131, 226, 0.08);
+  color: #2383e2;
+}
+
+.table-confirm-action--primary:hover,
+.table-confirm-action--primary:focus-visible {
+  background: rgba(35, 131, 226, 0.14);
+}
+
+.table-confirm-action--danger {
+  border-color: rgba(185, 28, 28, 0.18);
+  background: rgba(185, 28, 28, 0.08);
+  color: #b91c1c;
+}
+
+.table-confirm-action--danger:hover,
+.table-confirm-action--danger:focus-visible {
+  background: rgba(185, 28, 28, 0.14);
+}
+
 .page-menu-item-label {
   flex: 1 1 auto;
   min-width: 0;

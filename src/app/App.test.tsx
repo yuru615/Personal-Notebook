@@ -339,6 +339,57 @@ describe('App', () => {
     )
   })
 
+  it('confirms current page deletion with the shared confirm dialog', async () => {
+    const user = userEvent.setup()
+    const deletePage = vi.fn(async () => undefined)
+    const pageId = 'page_delete'
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: 'Delete me',
+          icon: null,
+          cover: null,
+          blocks: [],
+          createdAt: '2026-06-30T00:00:00.000Z',
+          updatedAt: '2026-06-30T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+    const store = createWorkspaceStore(createMemoryRepository(snapshot))
+    store.setState({ deletePage })
+
+    render(<App store={store} initialEntries={[`/pages/${pageId}`]} />)
+
+    await screen.findByDisplayValue('Delete me')
+    await user.click(screen.getByRole('button', { name: '页面菜单' }))
+    await user.click(screen.getByRole('button', { name: '删除当前页面' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '删除当前页面' })
+    expect(within(dialog).getByText(/Delete me/)).toBeInTheDocument()
+    expect(deletePage).not.toHaveBeenCalled()
+
+    await user.click(within(dialog).getByRole('button', { name: '取消' }))
+
+    expect(screen.queryByRole('dialog', { name: '删除当前页面' })).not.toBeInTheDocument()
+    expect(deletePage).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: '页面菜单' }))
+    await user.click(screen.getByRole('button', { name: '删除当前页面' }))
+    await user.click(
+      within(await screen.findByRole('dialog', { name: '删除当前页面' })).getByRole('button', {
+        name: '确认删除',
+      }),
+    )
+
+    expect(deletePage).toHaveBeenCalledWith(pageId)
+  })
+
   it('keeps the page directory visible on data table pages', async () => {
     const pageId = 'page_database'
     const databaseId = 'database_project'

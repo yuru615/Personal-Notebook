@@ -55,6 +55,31 @@ describe('SidebarTree', () => {
     expect(screen.queryByRole('button', { name: '收起页面' })).not.toBeInTheDocument()
   })
 
+  it('does not render page delete actions in the sidebar tree', () => {
+    const actionPages = [
+      {
+        ...pages[0],
+        title: 'Parent',
+      },
+      {
+        ...pages[1],
+        title: 'Child',
+      },
+    ]
+
+    render(
+      <MemoryRouter>
+        <SidebarTree
+          pages={actionPages as never}
+          currentPageId="page_parent"
+          onCreatePage={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.queryByRole('button', { name: /\u5220\u9664 Child/ })).not.toBeInTheDocument()
+  })
+
   it('renders recent whiteboards from referenced boards only', () => {
     const whiteboardPages = [
       {

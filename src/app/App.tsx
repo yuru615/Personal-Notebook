@@ -19,6 +19,7 @@ import { useDismissableLayer } from '../components/editor/useDismissableLayer'
 import { ExportImportPanel } from '../components/export/ExportImportPanel'
 import { AppShell } from '../components/layout/AppShell'
 import { SearchDialog } from '../components/search/SearchDialog'
+import ConfirmDialog from '../components/dataTable/components/table/ConfirmDialog'
 import { SidebarTree } from '../components/sidebar/SidebarTree'
 import { AppErrorBoundary } from '../components/shared/AppErrorBoundary'
 import {
@@ -52,6 +53,7 @@ import { searchWorkspace } from '../lib/storageClient'
 import { createWorkspaceStore } from '../store/createWorkspaceStore'
 import { uiCopy } from '../ui/copy'
 import { sanitizeFileNameSegment } from '../utils/fileName'
+import { deletePageBranch } from '../utils/pageTree'
 import type { ReorderPosition } from '../utils/reorder'
 
 type WorkspaceStore = ReturnType<typeof createWorkspaceStore>
@@ -59,6 +61,12 @@ type AppState = ReturnType<WorkspaceStore['getState']>
 
 const DUPLICATE_BOARD_LABEL = '创建副本'
 const WHITEBOARD_MENU_LABEL = '白板菜单'
+const DELETE_CURRENT_PAGE_LABEL = '\u5220\u9664\u5f53\u524d\u9875\u9762'
+const DELETE_PAGE_CONFIRM_LABEL = '\u786e\u8ba4\u5220\u9664'
+const CANCEL_DELETE_PAGE_LABEL = '\u53d6\u6d88'
+const DELETE_PAGE_DESCRIPTION_PREFIX = '\u9875\u9762\u201c'
+const DELETE_PAGE_DESCRIPTION_SUFFIX =
+  '\u201d\u53ca\u5176\u6240\u6709\u5b50\u9875\u9762\u5c06\u88ab\u5220\u9664\u3002\u5982\u679c\u8bef\u5220\uff0c\u53ef\u4f7f\u7528\u64a4\u9500\u6062\u590d\u3002'
 const JSON_FILE_FILTER = [{ name: 'JSON', extensions: ['json'] }]
 const ZIP_FILE_FILTER = [{ name: 'ZIP', extensions: ['zip'] }]
 const DataTablePage = lazy(() =>
@@ -221,6 +229,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onCreatePage={() => store.getState().createPage()}
       onRoutePageChange={setCurrentPage}
       onRenamePage={(pageId, title) => store.getState().renamePage(pageId, title)}
+      onDeletePage={(pageId) => store.getState().deletePage(pageId)}
       onRenameBoard={(boardId, title) => store.getState().renameBoard(boardId, title)}
       onUpdateBoardSnapshot={(boardId, snapshot) =>
         store.getState().updateBoardSnapshot(boardId, snapshot)
@@ -378,6 +387,7 @@ interface AppRoutesProps {
   onCreatePage: () => Promise<PageRecord>
   onRoutePageChange: (pageId: string) => Promise<void>
   onRenamePage: (pageId: string, title: string) => Promise<void>
+  onDeletePage: (pageId: string) => Promise<void>
   onRenameBoard: (boardId: string, title: string) => Promise<void>
   onUpdateBoardSnapshot: (boardId: string, snapshot: unknown) => Promise<void>
   onImportBoard: (
@@ -450,6 +460,7 @@ function AppRoutes({
   onCreatePage,
   onRoutePageChange,
   onRenamePage,
+  onDeletePage,
   onRenameBoard,
   onUpdateBoardSnapshot,
   onImportBoard,
@@ -493,10 +504,36 @@ function AppRoutes({
   const isWhiteboardRoute = useMatch('/pages/:pageId/boards/:boardId') !== null
   const isMindmapRoute = useMatch('/pages/:pageId/mindmaps/:mindmapId') !== null
   const [isSearchOpen, setIsSearchOpen] = useState(false)
+  const [pendingDeletePageId, setPendingDeletePageId] = useState<string | null>(null)
+  const pendingDeletePage = pages.find((page) => page.id === pendingDeletePageId) ?? null
 
   async function handleCreatePage() {
     const page = await onCreatePage()
     navigate(`/pages/${page.id}`)
+  }
+
+  function handleRequestDeletePage(pageId: string) {
+    if (!pages.some((page) => page.id === pageId)) {
+      return
+    }
+
+    setPendingDeletePageId(pageId)
+  }
+
+  async function handleConfirmDeletePage() {
+    if (!pendingDeletePageId) {
+      return
+    }
+
+    const nextPageId = resolvePageIdAfterDelete(pages, pendingDeletePageId, currentPageId)
+    const pageId = pendingDeletePageId
+
+    setPendingDeletePageId(null)
+    await onDeletePage(pageId)
+
+    if (nextPageId !== currentPageId) {
+      navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
+    }
   }
 
   useLayoutEffect(() => {
@@ -584,6 +621,7 @@ function AppRoutes({
                 currentPageId={currentPageId}
                 onRoutePageChange={onRoutePageChange}
                 onRenamePage={onRenamePage}
+                onDeletePage={handleRequestDeletePage}
                 onTogglePageFullWidth={onTogglePageFullWidth}
                 onTogglePageSmallText={onTogglePageSmallText}
                 onTogglePageFontFamily={onTogglePageFontFamily}
@@ -706,6 +744,19 @@ function AppRoutes({
           />
         </Routes>
       </AppErrorBoundary>
+      {pendingDeletePage ? (
+        <ConfirmDialog
+          title={DELETE_CURRENT_PAGE_LABEL}
+          description={buildDeletePageConfirmDescription(pendingDeletePage.title)}
+          confirmLabel={DELETE_PAGE_CONFIRM_LABEL}
+          cancelLabel={CANCEL_DELETE_PAGE_LABEL}
+          danger
+          onConfirm={() => {
+            void handleConfirmDeletePage()
+          }}
+          onCancel={() => setPendingDeletePageId(null)}
+        />
+      ) : null}
     </AppShell>
   )
 }
@@ -718,6 +769,7 @@ interface PageRouteProps {
   currentPageId: string | null
   onRoutePageChange: (pageId: string) => Promise<void>
   onRenamePage: (pageId: string, title: string) => Promise<void>
+  onDeletePage: (pageId: string) => void
   onTogglePageFullWidth: (pageId: string, isFullWidth: boolean) => Promise<void>
   onTogglePageSmallText: (pageId: string, isSmallText: boolean) => Promise<void>
   onTogglePageFontFamily: (pageId: string, fontFamily: PageFontFamily) => Promise<void>
@@ -776,6 +828,7 @@ function PageRoute({
   currentPageId,
   onRoutePageChange,
   onRenamePage,
+  onDeletePage,
   onTogglePageFullWidth,
   onTogglePageSmallText,
   onTogglePageFontFamily,
@@ -886,6 +939,7 @@ function PageRoute({
             }}
             onCleanupOrphanBoards={() => void onCleanupOrphanBoards()}
             onCleanupOrphanDataTables={() => void onCleanupOrphanDataTables()}
+            onDeletePage={() => void onDeletePage(page.id)}
           />
         }
       />
@@ -982,6 +1036,23 @@ function buildPageBreadcrumbs(
       to: options.linkCurrent || !isCurrent ? `/pages/${item.id}` : undefined,
     }
   })
+}
+
+function buildDeletePageConfirmDescription(title: string) {
+  const pageTitle = title.trim() || uiCopy.page.untitled
+  return `${DELETE_PAGE_DESCRIPTION_PREFIX}${pageTitle}${DELETE_PAGE_DESCRIPTION_SUFFIX}`
+}
+
+function resolvePageIdAfterDelete(
+  pages: PageRecord[],
+  pageId: string,
+  currentPageId: string | null,
+) {
+  const nextPages = deletePageBranch(pages, pageId)
+  const currentPageStillExists =
+    currentPageId !== null && nextPages.some((page) => page.id === currentPageId)
+
+  return currentPageStillExists ? currentPageId : (nextPages[0]?.id ?? null)
 }
 
 function getDataTableRecordTitle(
