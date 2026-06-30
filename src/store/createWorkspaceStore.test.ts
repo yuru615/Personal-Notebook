@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createDefaultAppState } from '../components/dataTable/domain/factory'
 import { createMemoryRepository } from '../test/memoryRepository'
 import { createWorkspaceStore } from './createWorkspaceStore'
-import type { WorkspaceSnapshot } from '../domain/types'
+import type { BlockRecord, WorkspaceSnapshot } from '../domain/types'
 
 function createCountingRepository(initialSnapshot: WorkspaceSnapshot | null = null) {
   let snapshot = initialSnapshot ? structuredClone(initialSnapshot) : null
@@ -242,6 +242,71 @@ describe('createWorkspaceStore data tables', () => {
       icon: null,
       cover: null,
     })
+  })
+})
+
+describe('createWorkspaceStore autosave', () => {
+  function createWorkspaceWithParagraphBlock() {
+    const workspace = createWorkspace()
+    workspace.pages[0].blocks = [
+      {
+        id: 'block_1',
+        type: 'paragraph',
+        text: 'Initial',
+      },
+    ]
+    return workspace
+  }
+
+  it('debounces block persistence while applying the latest block state immediately', async () => {
+    vi.useFakeTimers()
+    try {
+      const counted = createCountingRepository(createWorkspaceWithParagraphBlock())
+      const store = createWorkspaceStore(counted.repository)
+
+      await store.getState().bootstrap()
+      const block = store.getState().pages[0].blocks[0] as BlockRecord
+
+      await store.getState().updateBlock('page_1', 'block_1', { ...block, text: 'A' })
+      await store.getState().updateBlock('page_1', 'block_1', { ...block, text: 'AB' })
+
+      expect(store.getState().pages[0].blocks[0]).toMatchObject({ text: 'AB' })
+      expect(store.getState().saveStatus).toBe('saving')
+      expect(counted.getSaveCalls()).toBe(0)
+
+      await vi.advanceTimersByTimeAsync(599)
+      expect(counted.getSaveCalls()).toBe(0)
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(counted.getSaveCalls()).toBe(1)
+      expect(counted.getSnapshot()?.pages[0]?.blocks[0]).toMatchObject({ text: 'AB' })
+      expect(store.getState().saveStatus).toBe('saved')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('flushes a pending block save without waiting for the debounce delay', async () => {
+    vi.useFakeTimers()
+    try {
+      const counted = createCountingRepository(createWorkspaceWithParagraphBlock())
+      const store = createWorkspaceStore(counted.repository)
+
+      await store.getState().bootstrap()
+      const block = store.getState().pages[0].blocks[0] as BlockRecord
+
+      await store.getState().updateBlock('page_1', 'block_1', { ...block, text: 'Flushed' })
+      await store.getState().flushPendingSaves()
+
+      expect(counted.getSaveCalls()).toBe(1)
+      expect(counted.getSnapshot()?.pages[0]?.blocks[0]).toMatchObject({ text: 'Flushed' })
+      expect(store.getState().saveStatus).toBe('saved')
+
+      await vi.advanceTimersByTimeAsync(600)
+      expect(counted.getSaveCalls()).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

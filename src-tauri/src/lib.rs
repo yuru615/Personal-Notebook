@@ -2,7 +2,7 @@ use std::process::Command;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    Manager, WindowEvent,
+    Emitter, Manager, WindowEvent,
 };
 
 mod storage;
@@ -11,6 +11,7 @@ const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_SHOW_WINDOW_ID: &str = "show-window";
 const TRAY_HIDE_WINDOW_ID: &str = "hide-window";
 const TRAY_QUIT_APP_ID: &str = "quit-app";
+const FRONTEND_QUIT_REQUESTED_EVENT: &str = "personal-notebook://quit-requested";
 const ALLOWED_EXTERNAL_URL_SCHEMES: [&str; 3] = ["http://", "https://", "mailto:"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +57,7 @@ pub fn run() {
             storage::commands::read_asset,
             storage::commands::cleanup_orphan_assets,
             storage::commands::search_workspace,
+            quit_app_after_pending_saves,
         ])
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir()?;
@@ -84,6 +86,11 @@ fn open_external_url(url: String) -> Result<(), String> {
     }
 
     open_external_url_with_system(&url)
+}
+
+#[tauri::command]
+fn quit_app_after_pending_saves(app: tauri::AppHandle) {
+    app.exit(0);
 }
 
 fn is_allowed_external_url(url: &str) -> bool {
@@ -158,8 +165,18 @@ fn handle_tray_menu_action<R: tauri::Runtime>(app: &tauri::AppHandle<R>, action:
     match action {
         TrayMenuAction::ShowWindow => show_main_window(app),
         TrayMenuAction::HideWindow => hide_main_window(app),
-        TrayMenuAction::QuitApp => app.exit(0),
+        TrayMenuAction::QuitApp => request_app_quit_after_frontend_flush(app),
     }
+}
+
+fn request_app_quit_after_frontend_flush<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        if window.emit(FRONTEND_QUIT_REQUESTED_EVENT, ()).is_ok() {
+            return;
+        }
+    }
+
+    app.exit(0);
 }
 
 fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {

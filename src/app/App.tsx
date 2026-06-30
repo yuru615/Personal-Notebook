@@ -40,6 +40,7 @@ import {
   createStorageWorkspaceRepository,
   type WorkspaceRepository,
 } from '../lib/workspaceRepository'
+import { registerDesktopPendingSaveFlush } from '../lib/desktopLifecycle'
 import {
   openBinaryFile,
   openedBinaryFileToFile,
@@ -158,6 +159,47 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
     window.addEventListener('keydown', handleKeyDown)
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [store])
+
+  useEffect(() => {
+    let isActive = true
+    let unlistenDesktopFlush: (() => void) | null = null
+
+    function flushPendingSaves() {
+      return store.getState().flushPendingSaves()
+    }
+
+    function flushPendingSavesSilently() {
+      void flushPendingSaves().catch(() => undefined)
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'hidden') {
+        flushPendingSavesSilently()
+      }
+    }
+
+    window.addEventListener('pagehide', flushPendingSavesSilently)
+    window.addEventListener('beforeunload', flushPendingSavesSilently)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    void registerDesktopPendingSaveFlush(flushPendingSaves)
+      .then((unlisten) => {
+        if (isActive) {
+          unlistenDesktopFlush = unlisten
+          return
+        }
+
+        unlisten()
+      })
+      .catch(() => undefined)
+
+    return () => {
+      isActive = false
+      unlistenDesktopFlush?.()
+      window.removeEventListener('pagehide', flushPendingSavesSilently)
+      window.removeEventListener('beforeunload', flushPendingSavesSilently)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [store])
 

@@ -6,7 +6,20 @@ import type { WorkspaceSnapshot } from '../domain/types'
 import { createDefaultAppState } from '../components/dataTable/domain/factory'
 import type { WorkspaceRepository } from '../lib/workspaceRepository'
 import { createMemoryRepository } from '../test/memoryRepository'
+import { createWorkspaceStore } from '../store/createWorkspaceStore'
 import { App } from './App'
+
+const desktopLifecycle = vi.hoisted(() => ({
+  registerDesktopPendingSaveFlush: vi.fn(async () => () => undefined),
+}))
+
+vi.mock('../lib/desktopLifecycle', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/desktopLifecycle')>()
+  return {
+    ...actual,
+    registerDesktopPendingSaveFlush: desktopLifecycle.registerDesktopPendingSaveFlush,
+  }
+})
 
 function findTextNode(element: Node): Text {
   if (element.nodeType === Node.TEXT_NODE) {
@@ -37,6 +50,7 @@ describe('App', () => {
   let scrollTo: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
+    desktopLifecycle.registerDesktopPendingSaveFlush.mockResolvedValue(() => undefined)
     scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
   })
 
@@ -69,6 +83,75 @@ describe('App', () => {
     await screen.findByDisplayValue('快速开始')
 
     expect(replaceCalls).toBe(1)
+  })
+
+  it('flushes pending saves when the page is being hidden', async () => {
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: 'page_flush',
+          parentId: null,
+          title: 'Flush page',
+          icon: null,
+          cover: null,
+          blocks: [{ id: 'block_1', type: 'paragraph', text: 'Draft' }],
+          createdAt: '2026-06-29T00:00:00.000Z',
+          updatedAt: '2026-06-29T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: 'page_flush' },
+    }
+    const store = createWorkspaceStore(createMemoryRepository(snapshot))
+    const flushPendingSaves = vi.fn(store.getState().flushPendingSaves)
+    store.setState({ flushPendingSaves })
+
+    render(<App store={store} initialEntries={['/pages/page_flush']} />)
+
+    await screen.findByDisplayValue('Flush page')
+
+    fireEvent(window, new Event('pagehide'))
+
+    expect(flushPendingSaves).toHaveBeenCalledTimes(1)
+  })
+
+  it('registers pending saves for desktop close and quit lifecycle events', async () => {
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: 'page_desktop_flush',
+          parentId: null,
+          title: 'Desktop flush page',
+          icon: null,
+          cover: null,
+          blocks: [{ id: 'block_1', type: 'paragraph', text: 'Draft' }],
+          createdAt: '2026-06-29T00:00:00.000Z',
+          updatedAt: '2026-06-29T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: 'page_desktop_flush' },
+    }
+    const store = createWorkspaceStore(createMemoryRepository(snapshot))
+    const flushPendingSaves = vi.fn(store.getState().flushPendingSaves)
+    store.setState({ flushPendingSaves })
+
+    render(<App store={store} initialEntries={['/pages/page_desktop_flush']} />)
+
+    await screen.findByDisplayValue('Desktop flush page')
+
+    await waitFor(() => {
+      expect(desktopLifecycle.registerDesktopPendingSaveFlush).toHaveBeenCalled()
+    })
+
+    const registeredFlush = desktopLifecycle.registerDesktopPendingSaveFlush.mock.calls.at(-1)?.[0]
+    await registeredFlush?.()
+
+    expect(flushPendingSaves).toHaveBeenCalledTimes(1)
   })
 
   it('uses workspace undo inside the focused rich text editor after a floating toolbar bold action', async () => {

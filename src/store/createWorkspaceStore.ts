@@ -37,6 +37,7 @@ import { reorderItems, type ReorderPosition } from '../utils/reorder'
 const UNTITLED_PAGE_TITLE = '未命名'
 const BACKUP_VERSION = 1
 const COPY_SUFFIX = ' \u526f\u672c'
+const BLOCK_SAVE_DEBOUNCE_MS = 600
 
 export interface WorkspaceState {
   boards: BoardRecord[]
@@ -73,6 +74,7 @@ export interface WorkspaceState {
   renamePage: (pageId: PageId, title: string) => Promise<void>
   deletePage: (pageId: PageId) => Promise<void>
   updateBlock: (pageId: PageId, blockId: string, nextBlock: BlockRecord) => Promise<void>
+  flushPendingSaves: () => Promise<void>
   insertBlock: (pageId: PageId, type: BlockType) => Promise<BlockRecord | null>
   insertParagraphBlock: (pageId: PageId, text: string) => Promise<void>
   insertBlockAfter: (
@@ -192,6 +194,7 @@ function createEmptyState(): WorkspaceState {
     updateBlock: async () => {
       throw new Error('not implemented')
     },
+    flushPendingSaves: async () => undefined,
     insertBlock: async () => {
       throw new Error('not implemented')
     },
@@ -656,6 +659,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
   const redoStack: WorkspaceSnapshot[] = []
   let nonPageAssetsPersistQueue: Promise<void> = Promise.resolve()
   let nonPageAssetsPersistVersion = 0
+  let pendingBlockSaveTimer: ReturnType<typeof setTimeout> | null = null
+  let pendingBlockSaveTask: Promise<void> | null = null
+  let pendingBlockSaveVersion = 0
 
   function createSnapshotFromState(
     state: Pick<WorkspaceState, 'boards' | 'dataTables' | 'mindmaps' | 'pages' | 'settings'>,
@@ -681,6 +687,65 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
   }
 
   return createStore<WorkspaceState>()((set, get) => {
+    function clearPendingBlockSaveTimer() {
+      if (pendingBlockSaveTimer !== null) {
+        clearTimeout(pendingBlockSaveTimer)
+        pendingBlockSaveTimer = null
+      }
+    }
+
+    function runPendingBlockSave(persistVersion: number) {
+      clearPendingBlockSaveTimer()
+
+      const previousTask = pendingBlockSaveTask ?? Promise.resolve()
+      const persistTask = previousTask
+        .then(async () => {
+          const latestState = get()
+          await repository.save({
+            boards: latestState.boards,
+            dataTables: latestState.dataTables,
+            mindmaps: latestState.mindmaps,
+            pages: latestState.pages,
+            settings: latestState.settings,
+          })
+
+          if (persistVersion === pendingBlockSaveVersion) {
+            set({ saveStatus: 'saved' })
+          }
+        })
+        .catch((error) => {
+          if (persistVersion === pendingBlockSaveVersion) {
+            set({ saveStatus: 'error' })
+          }
+          throw error
+        })
+        .finally(() => {
+          if (pendingBlockSaveTask === persistTask) {
+            pendingBlockSaveTask = null
+          }
+        })
+
+      pendingBlockSaveTask = persistTask
+      return persistTask
+    }
+
+    function scheduleBlockSave() {
+      const persistVersion = ++pendingBlockSaveVersion
+      clearPendingBlockSaveTimer()
+      pendingBlockSaveTimer = setTimeout(() => {
+        void runPendingBlockSave(persistVersion).catch(() => undefined)
+      }, BLOCK_SAVE_DEBOUNCE_MS)
+    }
+
+    async function flushPendingSaves() {
+      if (pendingBlockSaveTimer !== null) {
+        await runPendingBlockSave(pendingBlockSaveVersion)
+        return
+      }
+
+      await pendingBlockSaveTask
+    }
+
     async function persistNonPageAssets(
       state: Pick<WorkspaceState, 'boards' | 'dataTables' | 'mindmaps' | 'pages' | 'settings'>,
       nextAssets: Partial<Pick<WorkspaceState, 'boards' | 'dataTables' | 'mindmaps'>>,
@@ -778,6 +843,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
     },
 
     setCurrentPage: async (pageId: PageId) => {
+      await flushPendingSaves()
       const state = get()
 
       if (!state.pages.some((page) => page.id === pageId)) {
@@ -1586,20 +1652,15 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       )
 
       pushUndoSnapshot(state)
-      set({ saveStatus: 'saving' })
-
-      try {
-        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
-        set({
-          boards: state.boards,
-          pages: nextPages,
-          saveStatus: 'saved',
-        })
-      } catch {
-        set({ saveStatus: 'error' })
-        throw new Error('Failed to update block')
-      }
+      set({
+        boards: state.boards,
+        pages: nextPages,
+        saveStatus: 'saving',
+      })
+      scheduleBlockSave()
     },
+
+    flushPendingSaves,
 
     insertBlock: async (pageId: PageId, type: BlockType) => {
       const state = get()
