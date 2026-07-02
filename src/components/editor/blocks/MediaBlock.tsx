@@ -135,7 +135,7 @@ export function MediaBlock({ block, onChange }: MediaBlockProps) {
   }
 
   return (
-    <figure className={`media-block media-block-${block.type}`}>
+    <figure className={`media-block media-block-kind-${block.type}`}>
       <div className="media-block-toolbar">
         <div className="media-block-label">
           <Icon size={16} aria-hidden="true" />

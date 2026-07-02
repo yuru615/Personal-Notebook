@@ -1314,11 +1314,23 @@ a {
 }
 
 .media-block-preview {
+  display: grid;
+  justify-items: start;
   min-width: 0;
 }
 
-.media-block-image,
-.media-block-video {
+img.media-block-image {
+  display: block;
+  max-width: 100%;
+  width: auto;
+  height: auto;
+  max-height: min(540px, 70vh);
+  border-radius: 6px;
+  object-fit: contain;
+  background: #f4f2ee;
+}
+
+video.media-block-video {
   display: block;
   width: 100%;
   max-height: min(540px, 70vh);
