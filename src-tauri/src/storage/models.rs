@@ -21,6 +21,26 @@ pub struct WorkspaceSettings {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
+pub struct PagePackageImportResult {
+    pub root_page_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PagePackageManifest {
+    pub kind: String,
+    pub version: u32,
+    pub root_page_id: String,
+    pub pages: Vec<PageRecord>,
+    pub boards: Vec<BoardRecord>,
+    pub data_tables: Vec<DataTableRecord>,
+    pub mindmaps: Vec<MindmapRecord>,
+    pub assets: Vec<AssetMeta>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PageRecord {
     pub id: String,
     pub parent_id: Option<String>,

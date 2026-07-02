@@ -20,15 +20,23 @@ use serde::Serialize;
 use serde_json::Value;
 
 pub use error::{StorageError, StorageResult};
+#[allow(unused_imports)]
+pub use models::PagePackageImportResult;
 pub use models::{
     AssetMeta, BoardRecord, BootstrapPayload, DataTableRecord, DeleteResult, ImportAssetFileInput,
-    LoadedPage, MindmapRecord, PageMeta, PageRecord, SaveResult, SearchResult, WorkspaceSettings,
-    WorkspaceSnapshot, WriteAssetInput,
+    LoadedPage, MindmapRecord, PageMeta, PagePackageManifest, PageRecord, SaveResult, SearchResult,
+    WorkspaceSettings, WorkspaceSnapshot, WriteAssetInput,
 };
 
 const DATABASE_FILE_NAME: &str = "zhixi.db";
 const ASSETS_DIR_NAME: &str = "zhixi-assets";
 const SETTINGS_ID: &str = "workspace";
+#[allow(dead_code)]
+pub const PAGE_PACKAGE_KIND: &str = "zhixi.page-package";
+#[allow(dead_code)]
+pub const PAGE_PACKAGE_VERSION: u32 = 1;
+#[allow(dead_code)]
+pub const PAGE_PACKAGE_MANIFEST_ENTRY: &str = "page-package.json";
 pub const WORKSPACE_ARCHIVE_PROGRESS_EVENT: &str = "zhixi://workspace-archive-progress";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -368,6 +376,41 @@ impl Storage {
         Ok(())
     }
 
+    #[allow(dead_code)]
+    pub fn export_page_package(&self, page_id: &str) -> StorageResult<Vec<u8>> {
+        let mut ignore_progress = |_| {};
+        self.write_page_package(page_id, Cursor::new(Vec::new()), None, &mut ignore_progress)
+            .map(|cursor| cursor.into_inner())
+    }
+
+    #[allow(dead_code)]
+    pub fn export_page_package_to_path(
+        &self,
+        page_id: &str,
+        path: impl AsRef<Path>,
+    ) -> StorageResult<()> {
+        let mut ignore_progress = |_| {};
+        self.export_page_package_to_path_with_progress(page_id, path, None, &mut ignore_progress)
+    }
+
+    #[allow(dead_code)]
+    pub fn export_page_package_to_path_with_progress<F>(
+        &self,
+        page_id: &str,
+        path: impl AsRef<Path>,
+        task_id: Option<&str>,
+        progress: &mut F,
+    ) -> StorageResult<()>
+    where
+        F: FnMut(WorkspaceArchiveProgress),
+    {
+        let file = fs::File::create(path)?;
+        let writer = BufWriter::new(file);
+        let mut writer = self.write_page_package(page_id, writer, task_id, progress)?;
+        writer.flush()?;
+        Ok(())
+    }
+
     fn write_workspace_archive<W, F>(
         &self,
         writer: W,
@@ -403,6 +446,189 @@ impl Storage {
             .start_file("workspace.json", metadata_options)
             .map_err(zip_error)?;
         serde_json::to_writer_pretty(&mut archive, &snapshot)?;
+
+        report_archive_progress(
+            task_id,
+            progress,
+            WorkspaceArchiveOperation::Export,
+            WorkspaceArchiveProgressPhase::WritingMetadata,
+            0,
+            total_assets,
+            0,
+            bytes_total,
+            None,
+        );
+
+        archive
+            .start_file("assets/manifest.json", metadata_options)
+            .map_err(zip_error)?;
+        serde_json::to_writer_pretty(&mut archive, &assets)?;
+
+        for (index, asset) in assets.iter().enumerate() {
+            let path = assets::asset_file_path(&self.connection, &self.assets_dir, &asset.id)?;
+            let mut asset_file = fs::File::open(path)?;
+            let current = index as u64 + 1;
+            archive
+                .start_file(
+                    format!("assets/{}", asset.relative_path),
+                    archive_options_for_asset(&asset),
+                )
+                .map_err(zip_error)?;
+
+            report_archive_progress(
+                task_id,
+                progress,
+                WorkspaceArchiveOperation::Export,
+                WorkspaceArchiveProgressPhase::ProcessingAsset,
+                current,
+                total_assets,
+                bytes_processed,
+                bytes_total,
+                Some(asset.name.clone()),
+            );
+
+            let copied = copy_with_progress(&mut asset_file, &mut archive, |asset_copied| {
+                report_archive_progress(
+                    task_id,
+                    progress,
+                    WorkspaceArchiveOperation::Export,
+                    WorkspaceArchiveProgressPhase::ProcessingAsset,
+                    current,
+                    total_assets,
+                    bytes_processed + asset_copied,
+                    bytes_total,
+                    Some(asset.name.clone()),
+                );
+            })?;
+            bytes_processed += copied;
+        }
+
+        report_archive_progress(
+            task_id,
+            progress,
+            WorkspaceArchiveOperation::Export,
+            WorkspaceArchiveProgressPhase::Finalizing,
+            total_assets,
+            total_assets,
+            bytes_processed,
+            bytes_total,
+            None,
+        );
+
+        let writer = archive.finish().map_err(zip_error)?;
+        report_archive_progress(
+            task_id,
+            progress,
+            WorkspaceArchiveOperation::Export,
+            WorkspaceArchiveProgressPhase::Complete,
+            total_assets,
+            total_assets,
+            bytes_total,
+            bytes_total,
+            None,
+        );
+        Ok(writer)
+    }
+
+    #[allow(dead_code)]
+    fn write_page_package<W, F>(
+        &self,
+        page_id: &str,
+        writer: W,
+        task_id: Option<&str>,
+        progress: &mut F,
+    ) -> StorageResult<W>
+    where
+        W: Write + Seek,
+        F: FnMut(WorkspaceArchiveProgress),
+    {
+        let branch_ids = self.descendant_page_ids(page_id)?;
+        if branch_ids.is_empty() {
+            return Err(StorageError::not_found(format!(
+                "page not found: {page_id}"
+            )));
+        }
+        let branch_id_set = branch_ids.iter().collect::<std::collections::HashSet<_>>();
+        let pages = self
+            .load_pages()?
+            .into_iter()
+            .filter(|page| branch_id_set.contains(&page.id))
+            .collect::<Vec<_>>();
+        let board_ids = collect_ref_ids_from_pages(&pages, "board");
+        let data_table_ids = collect_ref_ids_from_pages(&pages, "data_table");
+        let mindmap_ids = collect_ref_ids_from_pages(&pages, "mindmap");
+        let boards = self
+            .load_boards()?
+            .into_iter()
+            .filter(|board| board_ids.iter().any(|id| id == &board.id))
+            .collect::<Vec<_>>();
+        let data_tables = self
+            .load_data_tables()?
+            .into_iter()
+            .filter(|data_table| data_table_ids.iter().any(|id| id == &data_table.id))
+            .collect::<Vec<_>>();
+        let mindmaps = self
+            .load_mindmaps()?
+            .into_iter()
+            .filter(|mindmap| mindmap_ids.iter().any(|id| id == &mindmap.id))
+            .collect::<Vec<_>>();
+        let mut asset_ids = collect_asset_ids_from_pages(&pages);
+        for asset_id in collect_asset_ids_from_data_tables(&data_tables) {
+            if !asset_ids.iter().any(|existing| existing == &asset_id) {
+                asset_ids.push(asset_id);
+            }
+        }
+        let assets = assets::load_assets_by_ids(&self.connection, &asset_ids)?;
+        let manifest = PagePackageManifest {
+            kind: PAGE_PACKAGE_KIND.to_string(),
+            version: PAGE_PACKAGE_VERSION,
+            root_page_id: page_id.to_string(),
+            pages,
+            boards,
+            data_tables,
+            mindmaps,
+            assets,
+        };
+
+        self.write_page_package_archive(manifest, writer, task_id, progress)
+    }
+
+    #[allow(dead_code)]
+    fn write_page_package_archive<W, F>(
+        &self,
+        manifest: PagePackageManifest,
+        writer: W,
+        task_id: Option<&str>,
+        progress: &mut F,
+    ) -> StorageResult<W>
+    where
+        W: Write + Seek,
+        F: FnMut(WorkspaceArchiveProgress),
+    {
+        let assets = manifest.assets.clone();
+        let total_assets = assets.len() as u64;
+        let bytes_total = total_asset_bytes(&assets);
+        let mut bytes_processed = 0;
+        let mut archive = zip::ZipWriter::new(writer);
+        let metadata_options =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+        report_archive_progress(
+            task_id,
+            progress,
+            WorkspaceArchiveOperation::Export,
+            WorkspaceArchiveProgressPhase::Preparing,
+            0,
+            total_assets,
+            0,
+            bytes_total,
+            None,
+        );
+
+        archive
+            .start_file(PAGE_PACKAGE_MANIFEST_ENTRY, metadata_options)
+            .map_err(zip_error)?;
+        serde_json::to_writer_pretty(&mut archive, &manifest)?;
 
         report_archive_progress(
             task_id,
@@ -1268,6 +1494,74 @@ fn total_asset_bytes(assets: &[AssetMeta]) -> u64 {
         .sum()
 }
 
+#[allow(dead_code)]
+fn collect_ref_ids_from_pages(pages: &[PageRecord], ref_kind: &str) -> Vec<String> {
+    let mut ids = Vec::new();
+
+    for page in pages {
+        for block in &page.blocks {
+            let Some(block_type) = block.get("type").and_then(Value::as_str) else {
+                continue;
+            };
+            let id = match (ref_kind, block_type) {
+                ("board", "whiteboard") => block.get("boardId").and_then(Value::as_str),
+                ("data_table", "data_table") | ("data_table", "data_table_inline") => {
+                    block.get("databaseId").and_then(Value::as_str)
+                }
+                ("mindmap", "mindmap") => block.get("mindmapId").and_then(Value::as_str),
+                _ => None,
+            };
+            if let Some(id) = id {
+                if !ids.iter().any(|existing| existing == id) {
+                    ids.push(id.to_string());
+                }
+            }
+        }
+    }
+
+    ids
+}
+
+#[allow(dead_code)]
+fn collect_asset_ids_from_pages(pages: &[PageRecord]) -> Vec<String> {
+    let mut ids = Vec::new();
+
+    for page in pages {
+        for block in &page.blocks {
+            let Some(block_type) = block.get("type").and_then(Value::as_str) else {
+                continue;
+            };
+            if matches!(block_type, "image" | "video" | "audio") {
+                if let Some(asset_id) = block.get("assetId").and_then(Value::as_str) {
+                    if !ids.iter().any(|existing| existing == asset_id) {
+                        ids.push(asset_id.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    ids
+}
+
+#[allow(dead_code)]
+fn collect_asset_ids_from_data_tables(data_tables: &[DataTableRecord]) -> Vec<String> {
+    let mut ids = Vec::new();
+
+    for data_table in data_tables {
+        let Some(assets) = data_table.snapshot.get("assets").and_then(Value::as_object) else {
+            continue;
+        };
+        for asset_id in assets.keys() {
+            if !ids.iter().any(|existing| existing == asset_id) {
+                ids.push(asset_id.clone());
+            }
+        }
+    }
+
+    ids
+}
+
 fn report_archive_progress<F>(
     task_id: Option<&str>,
     progress: &mut F,
@@ -1712,6 +2006,97 @@ mod tests {
             target.read_asset(&asset.id).expect("read imported"),
             b"image"
         );
+    }
+
+    #[test]
+    fn page_package_exports_current_page_tree_only() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        let asset = source
+            .write_asset(WriteAssetInput {
+                name: "image.png".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes: b"image".to_vec(),
+            })
+            .expect("write asset");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages.push(PageRecord {
+            id: "page_child".to_string(),
+            parent_id: Some("page_1".to_string()),
+            title: "Child".to_string(),
+            icon: None,
+            cover: None,
+            is_full_width: None,
+            is_small_text: None,
+            font_family: None,
+            show_outline: None,
+            blocks: vec![json!({
+                "id": "block_image",
+                "type": "image",
+                "assetId": asset.id,
+                "name": "image.png",
+                "mimeType": "image/png",
+                "caption": "",
+                "alt": "image"
+            })],
+            created_at: "2026-07-02T00:00:00.000Z".to_string(),
+            updated_at: "2026-07-02T00:00:00.000Z".to_string(),
+        });
+        snapshot.pages.push(PageRecord {
+            id: "page_unrelated".to_string(),
+            parent_id: None,
+            title: "Unrelated".to_string(),
+            icon: None,
+            cover: None,
+            is_full_width: None,
+            is_small_text: None,
+            font_family: None,
+            show_outline: None,
+            blocks: vec![],
+            created_at: "2026-07-02T00:00:00.000Z".to_string(),
+            updated_at: "2026-07-02T00:00:00.000Z".to_string(),
+        });
+        source
+            .replace_workspace_backup(snapshot)
+            .expect("replace snapshot");
+
+        let archive = source
+            .export_page_package("page_1")
+            .expect("export page package");
+        let cursor = Cursor::new(archive);
+        let mut archive = zip::ZipArchive::new(cursor).expect("read archive");
+        let manifest: PagePackageManifest = {
+            let mut manifest_entry = archive
+                .by_name(PAGE_PACKAGE_MANIFEST_ENTRY)
+                .expect("page package manifest");
+            serde_json::from_reader(&mut manifest_entry).expect("parse manifest")
+        };
+
+        assert_eq!(manifest.kind, PAGE_PACKAGE_KIND);
+        assert_eq!(manifest.version, PAGE_PACKAGE_VERSION);
+        assert_eq!(manifest.root_page_id, "page_1");
+        assert_eq!(
+            manifest
+                .pages
+                .iter()
+                .map(|page| page.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["page_1", "page_child"]
+        );
+        assert!(manifest
+            .pages
+            .iter()
+            .all(|page| page.id != "page_unrelated"));
+        assert_eq!(
+            manifest
+                .assets
+                .iter()
+                .map(|asset| asset.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![asset.id.as_str()]
+        );
+        archive
+            .by_name(&format!("assets/{}", asset.relative_path))
+            .expect("asset entry exists");
     }
 
     #[test]

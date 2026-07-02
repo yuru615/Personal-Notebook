@@ -6,7 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
 
 use super::{
@@ -200,6 +200,39 @@ pub fn load_referenced_assets(connection: &Connection) -> StorageResult<Vec<Asse
     })?;
 
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+pub fn load_assets_by_ids(
+    connection: &Connection,
+    asset_ids: &[String],
+) -> StorageResult<Vec<AssetMeta>> {
+    let mut assets = Vec::new();
+
+    for asset_id in asset_ids {
+        let asset = connection
+            .query_row(
+                "SELECT id, sha256, name, mime_type, byte_size, relative_path, created_at
+                  FROM zhixi_assets WHERE id = ?1",
+                [asset_id],
+                |row| {
+                    Ok(AssetMeta {
+                        id: row.get(0)?,
+                        sha256: row.get(1)?,
+                        name: row.get(2)?,
+                        mime_type: row.get(3)?,
+                        byte_size: row.get(4)?,
+                        relative_path: row.get(5)?,
+                        created_at: row.get(6)?,
+                    })
+                },
+            )
+            .optional()?;
+        if let Some(asset) = asset {
+            assets.push(asset);
+        }
+    }
+
+    Ok(assets)
 }
 
 pub fn cleanup_orphan_assets(connection: &Connection, assets_dir: &Path) -> StorageResult<usize> {
