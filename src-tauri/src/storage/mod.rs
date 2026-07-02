@@ -3224,6 +3224,84 @@ mod tests {
     }
 
     #[test]
+    fn page_package_import_rejects_duplicate_page_ids() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages.push(PageRecord {
+            id: "page_child".to_string(),
+            parent_id: Some("page_1".to_string()),
+            title: "Child".to_string(),
+            icon: None,
+            cover: None,
+            is_full_width: None,
+            is_small_text: None,
+            font_family: None,
+            show_outline: None,
+            blocks: vec![],
+            created_at: "2026-07-02T00:00:00.000Z".to_string(),
+            updated_at: "2026-07-02T00:00:00.000Z".to_string(),
+        });
+        source
+            .replace_workspace_backup(snapshot)
+            .expect("seed source");
+        let archive = source
+            .export_page_package("page_1")
+            .expect("export package");
+        let archive = rewrite_page_package_manifest(archive, |manifest| {
+            let child = manifest
+                .pages
+                .iter_mut()
+                .find(|page| page.id == "page_child")
+                .expect("child page");
+            child.id = "page_1".to_string();
+        });
+        let target = Storage::open_in_memory_for_tests().expect("target opens");
+        target
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed target");
+        let before = target.export_workspace_backup().expect("snapshot before");
+
+        let error = target
+            .import_page_package(archive)
+            .expect_err("duplicate page id rejected");
+
+        assert_eq!(error.code, "invalid_payload");
+        assert_eq!(
+            target.export_workspace_backup().expect("snapshot after"),
+            before
+        );
+    }
+
+    #[test]
+    fn page_package_import_rejects_missing_root_page() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        source
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed source");
+        let archive = source
+            .export_page_package("page_1")
+            .expect("export package");
+        let archive = rewrite_page_package_manifest(archive, |manifest| {
+            manifest.root_page_id = "page_missing".to_string();
+        });
+        let target = Storage::open_in_memory_for_tests().expect("target opens");
+        target
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed target");
+        let before = target.export_workspace_backup().expect("snapshot before");
+
+        let error = target
+            .import_page_package(archive)
+            .expect_err("missing root page rejected");
+
+        assert_eq!(error.code, "invalid_payload");
+        assert_eq!(
+            target.export_workspace_backup().expect("snapshot after"),
+            before
+        );
+    }
+
+    #[test]
     fn page_package_import_rejects_extra_non_root_top_level_page() {
         let source = Storage::open_in_memory_for_tests().expect("source opens");
         source
