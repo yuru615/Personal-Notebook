@@ -2,9 +2,9 @@ use tauri::{async_runtime, AppHandle, Emitter, State};
 
 use super::{
     AssetMeta, BoardRecord, BootstrapPayload, DataTableRecord, DeleteResult, ImportAssetFileInput,
-    LoadedPage, MindmapRecord, PageRecord, SaveResult, SearchResult, Storage, StorageError,
-    StorageResult, StorageState, WorkspaceArchiveProgress, WorkspaceSnapshot, WriteAssetInput,
-    WORKSPACE_ARCHIVE_PROGRESS_EVENT,
+    LoadedPage, MindmapRecord, PagePackageImportResult, PageRecord, SaveResult, SearchResult,
+    Storage, StorageError, StorageResult, StorageState, WorkspaceArchiveProgress,
+    WorkspaceSnapshot, WriteAssetInput, WORKSPACE_ARCHIVE_PROGRESS_EVENT,
 };
 
 #[tauri::command]
@@ -80,6 +80,72 @@ pub async fn import_workspace_archive_from_path(
         }
 
         storage.import_workspace_archive_from_path_with_progress(
+            &path,
+            task_id.as_deref(),
+            &mut |progress| emit_archive_progress(&app, progress),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn export_page_package(
+    state: State<'_, StorageState>,
+    page_id: String,
+) -> StorageResult<Vec<u8>> {
+    with_storage_blocking(state.inner().clone(), move |storage| {
+        storage.export_page_package(&page_id)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn export_page_package_to_path(
+    app: AppHandle,
+    state: State<'_, StorageState>,
+    page_id: String,
+    path: String,
+    task_id: Option<String>,
+) -> StorageResult<()> {
+    with_storage_blocking(state.inner().clone(), move |storage| {
+        if task_id.is_none() {
+            return storage.export_page_package_to_path(&page_id, &path);
+        }
+
+        storage.export_page_package_to_path_with_progress(
+            &page_id,
+            &path,
+            task_id.as_deref(),
+            &mut |progress| emit_archive_progress(&app, progress),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn import_page_package(
+    state: State<'_, StorageState>,
+    bytes: Vec<u8>,
+) -> StorageResult<PagePackageImportResult> {
+    with_storage_blocking(state.inner().clone(), move |storage| {
+        storage.import_page_package(bytes)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn import_page_package_from_path(
+    app: AppHandle,
+    state: State<'_, StorageState>,
+    path: String,
+    task_id: Option<String>,
+) -> StorageResult<PagePackageImportResult> {
+    with_storage_blocking(state.inner().clone(), move |storage| {
+        if task_id.is_none() {
+            return storage.import_page_package_from_path(&path);
+        }
+
+        storage.import_page_package_from_path_with_progress(
             &path,
             task_id.as_deref(),
             &mut |progress| emit_archive_progress(&app, progress),

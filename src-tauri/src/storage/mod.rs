@@ -10,10 +10,8 @@ use std::{
     io::{self, BufReader, BufWriter, Cursor, Read, Seek, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    time::{SystemTime, UNIX_EPOCH},
 };
-
-#[cfg(test)]
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
@@ -409,6 +407,33 @@ impl Storage {
         let mut writer = self.write_page_package(page_id, writer, task_id, progress)?;
         writer.flush()?;
         Ok(())
+    }
+
+    pub fn import_page_package(&self, bytes: Vec<u8>) -> StorageResult<PagePackageImportResult> {
+        let mut ignore_progress = |_| {};
+        let cursor = Cursor::new(bytes);
+        self.import_page_package_reader(cursor, None, &mut ignore_progress)
+    }
+
+    pub fn import_page_package_from_path(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> StorageResult<PagePackageImportResult> {
+        let mut ignore_progress = |_| {};
+        self.import_page_package_from_path_with_progress(path, None, &mut ignore_progress)
+    }
+
+    pub fn import_page_package_from_path_with_progress<F>(
+        &self,
+        path: impl AsRef<Path>,
+        task_id: Option<&str>,
+        progress: &mut F,
+    ) -> StorageResult<PagePackageImportResult>
+    where
+        F: FnMut(WorkspaceArchiveProgress),
+    {
+        let file = fs::File::open(path)?;
+        self.import_page_package_reader(BufReader::new(file), task_id, progress)
     }
 
     fn write_workspace_archive<W, F>(
@@ -860,6 +885,213 @@ impl Storage {
         );
 
         Ok(())
+    }
+
+    fn import_page_package_reader<R, F>(
+        &self,
+        reader: R,
+        task_id: Option<&str>,
+        progress: &mut F,
+    ) -> StorageResult<PagePackageImportResult>
+    where
+        R: Read + Seek,
+        F: FnMut(WorkspaceArchiveProgress),
+    {
+        let mut archive = zip::ZipArchive::new(reader).map_err(zip_error)?;
+        report_archive_progress(
+            task_id,
+            progress,
+            WorkspaceArchiveOperation::Import,
+            WorkspaceArchiveProgressPhase::Preparing,
+            0,
+            0,
+            0,
+            0,
+            None,
+        );
+        let manifest: PagePackageManifest = {
+            let mut manifest_entry = archive
+                .by_name(PAGE_PACKAGE_MANIFEST_ENTRY)
+                .map_err(|_| StorageError::invalid_payload("not a zhixi page package"))?;
+            serde_json::from_reader(&mut manifest_entry)?
+        };
+        if manifest.kind != PAGE_PACKAGE_KIND || manifest.version != PAGE_PACKAGE_VERSION {
+            return Err(StorageError::invalid_payload("unsupported page package"));
+        }
+        if !manifest
+            .pages
+            .iter()
+            .any(|page| page.id == manifest.root_page_id)
+        {
+            return Err(StorageError::invalid_payload(
+                "page package root is missing",
+            ));
+        }
+
+        let total_assets = manifest.assets.len() as u64;
+        let bytes_total = total_asset_bytes(&manifest.assets);
+
+        report_archive_progress(
+            task_id,
+            progress,
+            WorkspaceArchiveOperation::Import,
+            WorkspaceArchiveProgressPhase::WritingMetadata,
+            0,
+            total_assets,
+            0,
+            bytes_total,
+            None,
+        );
+
+        for asset in &manifest.assets {
+            let archive_path = format!("assets/{}", asset.relative_path);
+            if let Err(error) = archive.by_name(&archive_path) {
+                return Err(zip_error(error));
+            }
+        }
+
+        let mut counter = 0;
+        let mut page_id_map = std::collections::HashMap::new();
+        let mut board_id_map = std::collections::HashMap::new();
+        let mut data_table_id_map = std::collections::HashMap::new();
+        let mut mindmap_id_map = std::collections::HashMap::new();
+        for page in &manifest.pages {
+            page_id_map.insert(page.id.clone(), import_id("page", &mut counter));
+        }
+        for board in &manifest.boards {
+            board_id_map.insert(board.id.clone(), import_id("board", &mut counter));
+        }
+        for data_table in &manifest.data_tables {
+            data_table_id_map.insert(data_table.id.clone(), import_id("database", &mut counter));
+        }
+        for mindmap in &manifest.mindmaps {
+            mindmap_id_map.insert(mindmap.id.clone(), import_id("mindmap", &mut counter));
+        }
+
+        let root_page_id = page_id_map
+            .get(&manifest.root_page_id)
+            .cloned()
+            .ok_or_else(|| StorageError::invalid_payload("page package root is missing"))?;
+        let mut asset_id_map = std::collections::HashMap::new();
+        let mut bytes_processed = 0;
+
+        self.with_transaction(|| {
+            for (index, asset) in manifest.assets.iter().enumerate() {
+                let archive_path = format!("assets/{}", asset.relative_path);
+                let mut asset_file = archive.by_name(&archive_path).map_err(zip_error)?;
+                let current = index as u64 + 1;
+                let item_name = asset.name.clone();
+                let mut copied_for_asset = 0;
+
+                report_archive_progress(
+                    task_id,
+                    progress,
+                    WorkspaceArchiveOperation::Import,
+                    WorkspaceArchiveProgressPhase::ProcessingAsset,
+                    current,
+                    total_assets,
+                    bytes_processed,
+                    bytes_total,
+                    Some(item_name.clone()),
+                );
+
+                let imported = assets::write_asset_from_reader(
+                    &self.connection,
+                    &self.assets_dir,
+                    asset.name.clone(),
+                    asset.mime_type.clone(),
+                    &mut asset_file,
+                    &mut |asset_copied| {
+                        copied_for_asset = asset_copied;
+                        report_archive_progress(
+                            task_id,
+                            progress,
+                            WorkspaceArchiveOperation::Import,
+                            WorkspaceArchiveProgressPhase::ProcessingAsset,
+                            current,
+                            total_assets,
+                            bytes_processed + asset_copied,
+                            bytes_total,
+                            Some(item_name.clone()),
+                        );
+                    },
+                )?;
+                bytes_processed += copied_for_asset;
+                asset_id_map.insert(asset.id.clone(), imported.id);
+            }
+
+            let mut board_position = self.next_position("zhixi_boards");
+            for board in &manifest.boards {
+                let mut next_board = board.clone();
+                next_board.id = board_id_map[&board.id].clone();
+                self.insert_board(&next_board, board_position)?;
+                board_position += 1;
+            }
+
+            let mut data_table_position = self.next_position("zhixi_data_tables");
+            for data_table in &manifest.data_tables {
+                let mut next_data_table = data_table.clone();
+                next_data_table.id = data_table_id_map[&data_table.id].clone();
+                rewrite_data_table_asset_refs(&mut next_data_table.snapshot, &asset_id_map);
+                if let Some(database) = next_data_table
+                    .snapshot
+                    .get_mut("database")
+                    .and_then(Value::as_object_mut)
+                {
+                    database.insert("id".to_string(), Value::String(next_data_table.id.clone()));
+                }
+                self.insert_data_table(&next_data_table, data_table_position)?;
+                data_table_position += 1;
+            }
+
+            let mut mindmap_position = self.next_position("zhixi_mindmaps");
+            for mindmap in &manifest.mindmaps {
+                let mut next_mindmap = mindmap.clone();
+                next_mindmap.id = mindmap_id_map[&mindmap.id].clone();
+                self.insert_mindmap(&next_mindmap, mindmap_position)?;
+                mindmap_position += 1;
+            }
+
+            let mut page_position = self.next_position("zhixi_pages");
+            for page in &manifest.pages {
+                let mut next_page = page.clone();
+                next_page.id = page_id_map[&page.id].clone();
+                next_page.parent_id = if page.id == manifest.root_page_id {
+                    None
+                } else {
+                    page.parent_id
+                        .as_ref()
+                        .and_then(|parent_id| page_id_map.get(parent_id).cloned())
+                };
+                rewrite_block_ids_and_refs(
+                    &mut next_page.blocks,
+                    &page_id_map,
+                    &board_id_map,
+                    &data_table_id_map,
+                    &mindmap_id_map,
+                    &asset_id_map,
+                    &mut counter,
+                );
+                self.insert_page(&next_page, page_position)?;
+                page_position += 1;
+            }
+            self.rebuild_resource_search_documents()?;
+            Ok(())
+        })?;
+
+        report_archive_progress(
+            task_id,
+            progress,
+            WorkspaceArchiveOperation::Import,
+            WorkspaceArchiveProgressPhase::Complete,
+            total_assets,
+            total_assets,
+            bytes_total,
+            bytes_total,
+            None,
+        );
+
+        Ok(PagePackageImportResult { root_page_id })
     }
 
     pub fn search_workspace(&self, query: &str, limit: usize) -> StorageResult<Vec<SearchResult>> {
@@ -1494,6 +1726,86 @@ fn total_asset_bytes(assets: &[AssetMeta]) -> u64 {
         .sum()
 }
 
+fn import_id(prefix: &str, counter: &mut u64) -> String {
+    *counter += 1;
+    format!("{prefix}_import_{}_{}", now_millis(), counter)
+}
+
+fn rewrite_block_ids_and_refs(
+    blocks: &mut [Value],
+    page_id_map: &std::collections::HashMap<String, String>,
+    board_id_map: &std::collections::HashMap<String, String>,
+    data_table_id_map: &std::collections::HashMap<String, String>,
+    mindmap_id_map: &std::collections::HashMap<String, String>,
+    asset_id_map: &std::collections::HashMap<String, String>,
+    counter: &mut u64,
+) {
+    for block in blocks {
+        let Some(object) = block.as_object_mut() else {
+            continue;
+        };
+        if object.contains_key("id") {
+            object.insert("id".to_string(), Value::String(import_id("block", counter)));
+        }
+        if let Some(Value::String(page_id)) = object.get_mut("pageId") {
+            if let Some(next_id) = page_id_map.get(page_id) {
+                *page_id = next_id.clone();
+            }
+        }
+        if let Some(Value::String(board_id)) = object.get_mut("boardId") {
+            if let Some(next_id) = board_id_map.get(board_id) {
+                *board_id = next_id.clone();
+            }
+        }
+        if let Some(Value::String(database_id)) = object.get_mut("databaseId") {
+            if let Some(next_id) = data_table_id_map.get(database_id) {
+                *database_id = next_id.clone();
+            }
+        }
+        if let Some(Value::String(mindmap_id)) = object.get_mut("mindmapId") {
+            if let Some(next_id) = mindmap_id_map.get(mindmap_id) {
+                *mindmap_id = next_id.clone();
+            }
+        }
+        if let Some(Value::String(asset_id)) = object.get_mut("assetId") {
+            if let Some(next_id) = asset_id_map.get(asset_id) {
+                *asset_id = next_id.clone();
+            }
+        }
+    }
+}
+
+fn rewrite_data_table_asset_refs(
+    snapshot: &mut Value,
+    asset_id_map: &std::collections::HashMap<String, String>,
+) {
+    if let Some(assets) = snapshot.get_mut("assets").and_then(Value::as_object_mut) {
+        let old_assets = std::mem::take(assets);
+        for (asset_id, mut asset_value) in old_assets {
+            let next_asset_id = asset_id_map.get(&asset_id).cloned().unwrap_or(asset_id);
+            if let Some(object) = asset_value.as_object_mut() {
+                object.insert("id".to_string(), Value::String(next_asset_id.clone()));
+            }
+            assets.insert(next_asset_id, asset_value);
+        }
+    }
+    if let Some(blocks) = snapshot.get_mut("blocks").and_then(Value::as_object_mut) {
+        for block in blocks.values_mut() {
+            if let Some(image_asset_id) = block
+                .get_mut("imageAssetId")
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+            {
+                if let Some(next_id) = asset_id_map.get(&image_asset_id) {
+                    if let Some(object) = block.as_object_mut() {
+                        object.insert("imageAssetId".to_string(), Value::String(next_id.clone()));
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[allow(dead_code)]
 fn collect_ref_ids_from_pages(pages: &[PageRecord], ref_kind: &str) -> Vec<String> {
     let mut ids = Vec::new();
@@ -1627,6 +1939,13 @@ fn option_bool_to_i64(value: Option<bool>) -> Option<i64> {
 
 fn option_i64_to_bool(value: Option<i64>) -> Option<bool> {
     value.map(|flag| flag != 0)
+}
+
+fn now_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -2224,6 +2543,444 @@ mod tests {
         archive
             .by_name(&format!("assets/{}", asset.relative_path))
             .expect("data table asset entry exists");
+    }
+
+    #[test]
+    fn page_package_import_adds_new_top_level_tree_with_new_ids() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        let asset = source
+            .write_asset(WriteAssetInput {
+                name: "image.png".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes: b"image".to_vec(),
+            })
+            .expect("write asset");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages[0].blocks.push(json!({
+            "id": "block_image",
+            "type": "image",
+            "assetId": asset.id,
+            "name": "image.png",
+            "mimeType": "image/png",
+            "caption": "",
+            "alt": "image"
+        }));
+        snapshot.pages.push(PageRecord {
+            id: "page_child".to_string(),
+            parent_id: Some("page_1".to_string()),
+            title: "Child".to_string(),
+            icon: None,
+            cover: None,
+            is_full_width: None,
+            is_small_text: None,
+            font_family: None,
+            show_outline: None,
+            blocks: vec![],
+            created_at: "2026-07-02T00:00:00.000Z".to_string(),
+            updated_at: "2026-07-02T00:00:00.000Z".to_string(),
+        });
+        source
+            .replace_workspace_backup(snapshot)
+            .expect("replace snapshot");
+        let archive = source
+            .export_page_package("page_1")
+            .expect("export package");
+
+        let target = Storage::open_in_memory_for_tests().expect("target opens");
+        let existing_snapshot = sample_snapshot();
+        target
+            .replace_workspace_backup(existing_snapshot.clone())
+            .expect("seed target");
+
+        let result = target
+            .import_page_package(archive)
+            .expect("import page package");
+        let imported = target.export_workspace_backup().expect("export target");
+
+        assert_ne!(result.root_page_id, "page_1");
+        assert!(imported.pages.iter().any(|page| page.id == "page_1"));
+        let imported_root = imported
+            .pages
+            .iter()
+            .find(|page| page.id == result.root_page_id)
+            .expect("imported root exists");
+        assert_eq!(imported_root.parent_id, None);
+        assert_eq!(imported_root.title, "Home");
+        let imported_child = imported
+            .pages
+            .iter()
+            .find(|page| page.parent_id.as_deref() == Some(result.root_page_id.as_str()))
+            .expect("imported child exists");
+        assert_ne!(imported_child.id, "page_child");
+        let image_block = imported_root
+            .blocks
+            .iter()
+            .find(|block| block.get("type").and_then(Value::as_str) == Some("image"))
+            .expect("image block exists");
+        assert_ne!(
+            image_block.get("id").and_then(Value::as_str),
+            Some("block_image")
+        );
+        assert!(image_block.get("assetId").and_then(Value::as_str).is_some());
+    }
+
+    #[test]
+    fn page_package_import_rejects_workspace_archives() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        source
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed source");
+        let workspace_archive = source
+            .export_workspace_archive()
+            .expect("export workspace archive");
+        let target = Storage::open_in_memory_for_tests().expect("target opens");
+        target
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed target");
+        let before = target.export_workspace_backup().expect("snapshot before");
+
+        let error = target
+            .import_page_package(workspace_archive)
+            .expect_err("workspace archive rejected");
+
+        assert_eq!(error.code, "invalid_payload");
+        assert_eq!(
+            target.export_workspace_backup().expect("snapshot after"),
+            before
+        );
+    }
+
+    #[test]
+    fn page_package_import_rewrites_resource_and_asset_references() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        let page_asset = source
+            .write_asset(WriteAssetInput {
+                name: "page-image.png".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes: b"page image".to_vec(),
+            })
+            .expect("write page asset");
+        let table_asset = source
+            .write_asset(WriteAssetInput {
+                name: "table-image.png".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes: b"table image".to_vec(),
+            })
+            .expect("write table asset");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages[0].blocks.push(json!({
+            "id": "block_image",
+            "type": "image",
+            "assetId": page_asset.id,
+            "name": "page-image.png",
+            "mimeType": "image/png",
+            "caption": "",
+            "alt": "image"
+        }));
+        snapshot.data_tables[0].snapshot["assets"] = json!({
+            table_asset.id.clone(): {
+                "id": table_asset.id,
+                "name": "table-image.png",
+                "mimeType": "image/png"
+            }
+        });
+        snapshot.data_tables[0].snapshot["blocks"] = json!({
+            "table_block_image": {
+                "id": "table_block_image",
+                "type": "image",
+                "imageAssetId": table_asset.id
+            }
+        });
+        source
+            .replace_workspace_backup(snapshot)
+            .expect("replace snapshot");
+        let archive = source
+            .export_page_package("page_1")
+            .expect("export package");
+        let page_legacy_asset_id = "asset_legacy_page";
+        let table_legacy_asset_id = "asset_legacy_table";
+        let archive = {
+            let mut source_archive =
+                zip::ZipArchive::new(Cursor::new(archive)).expect("read source archive");
+            let mut manifest: PagePackageManifest = {
+                let mut manifest_entry = source_archive
+                    .by_name(PAGE_PACKAGE_MANIFEST_ENTRY)
+                    .expect("page package manifest");
+                serde_json::from_reader(&mut manifest_entry).expect("parse manifest")
+            };
+            let mut asset_entries = Vec::new();
+            for asset in &manifest.assets {
+                let path = format!("assets/{}", asset.relative_path);
+                let mut entry = source_archive.by_name(&path).expect("asset entry");
+                let mut bytes = Vec::new();
+                entry.read_to_end(&mut bytes).expect("read asset entry");
+                asset_entries.push((path, asset.clone(), bytes));
+            }
+
+            for asset in &mut manifest.assets {
+                if asset.id == page_asset.id {
+                    asset.id = page_legacy_asset_id.to_string();
+                } else if asset.id == table_asset.id {
+                    asset.id = table_legacy_asset_id.to_string();
+                }
+            }
+            for page in &mut manifest.pages {
+                for block in &mut page.blocks {
+                    if block.get("assetId").and_then(Value::as_str) == Some(page_asset.id.as_str())
+                    {
+                        block["assetId"] = Value::String(page_legacy_asset_id.to_string());
+                    }
+                }
+            }
+            for data_table in &mut manifest.data_tables {
+                if let Some(assets) = data_table
+                    .snapshot
+                    .get_mut("assets")
+                    .and_then(Value::as_object_mut)
+                {
+                    if let Some(mut asset_value) = assets.remove(&table_asset.id) {
+                        if let Some(object) = asset_value.as_object_mut() {
+                            object.insert(
+                                "id".to_string(),
+                                Value::String(table_legacy_asset_id.to_string()),
+                            );
+                        }
+                        assets.insert(table_legacy_asset_id.to_string(), asset_value);
+                    }
+                }
+                if let Some(block) = data_table
+                    .snapshot
+                    .pointer_mut("/blocks/table_block_image")
+                    .and_then(Value::as_object_mut)
+                {
+                    block.insert(
+                        "imageAssetId".to_string(),
+                        Value::String(table_legacy_asset_id.to_string()),
+                    );
+                }
+            }
+
+            let mut bytes = Cursor::new(Vec::new());
+            {
+                let mut rewritten_archive = zip::ZipWriter::new(&mut bytes);
+                let metadata_options = zip::write::FileOptions::default()
+                    .compression_method(zip::CompressionMethod::Deflated);
+                rewritten_archive
+                    .start_file(PAGE_PACKAGE_MANIFEST_ENTRY, metadata_options)
+                    .expect("start page package manifest");
+                serde_json::to_writer(&mut rewritten_archive, &manifest).expect("write manifest");
+                rewritten_archive
+                    .start_file("assets/manifest.json", metadata_options)
+                    .expect("start asset manifest");
+                serde_json::to_writer(&mut rewritten_archive, &manifest.assets)
+                    .expect("write asset manifest");
+                for (path, asset, bytes) in asset_entries {
+                    rewritten_archive
+                        .start_file(path, archive_options_for_asset(&asset))
+                        .expect("start asset entry");
+                    rewritten_archive
+                        .write_all(&bytes)
+                        .expect("write asset entry");
+                }
+                rewritten_archive.finish().expect("finish archive");
+            }
+            bytes.into_inner()
+        };
+
+        let target = Storage::open_in_memory_for_tests().expect("target opens");
+        target
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed target");
+        let result = target
+            .import_page_package(archive)
+            .expect("import page package");
+        let imported = target.export_workspace_backup().expect("export target");
+        let imported_root = imported
+            .pages
+            .iter()
+            .find(|page| page.id == result.root_page_id)
+            .expect("imported root exists");
+        let imported_board_id = imported_root
+            .blocks
+            .iter()
+            .find(|block| block.get("type").and_then(Value::as_str) == Some("whiteboard"))
+            .and_then(|block| block.get("boardId"))
+            .and_then(Value::as_str)
+            .expect("imported board id");
+        let imported_database_id = imported_root
+            .blocks
+            .iter()
+            .find(|block| block.get("type").and_then(Value::as_str) == Some("data_table"))
+            .and_then(|block| block.get("databaseId"))
+            .and_then(Value::as_str)
+            .expect("imported database id");
+        let imported_mindmap_id = imported_root
+            .blocks
+            .iter()
+            .find(|block| block.get("type").and_then(Value::as_str) == Some("mindmap"))
+            .and_then(|block| block.get("mindmapId"))
+            .and_then(Value::as_str)
+            .expect("imported mindmap id");
+        let imported_page_asset_id = imported_root
+            .blocks
+            .iter()
+            .find(|block| block.get("type").and_then(Value::as_str) == Some("image"))
+            .and_then(|block| block.get("assetId"))
+            .and_then(Value::as_str)
+            .expect("imported page asset id");
+        let imported_data_table = imported
+            .data_tables
+            .iter()
+            .find(|data_table| data_table.id == imported_database_id)
+            .expect("imported data table");
+        let imported_table_assets = imported_data_table
+            .snapshot
+            .get("assets")
+            .and_then(Value::as_object)
+            .expect("imported table assets");
+        let imported_table_asset_id = imported_table_assets
+            .keys()
+            .next()
+            .expect("imported table asset id");
+        let imported_table_block_asset_id = imported_data_table
+            .snapshot
+            .pointer("/blocks/table_block_image/imageAssetId")
+            .and_then(Value::as_str)
+            .expect("imported table block asset id");
+
+        assert_ne!(imported_board_id, "board_1");
+        assert_ne!(imported_database_id, "database_1");
+        assert_ne!(imported_mindmap_id, "mindmap_1");
+        assert_ne!(imported_page_asset_id, page_legacy_asset_id);
+        assert_ne!(imported_table_asset_id, table_legacy_asset_id);
+        assert_eq!(imported_table_block_asset_id, imported_table_asset_id);
+        assert_eq!(
+            imported_data_table
+                .snapshot
+                .pointer("/database/id")
+                .and_then(Value::as_str),
+            Some(imported_database_id)
+        );
+        assert_eq!(
+            target
+                .read_asset(imported_page_asset_id)
+                .expect("read imported page asset"),
+            b"page image"
+        );
+        assert_eq!(
+            target
+                .read_asset(imported_table_asset_id)
+                .expect("read imported table asset"),
+            b"table image"
+        );
+    }
+
+    #[test]
+    fn page_package_import_rejects_invalid_manifest() {
+        let mut bytes = Cursor::new(Vec::new());
+        {
+            let mut archive = zip::ZipWriter::new(&mut bytes);
+            archive
+                .start_file(
+                    PAGE_PACKAGE_MANIFEST_ENTRY,
+                    zip::write::FileOptions::default()
+                        .compression_method(zip::CompressionMethod::Deflated),
+                )
+                .expect("start manifest file");
+            serde_json::to_writer(
+                &mut archive,
+                &PagePackageManifest {
+                    kind: "zhixi.other".to_string(),
+                    version: PAGE_PACKAGE_VERSION,
+                    root_page_id: "page_1".to_string(),
+                    pages: sample_snapshot().pages,
+                    boards: Vec::new(),
+                    data_tables: Vec::new(),
+                    mindmaps: Vec::new(),
+                    assets: Vec::new(),
+                },
+            )
+            .expect("write manifest");
+            archive.finish().expect("finish archive");
+        }
+        let target = Storage::open_in_memory_for_tests().expect("target opens");
+        target
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed target");
+        let before = target.export_workspace_backup().expect("snapshot before");
+
+        let error = target
+            .import_page_package(bytes.into_inner())
+            .expect_err("invalid manifest rejected");
+
+        assert_eq!(error.code, "invalid_payload");
+        assert_eq!(
+            target.export_workspace_backup().expect("snapshot after"),
+            before
+        );
+    }
+
+    #[test]
+    fn page_package_import_rejects_missing_asset_entries_without_partial_insert() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        let asset = source
+            .write_asset(WriteAssetInput {
+                name: "missing-entry.png".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes: b"image".to_vec(),
+            })
+            .expect("write asset");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages[0].blocks.push(json!({
+            "id": "block_image",
+            "type": "image",
+            "assetId": asset.id,
+            "name": "missing-entry.png",
+            "mimeType": "image/png",
+            "caption": "",
+            "alt": "image"
+        }));
+        source
+            .replace_workspace_backup(snapshot)
+            .expect("replace snapshot");
+        let archive = source
+            .export_page_package("page_1")
+            .expect("export package");
+        let mut archive = zip::ZipArchive::new(Cursor::new(archive)).expect("read archive");
+        let manifest: PagePackageManifest = {
+            let mut manifest_entry = archive
+                .by_name(PAGE_PACKAGE_MANIFEST_ENTRY)
+                .expect("page package manifest");
+            serde_json::from_reader(&mut manifest_entry).expect("parse manifest")
+        };
+        let mut bytes = Cursor::new(Vec::new());
+        {
+            let mut broken_archive = zip::ZipWriter::new(&mut bytes);
+            broken_archive
+                .start_file(
+                    PAGE_PACKAGE_MANIFEST_ENTRY,
+                    zip::write::FileOptions::default()
+                        .compression_method(zip::CompressionMethod::Deflated),
+                )
+                .expect("start manifest file");
+            serde_json::to_writer(&mut broken_archive, &manifest).expect("write manifest");
+            broken_archive.finish().expect("finish archive");
+        }
+        let target = Storage::open_in_memory_for_tests().expect("target opens");
+        target
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed target");
+        let before = target.export_workspace_backup().expect("snapshot before");
+
+        let error = target
+            .import_page_package(bytes.into_inner())
+            .expect_err("missing asset entry rejected");
+
+        assert_eq!(error.code, "not_found");
+        assert_eq!(
+            target.export_workspace_backup().expect("snapshot after"),
+            before
+        );
     }
 
     #[test]
