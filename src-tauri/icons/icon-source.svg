@@ -1,12 +1,23 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#f7f2ff" />
-  <path
-    fill="#7c3aed"
-    d="M296 48 128 282h114v182l154-236H282l80-180h-66Z"
-  />
-  <path
-    fill="#38bdf8"
-    d="M160 328h86v92l-16 24v-92h-87l17-24Zm109-144 62-136h31l-80 180h114l-16 24H243l26-68Z"
-    opacity=".9"
-  />
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="zhixi-icon-title" data-zhixi-logo="perch-page">
+  <title id="zhixi-icon-title">知栖栖页图标</title>
+  <defs>
+    <linearGradient id="zhixi-bg" x1="72" y1="64" x2="430" y2="438" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F9F4EA" />
+      <stop offset="1" stop-color="#DCEFE6" />
+    </linearGradient>
+    <linearGradient id="zhixi-leaf" x1="154" y1="148" x2="354" y2="372" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0E766E" />
+      <stop offset="1" stop-color="#378F5D" />
+    </linearGradient>
+    <linearGradient id="zhixi-page" x1="170" y1="164" x2="322" y2="324" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" />
+      <stop offset="1" stop-color="#E9F4EC" />
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="448" height="448" rx="106" fill="url(#zhixi-bg)" />
+  <path fill="url(#zhixi-leaf)" d="M154 316c62-70 132-110 214-122 13-2 23 11 17 23-34 72-92 123-172 157-18 8-38-9-28-27 7-13 18-24 32-31h-63Z" />
+  <path fill="url(#zhixi-page)" d="M166 164c67 9 123 32 168 70-54 15-104 44-150 86-19-43-25-95-18-156Z" />
+  <path fill="#D9ECE4" d="M178 182c41 7 77 22 109 43-34 12-66 31-96 57-12-30-16-63-13-100Z" />
+  <path fill="none" stroke="#233630" stroke-width="26" stroke-linecap="round" d="M164 348h146" />
+  <circle cx="352" cy="158" r="18" fill="#DDAE4E" />
 </svg>
