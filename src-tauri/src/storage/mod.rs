@@ -578,11 +578,14 @@ impl Storage {
             )));
         }
         let branch_id_set = branch_ids.iter().collect::<std::collections::HashSet<_>>();
-        let pages = self
+        let mut pages = self
             .load_pages()?
             .into_iter()
             .filter(|page| branch_id_set.contains(&page.id))
             .collect::<Vec<_>>();
+        if let Some(root_page) = pages.iter_mut().find(|page| page.id == page_id) {
+            root_page.parent_id = None;
+        }
         let board_ids = collect_ref_ids_from_pages(&pages, "board");
         let data_table_ids = collect_ref_ids_from_pages(&pages, "data_table");
         let mindmap_ids = collect_ref_ids_from_pages(&pages, "mindmap");
@@ -1811,6 +1814,16 @@ fn validate_page_package_manifest(manifest: &PagePackageManifest) -> StorageResu
         manifest.assets.len(),
         "duplicate asset id in page package",
     )?;
+    let root_page = manifest
+        .pages
+        .iter()
+        .find(|page| page.id == manifest.root_page_id)
+        .ok_or_else(|| StorageError::invalid_payload("page package root is missing"))?;
+    if root_page.parent_id.is_some() {
+        return Err(StorageError::invalid_payload(
+            "page package root must not have a parent",
+        ));
+    }
 
     for page in &manifest.pages {
         if page.id != manifest.root_page_id {
@@ -2674,6 +2687,67 @@ mod tests {
     }
 
     #[test]
+    fn page_package_export_normalizes_nested_root_parent() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages.push(PageRecord {
+            id: "page_nested".to_string(),
+            parent_id: Some("page_1".to_string()),
+            title: "Nested".to_string(),
+            icon: None,
+            cover: None,
+            is_full_width: None,
+            is_small_text: None,
+            font_family: None,
+            show_outline: None,
+            blocks: vec![],
+            created_at: "2026-07-02T00:00:00.000Z".to_string(),
+            updated_at: "2026-07-02T00:00:00.000Z".to_string(),
+        });
+        snapshot.pages.push(PageRecord {
+            id: "page_nested_child".to_string(),
+            parent_id: Some("page_nested".to_string()),
+            title: "Nested Child".to_string(),
+            icon: None,
+            cover: None,
+            is_full_width: None,
+            is_small_text: None,
+            font_family: None,
+            show_outline: None,
+            blocks: vec![],
+            created_at: "2026-07-02T00:00:00.000Z".to_string(),
+            updated_at: "2026-07-02T00:00:00.000Z".to_string(),
+        });
+        source
+            .replace_workspace_backup(snapshot)
+            .expect("replace snapshot");
+
+        let archive = source
+            .export_page_package("page_nested")
+            .expect("export nested package");
+        let mut archive = zip::ZipArchive::new(Cursor::new(archive)).expect("read archive");
+        let manifest: PagePackageManifest = {
+            let mut manifest_entry = archive
+                .by_name(PAGE_PACKAGE_MANIFEST_ENTRY)
+                .expect("page package manifest");
+            serde_json::from_reader(&mut manifest_entry).expect("parse manifest")
+        };
+        let root = manifest
+            .pages
+            .iter()
+            .find(|page| page.id == "page_nested")
+            .expect("nested root in manifest");
+        let child = manifest
+            .pages
+            .iter()
+            .find(|page| page.id == "page_nested_child")
+            .expect("nested child in manifest");
+
+        assert_eq!(root.parent_id, None);
+        assert_eq!(child.parent_id.as_deref(), Some("page_nested"));
+    }
+
+    #[test]
     fn page_package_fails_when_page_media_asset_is_missing() {
         let source = Storage::open_in_memory_for_tests().expect("source opens");
         let mut snapshot = sample_snapshot();
@@ -3121,6 +3195,35 @@ mod tests {
     }
 
     #[test]
+    fn page_package_import_rejects_root_with_parent() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        source
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed source");
+        let archive = source
+            .export_page_package("page_1")
+            .expect("export package");
+        let archive = rewrite_page_package_manifest(archive, |manifest| {
+            manifest.pages[0].parent_id = Some("page_missing".to_string());
+        });
+        let target = Storage::open_in_memory_for_tests().expect("target opens");
+        target
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed target");
+        let before = target.export_workspace_backup().expect("snapshot before");
+
+        let error = target
+            .import_page_package(archive)
+            .expect_err("root parent rejected");
+
+        assert_eq!(error.code, "invalid_payload");
+        assert_eq!(
+            target.export_workspace_backup().expect("snapshot after"),
+            before
+        );
+    }
+
+    #[test]
     fn page_package_import_rejects_extra_non_root_top_level_page() {
         let source = Storage::open_in_memory_for_tests().expect("source opens");
         source
@@ -3154,6 +3257,55 @@ mod tests {
         let error = target
             .import_page_package(archive)
             .expect_err("extra top-level page rejected");
+
+        assert_eq!(error.code, "invalid_payload");
+        assert_eq!(
+            target.export_workspace_backup().expect("snapshot after"),
+            before
+        );
+    }
+
+    #[test]
+    fn page_package_import_rejects_root_involved_cycle() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages.push(PageRecord {
+            id: "page_child".to_string(),
+            parent_id: Some("page_1".to_string()),
+            title: "Child".to_string(),
+            icon: None,
+            cover: None,
+            is_full_width: None,
+            is_small_text: None,
+            font_family: None,
+            show_outline: None,
+            blocks: vec![],
+            created_at: "2026-07-02T00:00:00.000Z".to_string(),
+            updated_at: "2026-07-02T00:00:00.000Z".to_string(),
+        });
+        source
+            .replace_workspace_backup(snapshot)
+            .expect("seed source");
+        let archive = source
+            .export_page_package("page_1")
+            .expect("export package");
+        let archive = rewrite_page_package_manifest(archive, |manifest| {
+            let root = manifest
+                .pages
+                .iter_mut()
+                .find(|page| page.id == "page_1")
+                .expect("root page");
+            root.parent_id = Some("page_child".to_string());
+        });
+        let target = Storage::open_in_memory_for_tests().expect("target opens");
+        target
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed target");
+        let before = target.export_workspace_backup().expect("snapshot before");
+
+        let error = target
+            .import_page_package(archive)
+            .expect_err("root-involved cycle rejected");
 
         assert_eq!(error.code, "invalid_payload");
         assert_eq!(
