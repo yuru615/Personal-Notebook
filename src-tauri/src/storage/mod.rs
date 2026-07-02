@@ -2894,6 +2894,12 @@ mod tests {
             "caption": "",
             "alt": "image"
         }));
+        snapshot.pages[0].blocks.push(json!({
+            "id": "block_child_page",
+            "type": "child_page",
+            "pageId": "page_child",
+            "title": "Child"
+        }));
         snapshot.pages.push(PageRecord {
             id: "page_child".to_string(),
             parent_id: Some("page_1".to_string()),
@@ -2941,6 +2947,17 @@ mod tests {
             .find(|page| page.parent_id.as_deref() == Some(result.root_page_id.as_str()))
             .expect("imported child exists");
         assert_ne!(imported_child.id, "page_child");
+        let child_page_block = imported_root
+            .blocks
+            .iter()
+            .find(|block| block.get("type").and_then(Value::as_str) == Some("child_page"))
+            .expect("child page block exists");
+        let child_page_id = child_page_block
+            .get("pageId")
+            .and_then(Value::as_str)
+            .expect("child page block page id");
+        assert_ne!(child_page_id, "page_child");
+        assert_eq!(child_page_id, imported_child.id);
         let image_block = imported_root
             .blocks
             .iter()
