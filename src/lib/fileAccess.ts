@@ -27,6 +27,11 @@ export interface SaveBinaryFileOptions {
   filters: FileAccessFilter[]
 }
 
+export interface PickSaveFilePathOptions {
+  defaultPath: string
+  filters: FileAccessFilter[]
+}
+
 export interface OpenedTextFile {
   name: string
   contents: string
@@ -72,7 +77,7 @@ export async function saveTextFile(options: SaveTextFileOptions) {
 
 export async function saveBinaryFile(options: SaveBinaryFileOptions) {
   if (isDesktopRuntime()) {
-    const path = await pickSavePath(options.defaultPath, options.filters)
+    const path = await pickSaveFilePath(options)
 
     if (!path) {
       return
@@ -89,6 +94,14 @@ export async function saveBinaryFile(options: SaveBinaryFileOptions) {
       : new Blob([toOwnedArrayBuffer(options.contents)]),
     options.defaultPath,
   )
+}
+
+export async function pickSaveFilePath(options: PickSaveFilePathOptions) {
+  if (!isDesktopRuntime()) {
+    return null
+  }
+
+  return pickSavePath(options.defaultPath, options.filters)
 }
 
 export async function openTextFile(options: OpenTextFileOptions) {

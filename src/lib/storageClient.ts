@@ -32,6 +32,7 @@ export interface AssetMeta {
 export interface WorkspaceStorageClient {
   exportWorkspaceBackup(): Promise<WorkspaceSnapshot | null>
   replaceWorkspaceBackup(snapshot: WorkspaceSnapshot): Promise<void>
+  exportWorkspaceArchiveToPath(path: string): Promise<void>
   exportWorkspaceArchive(): Promise<Uint8Array>
   importWorkspaceArchive(bytes: Uint8Array): Promise<void>
   savePage(page: PageRecord): Promise<void>
@@ -54,6 +55,10 @@ export function createTauriStorageClient(): WorkspaceStorageClient {
 
     replaceWorkspaceBackup(snapshot) {
       return invoke<void>('replace_workspace_backup', { payload: snapshot })
+    },
+
+    exportWorkspaceArchiveToPath(path) {
+      return invoke<void>('export_workspace_archive_to_path', { path })
     },
 
     async exportWorkspaceArchive() {

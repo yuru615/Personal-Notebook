@@ -4,6 +4,7 @@ import {
   openBinaryFile,
   openLocalFilePath,
   openTextFile,
+  pickSaveFilePath,
   saveBinaryFile,
   saveTextFile,
 } from './fileAccess'
@@ -124,6 +125,29 @@ describe('fileAccess', () => {
     })
 
     expect(fs.writeFile).toHaveBeenCalledWith('/tmp/page.zip', bytes)
+  })
+
+  it('returns a selected save path without writing bytes in desktop runtime', async () => {
+    Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    })
+
+    const dialog = await import('@tauri-apps/plugin-dialog')
+    const fs = await import('@tauri-apps/plugin-fs')
+    vi.mocked(dialog.save).mockResolvedValue('/tmp/page.zip')
+
+    const result = await pickSaveFilePath({
+      defaultPath: 'page.zip',
+      filters: [{ name: 'ZIP', extensions: ['zip'] }],
+    })
+
+    expect(result).toBe('/tmp/page.zip')
+    expect(dialog.save).toHaveBeenCalledWith({
+      defaultPath: 'page.zip',
+      filters: [{ name: 'ZIP', extensions: ['zip'] }],
+    })
+    expect(fs.writeFile).not.toHaveBeenCalled()
   })
 
   it('reads binary files through Tauri when running on desktop', async () => {

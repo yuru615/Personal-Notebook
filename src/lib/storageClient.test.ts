@@ -117,15 +117,19 @@ describe('createTauriStorageClient', () => {
   it('exports and imports complete workspace archive bytes', async () => {
     const { createTauriStorageClient } = await import('./storageClient')
     const bytes = new Uint8Array([80, 75, 3, 4])
-    invoke.mockResolvedValueOnce(bytes).mockResolvedValueOnce(undefined)
+    invoke.mockResolvedValueOnce(undefined).mockResolvedValueOnce(bytes).mockResolvedValueOnce(undefined)
 
     const client = createTauriStorageClient()
 
+    await client.exportWorkspaceArchiveToPath('/tmp/page.zip')
     await expect(client.exportWorkspaceArchive()).resolves.toBe(bytes)
     await client.importWorkspaceArchive(bytes)
 
-    expect(invoke).toHaveBeenNthCalledWith(1, 'export_workspace_archive')
-    expect(invoke).toHaveBeenNthCalledWith(2, 'import_workspace_archive', { bytes })
+    expect(invoke).toHaveBeenNthCalledWith(1, 'export_workspace_archive_to_path', {
+      path: '/tmp/page.zip',
+    })
+    expect(invoke).toHaveBeenNthCalledWith(2, 'export_workspace_archive')
+    expect(invoke).toHaveBeenNthCalledWith(3, 'import_workspace_archive', { bytes })
   })
 
   it('normalizes archive bytes returned from Tauri into a Uint8Array', async () => {

@@ -32,6 +32,14 @@ pub fn export_workspace_archive(state: State<'_, StorageState>) -> StorageResult
 }
 
 #[tauri::command]
+pub fn export_workspace_archive_to_path(
+    state: State<'_, StorageState>,
+    path: String,
+) -> StorageResult<()> {
+    state.with_storage(|storage| storage.export_workspace_archive_to_path(path))
+}
+
+#[tauri::command]
 pub fn import_workspace_archive(
     state: State<'_, StorageState>,
     bytes: Vec<u8>,

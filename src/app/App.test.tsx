@@ -13,9 +13,11 @@ const desktopLifecycle = vi.hoisted(() => ({
   registerDesktopPendingSaveFlush: vi.fn(async () => () => undefined),
 }))
 const fileAccess = vi.hoisted(() => ({
+  pickSaveFilePath: vi.fn(async () => '/tmp/产品规划.zip'),
   saveBinaryFile: vi.fn(async () => undefined),
 }))
 const archiveStorage = vi.hoisted(() => ({
+  exportWorkspaceArchiveToPath: vi.fn(async () => undefined),
   exportWorkspaceArchive: vi.fn(async () => new Uint8Array([80, 75, 3, 4])),
   importWorkspaceArchive: vi.fn(async () => undefined),
 }))
@@ -32,6 +34,7 @@ vi.mock('../lib/fileAccess', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/fileAccess')>()
   return {
     ...actual,
+    pickSaveFilePath: fileAccess.pickSaveFilePath,
     saveBinaryFile: fileAccess.saveBinaryFile,
   }
 })
@@ -40,6 +43,7 @@ vi.mock('../lib/assets', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/assets')>()
   return {
     ...actual,
+    exportWorkspaceArchiveToPath: archiveStorage.exportWorkspaceArchiveToPath,
     exportWorkspaceArchive: archiveStorage.exportWorkspaceArchive,
     importWorkspaceArchive: archiveStorage.importWorkspaceArchive,
   }
@@ -74,8 +78,12 @@ describe('App', () => {
   let scrollTo: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
+    Reflect.deleteProperty(globalThis, '__TAURI_INTERNALS__')
     desktopLifecycle.registerDesktopPendingSaveFlush.mockResolvedValue(() => undefined)
+    fileAccess.pickSaveFilePath.mockClear()
+    fileAccess.pickSaveFilePath.mockResolvedValue('/tmp/产品规划.zip')
     fileAccess.saveBinaryFile.mockClear()
+    archiveStorage.exportWorkspaceArchiveToPath.mockClear()
     archiveStorage.exportWorkspaceArchive.mockClear()
     archiveStorage.importWorkspaceArchive.mockClear()
     scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
@@ -83,6 +91,7 @@ describe('App', () => {
 
   afterEach(() => {
     scrollTo.mockRestore()
+    Reflect.deleteProperty(globalThis, '__TAURI_INTERNALS__')
   })
 
   it('bootstraps an empty repository once when StrictMode replays effects', async () => {
@@ -457,6 +466,54 @@ describe('App', () => {
         }),
       )
     })
+  })
+
+  it('exports complete backups directly to the selected desktop path without loading archive bytes in the webview', async () => {
+    Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    })
+    const user = userEvent.setup()
+    const pageId = 'page_archive_desktop'
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: '产品规划',
+          icon: null,
+          cover: null,
+          blocks: [],
+          createdAt: '2026-07-02T00:00:00.000Z',
+          updatedAt: '2026-07-02T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+
+    render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={[`/pages/${pageId}`]}
+      />,
+    )
+
+    await screen.findByDisplayValue('产品规划')
+    await user.click(screen.getByRole('button', { name: '页面菜单' }))
+    await user.click(screen.getByRole('button', { name: '创建完整备份' }))
+
+    await waitFor(() => {
+      expect(fileAccess.pickSaveFilePath).toHaveBeenCalledWith({
+        defaultPath: '产品规划.zip',
+        filters: [{ name: 'ZIP', extensions: ['zip'] }],
+      })
+    })
+    expect(archiveStorage.exportWorkspaceArchiveToPath).toHaveBeenCalledWith('/tmp/产品规划.zip')
+    expect(archiveStorage.exportWorkspaceArchive).not.toHaveBeenCalled()
+    expect(fileAccess.saveBinaryFile).not.toHaveBeenCalled()
   })
 
   it('keeps the page directory visible on data table pages', async () => {

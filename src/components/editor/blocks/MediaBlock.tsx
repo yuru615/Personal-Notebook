@@ -10,6 +10,82 @@ interface MediaBlockProps {
   onChange: (block: MediaBlockRecord) => void
 }
 
+async function createVideoFirstFramePoster(assetUrl: string): Promise<string | null> {
+  if (typeof document === 'undefined') {
+    return null
+  }
+
+  return new Promise((resolve) => {
+    const video = document.createElement('video')
+    let timeoutId: ReturnType<typeof window.setTimeout> | null = null
+    let settled = false
+
+    const settle = (posterUrl: string | null) => {
+      if (settled) {
+        return
+      }
+
+      settled = true
+      if (timeoutId) {
+        window.clearTimeout(timeoutId)
+      }
+      video.removeEventListener('loadeddata', handleLoadedData)
+      video.removeEventListener('error', handleError)
+      video.removeAttribute('src')
+      video.load()
+      resolve(posterUrl)
+    }
+
+    const captureFrame = () => {
+      if (settled) {
+        return
+      }
+
+      try {
+        const width = video.videoWidth
+        const height = video.videoHeight
+
+        if (!width || !height) {
+          settle(null)
+          return
+        }
+
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+
+        const context = canvas.getContext('2d')
+        if (!context) {
+          settle(null)
+          return
+        }
+
+        context.drawImage(video, 0, 0, width, height)
+        settle(canvas.toDataURL('image/png'))
+      } catch {
+        settle(null)
+      }
+    }
+
+    function handleLoadedData() {
+      captureFrame()
+    }
+
+    function handleError() {
+      settle(null)
+    }
+
+    video.muted = true
+    video.playsInline = true
+    video.preload = 'auto'
+    video.addEventListener('loadeddata', handleLoadedData, { once: true })
+    video.addEventListener('error', handleError, { once: true })
+    timeoutId = window.setTimeout(() => settle(null), 7000)
+    video.src = assetUrl
+    video.load()
+  })
+}
+
 const mediaLabels = {
   image: {
     title: '图片',
@@ -27,6 +103,7 @@ const mediaLabels = {
 
 export function MediaBlock({ block, onChange }: MediaBlockProps) {
   const [assetUrl, setAssetUrl] = useState<string | null>(null)
+  const [videoPosterUrl, setVideoPosterUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [hasLoadError, setHasLoadError] = useState(false)
   const labels = mediaLabels[block.type]
@@ -67,6 +144,25 @@ export function MediaBlock({ block, onChange }: MediaBlockProps) {
     }
   }, [block.assetId])
 
+  useEffect(() => {
+    let cancelled = false
+    setVideoPosterUrl(null)
+
+    if (block.type !== 'video' || !assetUrl) {
+      return
+    }
+
+    void createVideoFirstFramePoster(assetUrl).then((posterUrl) => {
+      if (!cancelled) {
+        setVideoPosterUrl(posterUrl)
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [assetUrl, block.type])
+
   async function handleSelectAsset() {
     setIsLoading(true)
     try {
@@ -99,8 +195,10 @@ export function MediaBlock({ block, onChange }: MediaBlockProps) {
           }}
           disabled={isLoading}
         >
-          <Upload size={18} aria-hidden="true" />
-          <span>{isLoading ? '上传中...' : labels.upload}</span>
+          <span className="media-block-upload-icon" aria-hidden="true">
+            <Upload size={20} />
+          </span>
+          <span className="media-block-upload-text">{isLoading ? '上传中...' : labels.upload}</span>
         </button>
       )
     }
@@ -124,14 +222,49 @@ export function MediaBlock({ block, onChange }: MediaBlockProps) {
     }
 
     if (block.type === 'image') {
-      return <img className="media-block-image" src={assetUrl} alt={block.alt || block.name} />
+      return (
+        <div className="media-block-surface">
+          <img className="media-block-image" src={assetUrl} alt={block.alt || block.name} />
+        </div>
+      )
     }
 
     if (block.type === 'video') {
-      return <video className="media-block-video" src={assetUrl} controls preload="metadata" />
+      return (
+        <div className="media-block-surface">
+          <video
+            className="media-block-video"
+            src={assetUrl}
+            poster={videoPosterUrl ?? undefined}
+            controls
+            preload="metadata"
+          />
+        </div>
+      )
     }
 
-    return <audio className="media-block-audio" src={assetUrl} controls preload="metadata" />
+    return (
+      <div className="media-block-surface">
+        <div className="media-block-audio-card">
+          <div className="media-block-audio-art" aria-hidden="true">
+            <Music size={22} />
+          </div>
+          <div className="media-block-audio-content">
+            <div className="media-block-audio-meta">
+              <span>{block.name || labels.title}</span>
+              {block.mimeType ? <small>{block.mimeType}</small> : null}
+            </div>
+            <audio
+              className="media-block-audio"
+              src={assetUrl}
+              controls
+              preload="metadata"
+              aria-label={block.name ? `播放 ${block.name}` : '播放音频'}
+            />
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (

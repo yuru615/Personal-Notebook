@@ -103,6 +103,10 @@ export function exportWorkspaceArchive() {
   return storageClient.exportWorkspaceArchive()
 }
 
+export function exportWorkspaceArchiveToPath(path: string) {
+  return storageClient.exportWorkspaceArchiveToPath(path)
+}
+
 export function importWorkspaceArchive(bytes: Uint8Array) {
   return storageClient.importWorkspaceArchive(bytes)
 }

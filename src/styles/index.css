@@ -1245,8 +1245,8 @@ a {
 
 .media-block {
   display: grid;
-  gap: 8px;
-  margin: 6px 0;
+  gap: 10px;
+  margin: 8px 0 12px;
   min-width: 0;
 }
 
@@ -1263,7 +1263,7 @@ a {
   align-items: center;
   gap: 6px;
   min-width: 0;
-  color: #6f6d68;
+  color: #6c665d;
   font-size: 13px;
 }
 
@@ -1281,12 +1281,17 @@ a {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border: 1px solid #ddd9d2;
-  border-radius: 6px;
-  background: #ffffff;
+  border: 1px solid #e2dbd1;
+  border-radius: 8px;
+  background: #fffdf9;
   color: #4f4b46;
   cursor: pointer;
   font-size: 13px;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease;
 }
 
 .media-block-replace {
@@ -1297,14 +1302,21 @@ a {
 
 .media-block-upload {
   width: 100%;
-  min-height: 96px;
-  padding: 18px;
+  min-height: 148px;
+  padding: 22px;
   border-style: dashed;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #fffdf9 0%, #f8f4ed 100%);
+  color: #6d6256;
+  flex-direction: column;
 }
 
 .media-block-replace:hover,
 .media-block-upload:hover {
-  background: #f8f7f4;
+  border-color: #cfc3b4;
+  background: #fffaf2;
+  box-shadow: 0 8px 22px rgba(42, 36, 28, 0.07);
+  color: #3f3932;
 }
 
 .media-block-replace:disabled,
@@ -1313,10 +1325,41 @@ a {
   opacity: 0.7;
 }
 
+.media-block-upload-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid #e6ded2;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #645b50;
+  box-shadow: 0 8px 18px rgba(42, 36, 28, 0.08);
+}
+
+.media-block-upload-text {
+  font-weight: 500;
+}
+
 .media-block-preview {
   display: grid;
   justify-items: start;
+  align-items: start;
   min-width: 0;
+}
+
+.media-block-surface {
+  display: inline-grid;
+  justify-items: start;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 6px;
+  border: 1px solid #e7e0d7;
+  border-radius: 12px;
+  background: #fffdf9;
+  box-shadow: 0 12px 30px rgba(42, 36, 28, 0.08);
 }
 
 img.media-block-image {
@@ -1325,23 +1368,84 @@ img.media-block-image {
   width: auto;
   height: auto;
   max-height: min(540px, 70vh);
-  border-radius: 6px;
+  border-radius: 8px;
   object-fit: contain;
   background: #f4f2ee;
+}
+
+.media-block-kind-video .media-block-surface {
+  width: min(100%, 760px);
+  background: #181715;
 }
 
 video.media-block-video {
   display: block;
   width: 100%;
   max-height: min(540px, 70vh);
-  border-radius: 6px;
+  border-radius: 8px;
   object-fit: contain;
-  background: #f4f2ee;
+  background: #181715;
+}
+
+.media-block-kind-audio .media-block-surface {
+  width: min(100%, 560px);
+  padding: 12px;
+}
+
+.media-block-audio-card {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.media-block-audio-art {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #49675f 0%, #d6b170 52%, #7d9ab4 100%);
+  color: rgba(255, 255, 255, 0.9);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
+}
+
+.media-block-audio-content {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.media-block-audio-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  color: #4b453d;
+  font-size: 13px;
+}
+
+.media-block-audio-meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-block-audio-meta small {
+  flex: 0 0 auto;
+  color: #91877a;
+  font-size: 11px;
 }
 
 .media-block-audio {
   display: block;
   width: 100%;
+  min-width: 0;
 }
 
 .media-block-missing {
@@ -1350,9 +1454,9 @@ video.media-block-video {
   gap: 8px;
   min-height: 72px;
   padding: 14px;
-  border: 1px solid #ece8df;
-  border-radius: 6px;
-  background: #fbfaf8;
+  border: 1px solid #e7e0d7;
+  border-radius: 10px;
+  background: #fffdf9;
   color: #8a8176;
   font-size: 13px;
 }

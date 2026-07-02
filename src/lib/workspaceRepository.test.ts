@@ -15,6 +15,9 @@ function createRepository() {
       calls.push('replaceWorkspaceBackup')
       snapshot = structuredClone(nextSnapshot)
     },
+    async exportWorkspaceArchiveToPath() {
+      return undefined
+    },
     async exportWorkspaceArchive() {
       return new Uint8Array()
     },

@@ -7,7 +7,7 @@ mod search;
 
 use std::{
     fs,
-    io::{Cursor, Read, Write},
+    io::{self, BufWriter, Cursor, Read, Seek, Write},
     path::{Path, PathBuf},
     sync::Mutex,
 };
@@ -308,36 +308,48 @@ impl Storage {
     }
 
     pub fn export_workspace_archive(&self) -> StorageResult<Vec<u8>> {
+        self.write_workspace_archive(Cursor::new(Vec::new()))
+            .map(|cursor| cursor.into_inner())
+    }
+
+    pub fn export_workspace_archive_to_path(&self, path: impl AsRef<Path>) -> StorageResult<()> {
+        let file = fs::File::create(path)?;
+        let writer = BufWriter::new(file);
+        let mut writer = self.write_workspace_archive(writer)?;
+        writer.flush()?;
+        Ok(())
+    }
+
+    fn write_workspace_archive<W: Write + Seek>(&self, writer: W) -> StorageResult<W> {
         let snapshot = self.export_workspace_backup()?;
         let assets = assets::load_assets(&self.connection)?;
-        let cursor = Cursor::new(Vec::new());
-        let mut archive = zip::ZipWriter::new(cursor);
-        let options =
+        let mut archive = zip::ZipWriter::new(writer);
+        let metadata_options =
             zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
         archive
-            .start_file("workspace.json", options)
+            .start_file("workspace.json", metadata_options)
             .map_err(zip_error)?;
-        archive.write_all(serde_json::to_string_pretty(&snapshot)?.as_bytes())?;
+        serde_json::to_writer_pretty(&mut archive, &snapshot)?;
 
         archive
-            .start_file("assets/manifest.json", options)
+            .start_file("assets/manifest.json", metadata_options)
             .map_err(zip_error)?;
-        archive.write_all(serde_json::to_string_pretty(&assets)?.as_bytes())?;
+        serde_json::to_writer_pretty(&mut archive, &assets)?;
 
         for asset in assets {
             let path = assets::asset_file_path(&self.connection, &self.assets_dir, &asset.id)?;
-            let bytes = fs::read(path)?;
+            let mut asset_file = fs::File::open(path)?;
             archive
-                .start_file(format!("assets/{}", asset.relative_path), options)
+                .start_file(
+                    format!("assets/{}", asset.relative_path),
+                    archive_options_for_asset(&asset),
+                )
                 .map_err(zip_error)?;
-            archive.write_all(&bytes)?;
+            io::copy(&mut asset_file, &mut archive)?;
         }
 
-        archive
-            .finish()
-            .map(|cursor| cursor.into_inner())
-            .map_err(zip_error)
+        archive.finish().map_err(zip_error)
     }
 
     pub fn import_workspace_archive(&self, bytes: Vec<u8>) -> StorageResult<()> {
@@ -1001,6 +1013,12 @@ fn insert_ordered_object_rows(
     Ok(())
 }
 
+fn archive_options_for_asset(asset: &AssetMeta) -> zip::write::FileOptions {
+    zip::write::FileOptions::default()
+        .compression_method(zip::CompressionMethod::Stored)
+        .large_file(asset.byte_size > u32::MAX as i64)
+}
+
 fn zip_error(error: zip::result::ZipError) -> StorageError {
     match error {
         zip::result::ZipError::Io(error) => StorageError::io(error),
@@ -1394,6 +1412,87 @@ mod tests {
             target.read_asset(&asset.id).expect("read imported"),
             b"image"
         );
+    }
+
+    #[test]
+    fn workspace_archive_exports_directly_to_file_path() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        let asset = source
+            .write_asset(WriteAssetInput {
+                name: "image.png".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes: b"image".to_vec(),
+            })
+            .expect("write asset");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages[0].blocks.push(json!({
+            "id": "block_image",
+            "type": "image",
+            "assetId": asset.id,
+            "name": "image.png",
+            "mimeType": "image/png",
+            "caption": "",
+            "alt": "image"
+        }));
+        source
+            .replace_workspace_backup(snapshot.clone())
+            .expect("replace snapshot");
+        let archive_path = unique_test_assets_dir().with_extension("zip");
+
+        source
+            .export_workspace_archive_to_path(&archive_path)
+            .expect("export workspace archive to path");
+
+        let target = Storage::open_in_memory_for_tests().expect("target opens");
+        target
+            .import_workspace_archive(std::fs::read(&archive_path).expect("read archive file"))
+            .expect("import workspace archive");
+
+        assert_eq!(
+            target.export_workspace_backup().expect("export imported"),
+            snapshot
+        );
+        assert_eq!(
+            target.read_asset(&asset.id).expect("read imported"),
+            b"image"
+        );
+
+        let _ = std::fs::remove_file(archive_path);
+    }
+
+    #[test]
+    fn workspace_archive_stores_media_assets_without_recompressing_them() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        let asset = source
+            .write_asset(WriteAssetInput {
+                name: "voice.m4a".to_string(),
+                mime_type: "audio/mp4".to_string(),
+                bytes: b"audio bytes".to_vec(),
+            })
+            .expect("write asset");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages[0].blocks.push(json!({
+            "id": "block_audio",
+            "type": "audio",
+            "assetId": asset.id,
+            "name": "voice.m4a",
+            "mimeType": "audio/mp4",
+            "caption": ""
+        }));
+        source
+            .replace_workspace_backup(snapshot)
+            .expect("replace snapshot");
+
+        let archive = source
+            .export_workspace_archive()
+            .expect("export workspace archive");
+        let cursor = Cursor::new(archive);
+        let mut archive = zip::ZipArchive::new(cursor).expect("read archive");
+        let asset_entry = archive
+            .by_name(&format!("assets/{}", asset.relative_path))
+            .expect("asset entry");
+
+        assert_eq!(asset_entry.compression(), zip::CompressionMethod::Stored);
     }
 
     #[test]

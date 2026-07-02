@@ -42,13 +42,16 @@ import {
   type WorkspaceRepository,
 } from '../lib/workspaceRepository'
 import {
+  exportWorkspaceArchiveToPath,
   exportWorkspaceArchive,
   importWorkspaceArchive,
 } from '../lib/assets'
 import { registerDesktopPendingSaveFlush } from '../lib/desktopLifecycle'
 import {
+  isDesktopRuntime,
   openBinaryFile,
   openTextFile,
+  pickSaveFilePath,
   saveBinaryFile,
   saveTextFile,
 } from '../lib/fileAccess'
@@ -310,9 +313,24 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onExportArchive={async () => {
         const latestState = store.getState()
         const currentPage = latestState.pages.find((page) => page.id === latestState.currentPageId)
+        const defaultPath = `${sanitizeFileName(currentPage?.title ?? '')}.zip`
+
+        if (isDesktopRuntime()) {
+          const path = await pickSaveFilePath({
+            defaultPath,
+            filters: ZIP_FILE_FILTER,
+          })
+
+          if (!path) {
+            return
+          }
+
+          await exportWorkspaceArchiveToPath(path)
+          return
+        }
 
         await saveBinaryFile({
-          defaultPath: `${sanitizeFileName(currentPage?.title ?? '')}.zip`,
+          defaultPath,
           contents: await exportWorkspaceArchive(),
           filters: ZIP_FILE_FILTER,
         })
