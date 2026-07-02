@@ -233,21 +233,25 @@ describe('createTauriStorageClient', () => {
 
   it('exports and imports page packages through typed Tauri commands', async () => {
     const { createTauriStorageClient } = await import('./storageClient')
-    const bytes = new Uint8Array([80, 75, 3, 4])
+    const exportedBytes = [80, 75, 3, 4]
+    const importedBytes = new Uint8Array([80, 75, 3, 4])
     eventApi.invoke
       .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce(bytes)
+      .mockResolvedValueOnce(exportedBytes)
       .mockResolvedValueOnce({ rootPageId: 'page_imported' })
       .mockResolvedValueOnce({ rootPageId: 'page_imported_bytes' })
 
     const client = createTauriStorageClient()
 
     await client.exportPagePackageToPath('page_source', '/tmp/page.zip')
-    await expect(client.exportPagePackage('page_source')).resolves.toBe(bytes)
+    const exportedPackage = await client.exportPagePackage('page_source')
+
+    expect(exportedPackage).toBeInstanceOf(Uint8Array)
+    expect([...exportedPackage]).toEqual(exportedBytes)
     await expect(client.importPagePackageFromPath('/tmp/page.zip')).resolves.toEqual({
       rootPageId: 'page_imported',
     })
-    await expect(client.importPagePackage(bytes)).resolves.toEqual({
+    await expect(client.importPagePackage(importedBytes)).resolves.toEqual({
       rootPageId: 'page_imported_bytes',
     })
 
@@ -261,7 +265,9 @@ describe('createTauriStorageClient', () => {
     expect(eventApi.invoke).toHaveBeenNthCalledWith(3, 'import_page_package_from_path', {
       path: '/tmp/page.zip',
     })
-    expect(eventApi.invoke).toHaveBeenNthCalledWith(4, 'import_page_package', { bytes })
+    expect(eventApi.invoke).toHaveBeenNthCalledWith(4, 'import_page_package', {
+      bytes: importedBytes,
+    })
   })
 
   it('subscribes to archive progress for page-package path commands', async () => {
@@ -269,6 +275,18 @@ describe('createTauriStorageClient', () => {
     const onProgress = vi.fn()
 
     eventApi.invoke.mockImplementationOnce(async (_command, args) => {
+      eventApi.handlers[0]?.({
+        payload: {
+          taskId: 'other_task',
+          operation: 'export',
+          phase: 'processingAsset',
+          current: 1,
+          total: 1,
+          bytesProcessed: 16,
+          bytesTotal: 16,
+          itemName: 'ignored.png',
+        },
+      })
       eventApi.handlers[0]?.({
         payload: {
           taskId: args.taskId,
@@ -304,6 +322,7 @@ describe('createTauriStorageClient', () => {
         itemName: 'image.png',
       }),
     )
+    expect(onProgress).toHaveBeenCalledTimes(1)
     expect(eventApi.unlisten).toHaveBeenCalledTimes(1)
   })
 
