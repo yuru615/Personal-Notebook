@@ -1,9 +1,9 @@
 use tauri::State;
 
 use super::{
-    AssetMeta, BoardRecord, BootstrapPayload, DataTableRecord, DeleteResult, LoadedPage,
-    MindmapRecord, PageRecord, SaveResult, SearchResult, StorageError, StorageResult, StorageState,
-    WorkspaceSnapshot, WriteAssetInput,
+    AssetMeta, BoardRecord, BootstrapPayload, DataTableRecord, DeleteResult, ImportAssetFileInput,
+    LoadedPage, MindmapRecord, PageRecord, SaveResult, SearchResult, StorageError, StorageResult,
+    StorageState, WorkspaceSnapshot, WriteAssetInput,
 };
 
 #[tauri::command]
@@ -24,6 +24,19 @@ pub fn replace_workspace_backup(
     payload: WorkspaceSnapshot,
 ) -> StorageResult<()> {
     state.with_storage(|storage| storage.replace_workspace_backup(payload))
+}
+
+#[tauri::command]
+pub fn export_workspace_archive(state: State<'_, StorageState>) -> StorageResult<Vec<u8>> {
+    state.with_storage(|storage| storage.export_workspace_archive())
+}
+
+#[tauri::command]
+pub fn import_workspace_archive(
+    state: State<'_, StorageState>,
+    bytes: Vec<u8>,
+) -> StorageResult<()> {
+    state.with_storage(|storage| storage.import_workspace_archive(bytes))
 }
 
 #[tauri::command]
@@ -114,8 +127,24 @@ pub fn write_asset(
 }
 
 #[tauri::command]
+pub fn import_asset_file(
+    state: State<'_, StorageState>,
+    input: ImportAssetFileInput,
+) -> StorageResult<AssetMeta> {
+    state.with_storage(|storage| storage.import_asset_file(input))
+}
+
+#[tauri::command]
 pub fn read_asset(state: State<'_, StorageState>, asset_id: String) -> StorageResult<Vec<u8>> {
     state.with_storage(|storage| storage.read_asset(&asset_id))
+}
+
+#[tauri::command]
+pub fn get_asset_file_path(
+    state: State<'_, StorageState>,
+    asset_id: String,
+) -> StorageResult<String> {
+    state.with_storage(|storage| storage.get_asset_file_path(&asset_id))
 }
 
 #[tauri::command]

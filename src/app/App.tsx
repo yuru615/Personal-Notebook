@@ -41,6 +41,12 @@ import {
   createStorageWorkspaceRepository,
   type WorkspaceRepository,
 } from '../lib/workspaceRepository'
+import {
+  exportWorkspaceArchive,
+  importWorkspaceArchive,
+  readAsset,
+  writeAssetBytes,
+} from '../lib/assets'
 import { registerDesktopPendingSaveFlush } from '../lib/desktopLifecycle'
 import {
   openBinaryFile,
@@ -315,6 +321,13 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
           filters: JSON_FILE_FILTER,
         })
       }}
+      onExportArchive={async () => {
+        await saveBinaryFile({
+          defaultPath: 'personal-notebook-complete-backup.zip',
+          contents: await exportWorkspaceArchive(),
+          filters: ZIP_FILE_FILTER,
+        })
+      }}
       onExportMarkdown={async (page) => {
         const { buildMarkdownZip } = await import('../domain/markdown')
         const blob = await buildMarkdownZip({
@@ -322,6 +335,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
           allPages: store.getState().pages,
           boards: store.getState().boards,
           reversible: reversibleExport,
+          readAsset,
         })
 
         await saveBinaryFile({
@@ -350,6 +364,26 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
           return store.getState().currentPageId
         }
       }}
+      onImportArchive={async () => {
+        const file = await openBinaryFile({ filters: ZIP_FILE_FILTER })
+
+        if (!file) {
+          return store.getState().currentPageId
+        }
+
+        if (!window.confirm(uiCopy.export.importConfirm)) {
+          return store.getState().currentPageId
+        }
+
+        try {
+          await importWorkspaceArchive(file.contents)
+          await store.getState().bootstrap()
+          return store.getState().currentPageId
+        } catch {
+          window.alert(uiCopy.export.importError)
+          return store.getState().currentPageId
+        }
+      }}
       onImportMarkdown={async () => {
         const file = await openBinaryFile({ filters: ZIP_FILE_FILTER })
 
@@ -359,7 +393,9 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
 
         try {
           const { importMarkdownZip } = await import('../domain/markdown')
-          const payload = await importMarkdownZip(openedBinaryFileToFile(file, 'application/zip'))
+          const payload = await importMarkdownZip(openedBinaryFileToFile(file, 'application/zip'), {
+            writeAsset: writeAssetBytes,
+          })
           return await store.getState().importPagePackage(payload)
         } catch {
           window.alert('导入失败，请检查页面包格式。')
@@ -444,8 +480,10 @@ interface AppRoutesProps {
   reversibleExport: boolean
   onToggleReversibleExport: (value: boolean) => void
   onExportJson: () => Promise<void>
+  onExportArchive: () => Promise<void>
   onExportMarkdown: (page: PageRecord) => Promise<void>
   onImportJson: () => Promise<string | null>
+  onImportArchive: () => Promise<string | null>
   onImportMarkdown: () => Promise<string | null>
   onCleanupOrphanBoards: () => Promise<void>
   onCleanupOrphanDataTables: () => Promise<void>
@@ -494,8 +532,10 @@ function AppRoutes({
   reversibleExport,
   onToggleReversibleExport,
   onExportJson,
+  onExportArchive,
   onExportMarkdown,
   onImportJson,
+  onImportArchive,
   onImportMarkdown,
   onCleanupOrphanBoards,
   onCleanupOrphanDataTables,
@@ -641,8 +681,10 @@ function AppRoutes({
                 reversibleExport={reversibleExport}
                 onToggleReversibleExport={onToggleReversibleExport}
                 onExportJson={onExportJson}
+                onExportArchive={onExportArchive}
                 onExportMarkdown={onExportMarkdown}
                 onImportJson={onImportJson}
+                onImportArchive={onImportArchive}
                 onImportMarkdown={onImportMarkdown}
                 onCleanupOrphanBoards={onCleanupOrphanBoards}
                 onCleanupOrphanDataTables={onCleanupOrphanDataTables}
@@ -691,8 +733,10 @@ function AppRoutes({
                 reversibleExport={reversibleExport}
                 onToggleReversibleExport={onToggleReversibleExport}
                 onExportJson={onExportJson}
+                onExportArchive={onExportArchive}
                 onExportMarkdown={onExportMarkdown}
                 onImportJson={onImportJson}
+                onImportArchive={onImportArchive}
                 onImportMarkdown={onImportMarkdown}
                 onCleanupOrphanBoards={onCleanupOrphanBoards}
                 onCleanupOrphanDataTables={onCleanupOrphanDataTables}
@@ -721,8 +765,10 @@ function AppRoutes({
                 reversibleExport={reversibleExport}
                 onToggleReversibleExport={onToggleReversibleExport}
                 onExportJson={onExportJson}
+                onExportArchive={onExportArchive}
                 onExportMarkdown={onExportMarkdown}
                 onImportJson={onImportJson}
+                onImportArchive={onImportArchive}
                 onImportMarkdown={onImportMarkdown}
                 onCleanupOrphanBoards={onCleanupOrphanBoards}
                 onCleanupOrphanDataTables={onCleanupOrphanDataTables}
@@ -809,8 +855,10 @@ interface PageRouteProps {
   reversibleExport: boolean
   onToggleReversibleExport: (value: boolean) => void
   onExportJson: () => Promise<void>
+  onExportArchive: () => Promise<void>
   onExportMarkdown: (page: PageRecord) => Promise<void>
   onImportJson: () => Promise<string | null>
+  onImportArchive: () => Promise<string | null>
   onImportMarkdown: () => Promise<string | null>
   onCleanupOrphanBoards: () => Promise<void>
   onCleanupOrphanDataTables: () => Promise<void>
@@ -848,8 +896,10 @@ function PageRoute({
   reversibleExport,
   onToggleReversibleExport,
   onExportJson,
+  onExportArchive,
   onExportMarkdown,
   onImportJson,
+  onImportArchive,
   onImportMarkdown,
   onCleanupOrphanBoards,
   onCleanupOrphanDataTables,
@@ -928,9 +978,14 @@ function PageRoute({
               void onTogglePageOutlineVisible(page.id, value)
             }}
             onExportJson={() => void onExportJson()}
+            onExportArchive={() => void onExportArchive()}
             onExportMarkdown={() => void onExportMarkdown(page)}
             onImportJson={async () => {
               const nextPageId = await onImportJson()
+              navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
+            }}
+            onImportArchive={async () => {
+              const nextPageId = await onImportArchive()
               navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
             }}
             onImportMarkdown={async () => {
@@ -1096,8 +1151,10 @@ interface DataTableRouteProps {
   reversibleExport: boolean
   onToggleReversibleExport: (value: boolean) => void
   onExportJson: () => Promise<void>
+  onExportArchive: () => Promise<void>
   onExportMarkdown: (page: PageRecord) => Promise<void>
   onImportJson: () => Promise<string | null>
+  onImportArchive: () => Promise<string | null>
   onImportMarkdown: () => Promise<string | null>
   onCleanupOrphanBoards: () => Promise<void>
   onCleanupOrphanDataTables: () => Promise<void>
@@ -1122,8 +1179,10 @@ function DataTableRoute({
   reversibleExport,
   onToggleReversibleExport,
   onExportJson,
+  onExportArchive,
   onExportMarkdown,
   onImportJson,
+  onImportArchive,
   onImportMarkdown,
   onCleanupOrphanBoards,
   onCleanupOrphanDataTables,
@@ -1204,9 +1263,14 @@ function DataTableRoute({
               void onTogglePageOutlineVisible(page.id, value)
             }}
             onExportJson={() => void onExportJson()}
+            onExportArchive={() => void onExportArchive()}
             onExportMarkdown={() => void onExportMarkdown(page)}
             onImportJson={async () => {
               const nextPageId = await onImportJson()
+              navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
+            }}
+            onImportArchive={async () => {
+              const nextPageId = await onImportArchive()
               navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
             }}
             onImportMarkdown={async () => {

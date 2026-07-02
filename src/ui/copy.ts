@@ -53,8 +53,10 @@ export const uiCopy = {
   export: {
     section: '导入与导出',
     json: '导出 JSON 备份',
+    archive: '导出完整 ZIP 备份',
     markdown: '导出 Markdown 页面包',
     import: '导入 JSON 备份',
+    importArchive: '导入完整 ZIP 备份',
     reversible: '兼容后续导入',
     importConfirm: '导入会覆盖当前本地内容，确认继续吗？',
     importError: '导入失败，请检查备份文件格式。',

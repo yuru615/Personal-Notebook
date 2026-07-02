@@ -8,13 +8,41 @@ import type {
   WorkspaceSnapshot,
 } from '../domain/types'
 
+export interface WriteAssetInput {
+  name: string
+  mimeType: string
+  bytes: Uint8Array
+}
+
+export interface ImportAssetFileInput {
+  path: string
+  mimeType: string
+}
+
+export interface AssetMeta {
+  id: string
+  sha256: string
+  name: string
+  mimeType: string
+  byteSize: number
+  relativePath: string
+  createdAt: string
+}
+
 export interface WorkspaceStorageClient {
   exportWorkspaceBackup(): Promise<WorkspaceSnapshot | null>
   replaceWorkspaceBackup(snapshot: WorkspaceSnapshot): Promise<void>
+  exportWorkspaceArchive(): Promise<Uint8Array>
+  importWorkspaceArchive(bytes: Uint8Array): Promise<void>
   savePage(page: PageRecord): Promise<void>
   saveBoard(board: BoardRecord): Promise<void>
   saveDataTable(dataTable: DataTableRecord): Promise<void>
   saveMindmap(mindmap: MindmapRecord): Promise<void>
+  writeAsset(input: WriteAssetInput): Promise<AssetMeta>
+  importAssetFile(input: ImportAssetFileInput): Promise<AssetMeta>
+  readAsset(assetId: string): Promise<Uint8Array>
+  getAssetFilePath(assetId: string): Promise<string>
+  cleanupOrphanAssets(): Promise<number>
   searchWorkspace(query: string, limit?: number): Promise<SearchResult[]>
 }
 
@@ -26,6 +54,14 @@ export function createTauriStorageClient(): WorkspaceStorageClient {
 
     replaceWorkspaceBackup(snapshot) {
       return invoke<void>('replace_workspace_backup', { payload: snapshot })
+    },
+
+    exportWorkspaceArchive() {
+      return invoke<Uint8Array>('export_workspace_archive')
+    },
+
+    importWorkspaceArchive(bytes) {
+      return invoke<void>('import_workspace_archive', { bytes })
     },
 
     async savePage(page) {
@@ -42,6 +78,26 @@ export function createTauriStorageClient(): WorkspaceStorageClient {
 
     async saveMindmap(mindmap) {
       await invoke('save_mindmap', { mindmap })
+    },
+
+    writeAsset(input) {
+      return invoke<AssetMeta>('write_asset', { input })
+    },
+
+    importAssetFile(input) {
+      return invoke<AssetMeta>('import_asset_file', { input })
+    },
+
+    readAsset(assetId) {
+      return invoke<Uint8Array>('read_asset', { assetId })
+    },
+
+    getAssetFilePath(assetId) {
+      return invoke<string>('get_asset_file_path', { assetId })
+    },
+
+    cleanupOrphanAssets() {
+      return invoke<number>('cleanup_orphan_assets')
     },
 
     searchWorkspace(query, limit = 30) {

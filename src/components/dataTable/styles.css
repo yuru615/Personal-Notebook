@@ -4124,18 +4124,16 @@ button {
   align-items: center;
   min-height: 32px;
   padding: 0 12px;
+  border: none;
   border-radius: 8px;
   background: rgba(55, 53, 47, 0.05);
   color: var(--notion-text-soft);
+  cursor: pointer;
   font-size: 14px;
 }
 
 .record-image-upload:hover {
   background: rgba(55, 53, 47, 0.09);
-}
-
-.record-image-upload input {
-  display: none;
 }
 
 .record-image-figure {
@@ -4228,6 +4226,7 @@ button {
   background: rgba(255, 255, 255, 0.92);
   box-shadow: rgba(15, 23, 42, 0.08) 0 4px 12px;
   color: var(--notion-text-soft);
+  cursor: pointer;
   font-size: 12px;
   backdrop-filter: blur(10px);
 }
@@ -4235,10 +4234,6 @@ button {
 .record-image-inline-action:hover {
   background: rgb(255, 255, 255);
   color: var(--notion-text);
-}
-
-.record-image-inline-action input {
-  display: none;
 }
 
 .record-image-preview-overlay {
@@ -4300,16 +4295,13 @@ button {
   border-radius: 8px;
   background: transparent;
   color: var(--notion-text-faint);
+  cursor: pointer;
   font-size: 12px;
 }
 
 .record-image-preview-action:hover {
   background: var(--notion-hover);
   color: var(--notion-text);
-}
-
-.record-image-preview-action input {
-  display: none;
 }
 
 .record-image-preview-body {

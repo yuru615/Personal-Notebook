@@ -201,6 +201,13 @@ pub struct WriteAssetInput {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ImportAssetFileInput {
+    pub path: String,
+    pub mime_type: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AssetMeta {
     pub id: String,
     pub sha256: String,

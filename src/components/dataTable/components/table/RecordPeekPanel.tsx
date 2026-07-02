@@ -1,4 +1,6 @@
 import { X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { getAssetUrl } from "../../../../lib/assets";
 import RecordProperties from "../record/RecordProperties";
 import type {
   AppState,
@@ -43,6 +45,33 @@ function getBlockPreview(block: Block) {
     default:
       return block.content || "空文本";
   }
+}
+
+function AssetPreviewImage({ asset }: { asset: Asset }) {
+  const [assetUrl, setAssetUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setAssetUrl(null);
+
+    void getAssetUrl(asset.id)
+      .then((url) => {
+        if (!cancelled) {
+          setAssetUrl(url);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [asset.id]);
+
+  return assetUrl ? (
+    <img className="record-peek-image" src={assetUrl} alt={asset.name} />
+  ) : (
+    <p>图片加载中...</p>
+  );
 }
 
 export default function RecordPeekPanel({
@@ -130,11 +159,7 @@ export default function RecordPeekPanel({
                     <article key={block.id} className="record-peek-block">
                       <div className="record-peek-block-label">{block.type}</div>
                       {block.type === "image" && asset ? (
-                        <img
-                          className="record-peek-image"
-                          src={asset.dataUrl}
-                          alt={asset.name}
-                        />
+                        <AssetPreviewImage asset={asset} />
                       ) : (
                         <p>{getBlockPreview(block)}</p>
                       )}

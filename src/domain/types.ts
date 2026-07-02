@@ -15,6 +15,9 @@ export type BlockType =
   | 'child_page'
   | 'code'
   | 'table'
+  | 'image'
+  | 'video'
+  | 'audio'
   | 'whiteboard'
   | 'data_table'
   | 'data_table_inline'
@@ -123,6 +126,31 @@ export interface TableBlock extends BlockBase {
   rowHeights?: number[]
 }
 
+export interface ImageBlock extends BlockBase {
+  type: 'image'
+  assetId: string | null
+  name: string
+  mimeType: string
+  caption: string
+  alt: string
+}
+
+export interface VideoBlock extends BlockBase {
+  type: 'video'
+  assetId: string | null
+  name: string
+  mimeType: string
+  caption: string
+}
+
+export interface AudioBlock extends BlockBase {
+  type: 'audio'
+  assetId: string | null
+  name: string
+  mimeType: string
+  caption: string
+}
+
 export interface WhiteboardBlock extends BlockBase {
   type: 'whiteboard'
   boardId: BoardId
@@ -152,6 +180,9 @@ export type BlockRecord =
   | ChildPageBlock
   | CodeBlock
   | TableBlock
+  | ImageBlock
+  | VideoBlock
+  | AudioBlock
   | WhiteboardBlock
   | DataTableBlock
   | MindmapBlock

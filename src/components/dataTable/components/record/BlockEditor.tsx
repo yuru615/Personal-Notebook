@@ -1,4 +1,6 @@
 import { ArrowDown, ArrowUp, GripVertical, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { getAssetUrl } from "../../../../lib/assets";
 import type { Asset, Block, BlockType } from "../../domain/types";
 import BlockTypeMenu from "./BlockTypeMenu";
 import ImageBlock from "./ImageBlock";
@@ -31,7 +33,7 @@ type BlockEditorProps = {
   onMoveUp: () => void;
   onMoveDown: () => void;
   onInsertBelow: (type: BlockType) => void;
-  onImageUpload?: (file: File) => void;
+  onImageUpload?: () => void;
 };
 
 export default function BlockEditor({
@@ -48,6 +50,29 @@ export default function BlockEditor({
   onInsertBelow,
   onImageUpload,
 }: BlockEditorProps) {
+  const [assetUrl, setAssetUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setAssetUrl(null);
+
+    if (!asset?.id) {
+      return;
+    }
+
+    void getAssetUrl(asset.id)
+      .then((url) => {
+        if (!cancelled) {
+          setAssetUrl(url);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [asset?.id]);
+
   return (
     <article className="record-block">
       <div className="record-block-left-rail">
@@ -107,27 +132,21 @@ export default function BlockEditor({
         />
       ) : block.type === "image" ? (
         <div className="record-image-upload-area">
-          {asset ? (
+          {asset && assetUrl ? (
             <ImageBlock
-              src={asset.dataUrl}
+              src={assetUrl}
               alt={asset.name}
               onReplace={onImageUpload}
             />
           ) : (
-            <label className="record-image-upload">
+            <button
+              type="button"
+              className="record-image-upload"
+              onClick={onImageUpload}
+              disabled={!onImageUpload}
+            >
               <span>{`+ ${UPLOAD_IMAGE_LABEL}`}</span>
-              <input
-                aria-label={UPLOAD_IMAGE_LABEL}
-                type="file"
-                accept="image/*"
-                onChange={(event) => {
-                  const file = event.currentTarget.files?.[0];
-                  if (file) {
-                    onImageUpload?.(file);
-                  }
-                }}
-              />
-            </label>
+            </button>
           )}
         </div>
       ) : block.type === "todo" ? (

@@ -24,8 +24,10 @@ function renderPanel(overrides: Partial<ComponentProps<typeof ExportImportPanel>
       onToggleFontFamily={vi.fn()}
       onToggleOutlineVisible={vi.fn()}
       onExportJson={vi.fn()}
+      onExportArchive={vi.fn()}
       onExportMarkdown={vi.fn()}
       onImportJson={vi.fn()}
+      onImportArchive={vi.fn()}
       onImportMarkdown={vi.fn()}
       onCleanupOrphanBoards={vi.fn()}
       onCleanupOrphanDataTables={vi.fn()}
@@ -55,8 +57,10 @@ describe('ExportImportPanel', () => {
     expect(screen.getByLabelText(uiCopy.page.outlineVisible)).toBeInTheDocument()
     expect(screen.getByText(uiCopy.export.section)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: uiCopy.export.json })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: uiCopy.export.archive })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: uiCopy.export.markdown })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: uiCopy.export.import })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: uiCopy.export.importArchive })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: IMPORT_MARKDOWN_LABEL })).toBeInTheDocument()
     expect(screen.getByLabelText(uiCopy.export.reversible)).toBeInTheDocument()
   })

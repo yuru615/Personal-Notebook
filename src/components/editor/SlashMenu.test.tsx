@@ -35,6 +35,14 @@ describe('SlashMenu', () => {
     expect(screen.queryByRole('button', { name: '数据表格' })).not.toBeInTheDocument()
   })
 
+  it('shows media block options', () => {
+    render(<SlashMenu query="/媒体" onPick={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: '图片' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '视频' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '音频' })).toBeInTheDocument()
+  })
+
   it('filters options by allowed block types', () => {
     const options = getSlashMenuOptions('/', ['paragraph', 'todo'])
 

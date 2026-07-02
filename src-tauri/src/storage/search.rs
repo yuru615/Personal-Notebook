@@ -272,6 +272,15 @@ fn block_search_text(block: &Value) -> String {
                     .join(" ")
             })
             .unwrap_or_default(),
+        Some("image" | "video" | "audio") => [
+            block.get("name").and_then(Value::as_str).unwrap_or(""),
+            block.get("caption").and_then(Value::as_str).unwrap_or(""),
+            block.get("alt").and_then(Value::as_str).unwrap_or(""),
+        ]
+        .into_iter()
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join(" "),
         Some("whiteboard") => "白板".to_string(),
         Some("data_table") | Some("data_table_inline") => "数据表格".to_string(),
         Some("mindmap") => "导图".to_string(),

@@ -344,6 +344,65 @@ function normalizeBoards(boards: BoardRecord[]) {
   }
 }
 
+function normalizeDataTables(dataTables: DataTableRecord[]) {
+  let didChange = false
+
+  return {
+    dataTables: dataTables.map((dataTable) => {
+      const snapshot = structuredClone(dataTable.snapshot)
+
+      if (!snapshot || typeof snapshot !== 'object') {
+        return dataTable
+      }
+
+      const candidate = snapshot as {
+        assets?: Record<
+          string,
+          {
+            id?: unknown
+            kind?: unknown
+            name?: unknown
+            mimeType?: unknown
+            createdAt?: unknown
+            dataUrl?: unknown
+          }
+        >
+      }
+
+      if (!candidate.assets || typeof candidate.assets !== 'object') {
+        return dataTable
+      }
+
+      const nextAssets: NonNullable<typeof candidate.assets> = {}
+      for (const [assetId, asset] of Object.entries(candidate.assets)) {
+        if (!asset || typeof asset !== 'object') {
+          didChange = true
+          continue
+        }
+
+        if ('dataUrl' in asset) {
+          didChange = true
+        }
+
+        nextAssets[assetId] = {
+          id: typeof asset.id === 'string' ? asset.id : assetId,
+          kind: 'image',
+          name: typeof asset.name === 'string' ? asset.name : '',
+          mimeType: typeof asset.mimeType === 'string' ? asset.mimeType : '',
+          createdAt: typeof asset.createdAt === 'string' ? asset.createdAt : dataTable.createdAt,
+        }
+      }
+
+      candidate.assets = nextAssets
+      return {
+        ...dataTable,
+        snapshot,
+      }
+    }),
+    didChange,
+  }
+}
+
 function renameDataTableSnapshot(snapshot: unknown, title: string) {
   if (!snapshot || typeof snapshot !== 'object') {
     return snapshot
@@ -373,7 +432,7 @@ function normalizeWorkspaceSnapshot(snapshot: WorkspaceSnapshot) {
   const rawDataTables = Array.isArray(
     (snapshot as WorkspaceSnapshot & { dataTables?: DataTableRecord[] }).dataTables,
   )
-    ? snapshot.dataTables
+    ? (snapshot.dataTables ?? [])
     : []
   const rawMindmaps = Array.isArray(
     (snapshot as WorkspaceSnapshot & { mindmaps?: MindmapRecord[] }).mindmaps,
@@ -382,10 +441,14 @@ function normalizeWorkspaceSnapshot(snapshot: WorkspaceSnapshot) {
     : []
   const normalizedBoards = normalizeBoards(rawBoards)
   const boards = normalizedBoards.boards
-  const dataTables = structuredClone(rawDataTables)
+  const normalizedDataTables = normalizeDataTables(rawDataTables)
+  const dataTables = normalizedDataTables.dataTables
   const mindmaps = structuredClone(rawMindmaps)
 
   if (normalizedBoards.didChange) {
+    didChange = true
+  }
+  if (normalizedDataTables.didChange) {
     didChange = true
   }
 
@@ -408,6 +471,9 @@ function normalizeWorkspaceSnapshot(snapshot: WorkspaceSnapshot) {
     'child_page',
     'code',
     'table',
+    'image',
+    'video',
+    'audio',
     'whiteboard',
     'data_table',
     'mindmap',
@@ -515,6 +581,10 @@ function getPlainTextFromBlock(block: BlockRecord): string {
       return block.items.join('\n')
     case 'table':
       return block.rows.flat().join(' ').trim()
+    case 'image':
+    case 'video':
+    case 'audio':
+      return block.caption
     case 'child_page':
     case 'whiteboard':
     case 'data_table':
@@ -542,6 +612,9 @@ function preserveBlockContent(nextBlock: BlockRecord, currentBlock: BlockRecord)
     case 'code':
       return { ...nextBlock, text }
     case 'table':
+    case 'image':
+    case 'video':
+    case 'audio':
     case 'child_page':
     case 'whiteboard':
     case 'data_table':

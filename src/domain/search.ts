@@ -174,6 +174,11 @@ function getBlockSearchText(block: BlockRecord, pageTitleById: Map<string, strin
       return block.items.join(' ').trim()
     case 'table':
       return block.rows.flat().join(' ').trim()
+    case 'image':
+      return [block.name, block.caption, block.alt].join(' ').trim()
+    case 'video':
+    case 'audio':
+      return [block.name, block.caption].join(' ').trim()
     case 'child_page':
       return pageTitleById.get(block.pageId)?.trim() ?? ''
     case 'whiteboard':

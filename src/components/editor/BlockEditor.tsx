@@ -26,6 +26,7 @@ import { ListBlock } from './blocks/ListBlock'
 import { ParagraphBlock } from './blocks/ParagraphBlock'
 import { TableBlock } from './blocks/TableBlock'
 import { TodoBlock } from './blocks/TodoBlock'
+import { MediaBlock } from './blocks/MediaBlock'
 import { MindmapBlock } from './blocks/MindmapBlock'
 import { WhiteboardBlock } from './blocks/WhiteboardBlock'
 import { getSlashMenuOptions, SlashMenu } from './SlashMenu'
@@ -805,6 +806,16 @@ export function BlockEditor({
                     rowHeights: details ? details.rowHeights : block.rowHeights,
                   })
                 }
+              />,
+            )
+          case 'image':
+          case 'video':
+          case 'audio':
+            return renderBlockRow(
+              block,
+              <MediaBlock
+                block={block}
+                onChange={(nextBlock) => onUpdateBlock(block.id, nextBlock)}
               />,
             )
           case 'child_page':

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   isDesktopRuntime,
   openBinaryFile,
+  openLocalFilePath,
   openTextFile,
   saveBinaryFile,
   saveTextFile,
@@ -145,6 +146,27 @@ describe('fileAccess', () => {
       name: 'page.zip',
       contents: bytes,
     })
+  })
+
+  it('returns a selected local path without reading bytes in desktop runtime', async () => {
+    Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    })
+
+    const dialog = await import('@tauri-apps/plugin-dialog')
+    const fs = await import('@tauri-apps/plugin-fs')
+    vi.mocked(dialog.open).mockResolvedValue('/tmp/media/clip.mp4')
+
+    const result = await openLocalFilePath({
+      filters: [{ name: 'Video', extensions: ['mp4'] }],
+    })
+
+    expect(result).toEqual({
+      name: 'clip.mp4',
+      path: '/tmp/media/clip.mp4',
+    })
+    expect(fs.readFile).not.toHaveBeenCalled()
   })
 
   it('downloads text files in the browser runtime', async () => {

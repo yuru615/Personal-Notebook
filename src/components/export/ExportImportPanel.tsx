@@ -22,8 +22,10 @@ interface ExportImportPanelProps {
   onToggleFontFamily: (value: PageFontFamily) => void
   onToggleOutlineVisible: (value: boolean) => void
   onExportJson: () => void | Promise<void>
+  onExportArchive: () => void | Promise<void>
   onExportMarkdown: () => void | Promise<void>
   onImportJson: () => void | Promise<void>
+  onImportArchive: () => void | Promise<void>
   onImportMarkdown: () => void | Promise<void>
   onCleanupOrphanBoards: () => void | Promise<void>
   onCleanupOrphanDataTables: () => void | Promise<void>
@@ -43,8 +45,10 @@ export function ExportImportPanel({
   onToggleFontFamily,
   onToggleOutlineVisible,
   onExportJson,
+  onExportArchive,
   onExportMarkdown,
   onImportJson,
+  onImportArchive,
   onImportMarkdown,
   onCleanupOrphanBoards,
   onCleanupOrphanDataTables,
@@ -80,9 +84,19 @@ export function ExportImportPanel({
     void onExportMarkdown()
   }
 
+  function handleExportArchive() {
+    closeMenu()
+    void onExportArchive()
+  }
+
   function handleImportJson() {
     closeMenu()
     void onImportJson()
+  }
+
+  function handleImportArchive() {
+    closeMenu()
+    void onImportArchive()
   }
 
   function handleImportMarkdown() {
@@ -182,11 +196,17 @@ export function ExportImportPanel({
             <button type="button" className="page-menu-action" onClick={handleExportJson}>
               <span className="page-menu-item-label">{uiCopy.export.json}</span>
             </button>
+            <button type="button" className="page-menu-action" onClick={handleExportArchive}>
+              <span className="page-menu-item-label">{uiCopy.export.archive}</span>
+            </button>
             <button type="button" className="page-menu-action" onClick={handleExportMarkdown}>
               <span className="page-menu-item-label">{uiCopy.export.markdown}</span>
             </button>
             <button type="button" className="page-menu-action" onClick={handleImportJson}>
               <span className="page-menu-item-label">{uiCopy.export.import}</span>
+            </button>
+            <button type="button" className="page-menu-action" onClick={handleImportArchive}>
+              <span className="page-menu-item-label">{uiCopy.export.importArchive}</span>
             </button>
             <button type="button" className="page-menu-action" onClick={handleImportMarkdown}>
               <span className="page-menu-item-label">{IMPORT_MARKDOWN_LABEL}</span>

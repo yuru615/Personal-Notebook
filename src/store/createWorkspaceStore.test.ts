@@ -276,6 +276,78 @@ describe('createWorkspaceStore data tables', () => {
       cover: null,
     })
   })
+
+  it('drops legacy data table image data urls during bootstrap normalization', async () => {
+    const workspace = createWorkspace()
+    const snapshot = createDefaultAppState()
+    snapshot.assets = {
+      asset_legacy: {
+        id: 'asset_legacy',
+        kind: 'image',
+        name: 'legacy.png',
+        mimeType: 'image/png',
+        dataUrl: 'data:image/png;base64,AA==',
+        createdAt: '2026-06-22T00:00:00.000Z',
+      },
+    }
+    workspace.dataTables = [
+      {
+        id: snapshot.database.id,
+        title: 'Project Database',
+        icon: null,
+        cover: null,
+        snapshot,
+        createdAt: '2026-06-22T00:00:00.000Z',
+        updatedAt: '2026-06-22T00:00:00.000Z',
+      },
+    ]
+    const counted = createCountingRepository(workspace)
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+
+    const normalized = store.getState().dataTables[0]?.snapshot as ReturnType<typeof createDefaultAppState>
+    expect(normalized.assets.asset_legacy).toEqual({
+      id: 'asset_legacy',
+      kind: 'image',
+      name: 'legacy.png',
+      mimeType: 'image/png',
+      createdAt: '2026-06-22T00:00:00.000Z',
+    })
+    expect(counted.getReplaceCalls()).toBe(1)
+  })
+})
+
+describe('createWorkspaceStore media blocks', () => {
+  it('creates empty media blocks for page images, videos, and audio', async () => {
+    const repository = createMemoryRepository(createWorkspace())
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+
+    await expect(store.getState().insertBlock('page_1', 'image')).resolves.toMatchObject({
+      type: 'image',
+      assetId: null,
+      name: '',
+      mimeType: '',
+      caption: '',
+      alt: '',
+    })
+    await expect(store.getState().insertBlock('page_1', 'video')).resolves.toMatchObject({
+      type: 'video',
+      assetId: null,
+      name: '',
+      mimeType: '',
+      caption: '',
+    })
+    await expect(store.getState().insertBlock('page_1', 'audio')).resolves.toMatchObject({
+      type: 'audio',
+      assetId: null,
+      name: '',
+      mimeType: '',
+      caption: '',
+    })
+  })
 })
 
 describe('createWorkspaceStore autosave', () => {

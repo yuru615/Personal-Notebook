@@ -106,6 +106,26 @@ export function createBlock(
       return { id: createId('block'), type, language: 'text', text: '' }
     case 'table':
       return { id: createId('block'), type, rows: [['', '']] }
+    case 'image':
+      return {
+        id: createId('block'),
+        type: 'image',
+        assetId: null,
+        name: '',
+        mimeType: '',
+        caption: '',
+        alt: '',
+      }
+    case 'video':
+    case 'audio':
+      return {
+        id: createId('block'),
+        type,
+        assetId: null,
+        name: '',
+        mimeType: '',
+        caption: '',
+      }
     case 'whiteboard':
       if (!options?.boardId) {
         throw new Error('Whiteboard block requires boardId')

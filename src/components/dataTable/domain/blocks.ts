@@ -234,13 +234,3 @@ export function attachImageAsset(state: AppState, blockId: string, asset: Asset)
     },
   };
 }
-
-export function fileToDataUrl(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () =>
-      reject(reader.error ?? new Error("Failed to read file as data URL."));
-    reader.readAsDataURL(file);
-  });
-}

@@ -75,4 +75,56 @@ describe('createTauriStorageClient', () => {
     ])
     expect(invoke).toHaveBeenCalledWith('search_workspace', { query: 'home', limit: 12 })
   })
+
+  it('writes assets and resolves asset file paths through typed Tauri commands', async () => {
+    const { createTauriStorageClient } = await import('./storageClient')
+    invoke
+      .mockResolvedValueOnce({
+        id: 'asset_abc',
+        sha256: 'abc',
+        name: 'clip.mp4',
+        mimeType: 'video/mp4',
+        byteSize: 3,
+        relativePath: 'ab/abc.mp4',
+        createdAt: 'unix-ms:1',
+      })
+      .mockResolvedValueOnce('/app/assets/ab/abc.mp4')
+
+    const client = createTauriStorageClient()
+    const bytes = new Uint8Array([1, 2, 3])
+
+    await expect(
+      client.writeAsset({
+        name: 'clip.mp4',
+        mimeType: 'video/mp4',
+        bytes,
+      }),
+    ).resolves.toMatchObject({ id: 'asset_abc' })
+    await expect(client.getAssetFilePath('asset_abc')).resolves.toBe('/app/assets/ab/abc.mp4')
+
+    expect(invoke).toHaveBeenNthCalledWith(1, 'write_asset', {
+      input: {
+        name: 'clip.mp4',
+        mimeType: 'video/mp4',
+        bytes,
+      },
+    })
+    expect(invoke).toHaveBeenNthCalledWith(2, 'get_asset_file_path', {
+      assetId: 'asset_abc',
+    })
+  })
+
+  it('exports and imports complete workspace archive bytes', async () => {
+    const { createTauriStorageClient } = await import('./storageClient')
+    const bytes = new Uint8Array([80, 75, 3, 4])
+    invoke.mockResolvedValueOnce(bytes).mockResolvedValueOnce(undefined)
+
+    const client = createTauriStorageClient()
+
+    await expect(client.exportWorkspaceArchive()).resolves.toBe(bytes)
+    await client.importWorkspaceArchive(bytes)
+
+    expect(invoke).toHaveBeenNthCalledWith(1, 'export_workspace_archive')
+    expect(invoke).toHaveBeenNthCalledWith(2, 'import_workspace_archive', { bytes })
+  })
 })

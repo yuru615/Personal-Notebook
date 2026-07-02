@@ -13,6 +13,15 @@ interface BuildMarkdownZipOptions {
   allPages: PageRecord[]
   boards?: BoardRecord[]
   reversible: boolean
+  readAsset?: (assetId: string) => Promise<Uint8Array>
+}
+
+interface ImportMarkdownZipOptions {
+  writeAsset?: (input: { name: string; mimeType: string; bytes: Uint8Array }) => Promise<{
+    id: string
+    name: string
+    mimeType: string
+  }>
 }
 
 export interface ImportedMarkdownPackage {
@@ -48,6 +57,14 @@ type ImportedBlockDraft =
   | { type: 'table'; rows: string[][] }
   | { type: 'child_page'; targetPath: string }
   | { type: 'whiteboard'; assetPath: string }
+  | {
+      type: 'image' | 'video' | 'audio'
+      assetPath: string
+      name: string
+      mimeType: string
+      caption: string
+      alt?: string
+    }
 
 interface ImportedPageDraft {
   filePath: string
@@ -102,6 +119,7 @@ function blockToMarkdown(
   childLinks: Map<PageId, ChildPageLink>,
   boardTitles: Map<string, string>,
   boardLinks: Map<string, string>,
+  mediaLinks: Map<string, string>,
 ): string {
   switch (block.type) {
     case 'paragraph':
@@ -131,6 +149,18 @@ function blockToMarkdown(
         .map((row) => `| ${row.map(escapeTableCell).join(' | ')} |`)
         .join('\n')
     }
+    case 'image':
+      return block.assetId
+        ? `![${block.alt || block.name}](${mediaLinks.get(block.id) ?? '#'})`
+        : `![${block.alt || block.name || '\u56fe\u7247'}]()`
+    case 'video':
+      return block.assetId
+        ? `[${block.caption || block.name || '\u89c6\u9891'}](${mediaLinks.get(block.id) ?? '#'})`
+        : `[${block.caption || block.name || '\u89c6\u9891'}](#)`
+    case 'audio':
+      return block.assetId
+        ? `[${block.caption || block.name || '\u97f3\u9891'}](${mediaLinks.get(block.id) ?? '#'})`
+        : `[${block.caption || block.name || '\u97f3\u9891'}](#)`
     case 'child_page': {
       const childLink = childLinks.get(block.pageId)
 
@@ -156,6 +186,7 @@ function pageToMarkdown(
   childLinks: Map<PageId, ChildPageLink>,
   boardTitles: Map<string, string>,
   boardLinks: Map<string, string>,
+  mediaLinks: Map<string, string>,
   reversible: boolean,
 ): string {
   const blocks = page.blocks
@@ -165,6 +196,7 @@ function pageToMarkdown(
         childLinks,
         boardTitles,
         boardLinks,
+        mediaLinks,
       ),
     )
     .filter((block) => block.trim().length > 0)
@@ -250,17 +282,52 @@ function buildWhiteboardAssets(
   return { boardTitles, boardLinks }
 }
 
+async function buildMediaAssets(
+  page: PageRecord,
+  currentFolder: JSZip,
+  readAsset: BuildMarkdownZipOptions['readAsset'],
+) {
+  const mediaLinks = new Map<string, string>()
+
+  if (!readAsset) {
+    return mediaLinks
+  }
+
+  const mediaFolder = currentFolder.folder('_assets')?.folder('media')
+
+  if (!mediaFolder) {
+    return mediaLinks
+  }
+
+  for (const block of page.blocks) {
+    if (block.type !== 'image' && block.type !== 'video' && block.type !== 'audio') {
+      continue
+    }
+
+    if (!block.assetId) {
+      continue
+    }
+
+    const fileName = `${block.assetId}-${sanitizeFileNameSegment(block.name || block.type, block.type)}`
+    mediaFolder.file(fileName, await readAsset(block.assetId))
+    mediaLinks.set(block.id, `./_assets/media/${fileName}`)
+  }
+
+  return mediaLinks
+}
+
 export async function buildMarkdownZip({
   rootPage,
   allPages,
   boards = [],
   reversible,
+  readAsset,
 }: BuildMarkdownZipOptions): Promise<Blob> {
   const zip = new JSZip()
   const childrenByParentId = buildChildrenMap(allPages)
   const boardsById = new Map(boards.map((board) => [board.id, board]))
 
-  function visit(page: PageRecord, parentFolder: JSZip, folderName: string) {
+  async function visit(page: PageRecord, parentFolder: JSZip, folderName: string) {
     const currentFolder = parentFolder.folder(folderName)
 
     if (!currentFolder) {
@@ -284,6 +351,7 @@ export async function buildMarkdownZip({
       boardsById,
       reversible,
     )
+    const mediaLinks = await buildMediaAssets(page, currentFolder, readAsset)
 
     currentFolder.file(
       'index.md',
@@ -292,12 +360,13 @@ export async function buildMarkdownZip({
         childLinks,
         boardTitles,
         boardLinks,
+        mediaLinks,
         reversible,
       ),
     )
 
     for (const child of children) {
-      visit(
+      await visit(
         child,
         currentFolder,
         folderNames.get(child.id) ?? sanitizePathSegment(child.title),
@@ -305,7 +374,7 @@ export async function buildMarkdownZip({
     }
   }
 
-  visit(rootPage, zip, sanitizePathSegment(rootPage.title))
+  await visit(rootPage, zip, sanitizePathSegment(rootPage.title))
 
   return zip.generateAsync({ type: 'blob' })
 }
@@ -405,6 +474,62 @@ function markdownToPlainText(value: string): string {
     .replace(/\\\|/g, '|')
 }
 
+function fileNameFromZipPath(path: string) {
+  return normalizeZipPath(path).split('/').pop() || 'media'
+}
+
+function mimeTypeFromName(name: string) {
+  const extension = name.split('.').pop()?.toLowerCase()
+
+  switch (extension) {
+    case 'png':
+      return 'image/png'
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg'
+    case 'gif':
+      return 'image/gif'
+    case 'webp':
+      return 'image/webp'
+    case 'svg':
+      return 'image/svg+xml'
+    case 'mp4':
+      return 'video/mp4'
+    case 'webm':
+      return 'video/webm'
+    case 'mov':
+      return 'video/quicktime'
+    case 'mp3':
+      return 'audio/mpeg'
+    case 'wav':
+      return 'audio/wav'
+    case 'ogg':
+      return 'audio/ogg'
+    case 'm4a':
+      return 'audio/mp4'
+    default:
+      return 'application/octet-stream'
+  }
+}
+
+function mediaTypeFromName(name: string): 'image' | 'video' | 'audio' | null {
+  const mimeType = mimeTypeFromName(name)
+
+  if (mimeType.startsWith('image/')) {
+    return 'image'
+  }
+
+  if (mimeType.startsWith('video/')) {
+    return 'video'
+  }
+
+  if (mimeType.startsWith('audio/')) {
+    return 'audio'
+  }
+
+  return null
+}
+
 function parseStandaloneLink(line: string, pageFilePath: string): ImportedBlockDraft | null {
   const match = line.trim().match(/^\[([^\]]+)\]\((.+)\)$/)
 
@@ -413,6 +538,19 @@ function parseStandaloneLink(line: string, pageFilePath: string): ImportedBlockD
   }
 
   const [, , href] = match
+  const assetPath = resolveZipPath(pageFilePath, href)
+  const name = fileNameFromZipPath(assetPath)
+  const mediaType = mediaTypeFromName(name)
+
+  if (assetPath.includes('/_assets/media/') && mediaType && mediaType !== 'image') {
+    return {
+      type: mediaType,
+      assetPath,
+      name,
+      mimeType: mimeTypeFromName(name),
+      caption: markdownToPlainText(match[1]),
+    }
+  }
 
   if (href.endsWith('.whiteboard.json')) {
     return {
@@ -429,6 +567,26 @@ function parseStandaloneLink(line: string, pageFilePath: string): ImportedBlockD
   }
 
   return null
+}
+
+function parseImageLine(line: string, pageFilePath: string): ImportedBlockDraft | null {
+  const match = line.trim().match(/^!\[([^\]]*)\]\((.+)\)$/)
+
+  if (!match) {
+    return null
+  }
+
+  const assetPath = resolveZipPath(pageFilePath, match[2])
+  const name = fileNameFromZipPath(assetPath)
+
+  return {
+    type: 'image',
+    assetPath,
+    name,
+    mimeType: mimeTypeFromName(name),
+    caption: '',
+    alt: markdownToPlainText(match[1]),
+  }
 }
 
 function splitTableRow(line: string): string[] {
@@ -474,6 +632,7 @@ function isStructuredLine(lines: string[], index: number): boolean {
     /^\d+\.\s/.test(line) ||
     line.startsWith('```') ||
     (line.startsWith('|') && isTableSeparatorLine(nextLine)) ||
+    /^!\[[^\]]*\]\((.+)\)$/.test(line) ||
     /^\[[^\]]+\]\((.+)\)$/.test(line)
   )
 }
@@ -579,6 +738,14 @@ function parseMarkdownBlocks(body: string, frontmatter: PageFrontmatter, pageFil
       continue
     }
 
+    const imageBlock = parseImageLine(trimmedLine, pageFilePath)
+
+    if (imageBlock) {
+      blocks.push(imageBlock)
+      index += 1
+      continue
+    }
+
     const linkBlock = parseStandaloneLink(trimmedLine, pageFilePath)
 
     if (linkBlock) {
@@ -618,6 +785,7 @@ function createBlockFromDraft(
   draft: ImportedBlockDraft,
   pageIdByFilePath: Map<string, string>,
   boardIdByAssetPath: Map<string, string>,
+  assetIdByAssetPath: Map<string, string>,
 ): BlockRecord | null {
   switch (draft.type) {
     case 'paragraph':
@@ -646,10 +814,37 @@ function createBlockFromDraft(
       const boardId = boardIdByAssetPath.get(draft.assetPath)
       return boardId ? { id: createId('block'), type: 'whiteboard', boardId } : null
     }
+    case 'image': {
+      const assetId = assetIdByAssetPath.get(draft.assetPath) ?? null
+      return {
+        id: createId('block'),
+        type: 'image',
+        assetId,
+        name: draft.name,
+        mimeType: draft.mimeType,
+        caption: draft.caption,
+        alt: draft.alt ?? '',
+      }
+    }
+    case 'video':
+    case 'audio': {
+      const assetId = assetIdByAssetPath.get(draft.assetPath) ?? null
+      return {
+        id: createId('block'),
+        type: draft.type,
+        assetId,
+        name: draft.name,
+        mimeType: draft.mimeType,
+        caption: draft.caption,
+      }
+    }
   }
 }
 
-export async function importMarkdownZip(blob: Blob): Promise<ImportedMarkdownPackage> {
+export async function importMarkdownZip(
+  blob: Blob,
+  options: ImportMarkdownZipOptions = {},
+): Promise<ImportedMarkdownPackage> {
   const zip = await JSZip.loadAsync(await blob.arrayBuffer())
   const pageFiles = Object.values(zip.files)
     .filter((file) => !file.dir && file.name.endsWith('/index.md'))
@@ -693,6 +888,7 @@ export async function importMarkdownZip(blob: Blob): Promise<ImportedMarkdownPac
 
   const boardIdByOriginalId = new Map<string, string>()
   const boardIdByAssetPath = new Map<string, string>()
+  const assetIdByAssetPath = new Map<string, string>()
   const boards: BoardRecord[] = []
   const now = new Date().toISOString()
 
@@ -730,6 +926,39 @@ export async function importMarkdownZip(blob: Blob): Promise<ImportedMarkdownPac
     boardIdByAssetPath.set(assetPath, nextBoardId)
   }
 
+  if (options.writeAsset) {
+    const mediaAssetPaths = Array.from(
+      new Set(
+        importedPageDrafts.flatMap((page) =>
+          page.blocks
+            .filter(
+              (
+                block,
+              ): block is Extract<ImportedBlockDraft, { type: 'image' | 'video' | 'audio' }> =>
+                block.type === 'image' || block.type === 'video' || block.type === 'audio',
+            )
+            .map((block) => block.assetPath),
+        ),
+      ),
+    )
+
+    for (const assetPath of mediaAssetPaths) {
+      const assetFile = zip.file(assetPath)
+
+      if (!assetFile) {
+        continue
+      }
+
+      const name = fileNameFromZipPath(assetPath)
+      const asset = await options.writeAsset({
+        name,
+        mimeType: mimeTypeFromName(name),
+        bytes: await assetFile.async('uint8array'),
+      })
+      assetIdByAssetPath.set(assetPath, asset.id)
+    }
+  }
+
   const pages: PageRecord[] = importedPageDrafts.map((draft) => ({
     id: pageIdByOriginalId.get(draft.frontmatter.pageId) ?? createId('page'),
     parentId: draft.frontmatter.parentId
@@ -739,7 +968,9 @@ export async function importMarkdownZip(blob: Blob): Promise<ImportedMarkdownPac
     icon: draft.frontmatter.icon,
     cover: draft.frontmatter.cover,
     blocks: draft.blocks
-      .map((block) => createBlockFromDraft(block, pageIdByFilePath, boardIdByAssetPath))
+      .map((block) =>
+        createBlockFromDraft(block, pageIdByFilePath, boardIdByAssetPath, assetIdByAssetPath),
+      )
       .filter((block): block is BlockRecord => block !== null),
     createdAt: draft.frontmatter.createdAt,
     updatedAt: draft.frontmatter.updatedAt,

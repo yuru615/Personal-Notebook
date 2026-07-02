@@ -20,7 +20,6 @@ import {
   addBlockAfter,
   attachImageAsset,
   deleteBlock,
-  fileToDataUrl,
   moveBlock,
   updateBlockChecked,
   updateBlockContent,
@@ -107,7 +106,6 @@ type AppStoreActions = {
   deleteBlock: (blockId: string) => void;
   moveBlock: (blockId: string, direction: "up" | "down") => void;
   attachImageAsset: (blockId: string, asset: Asset) => void;
-  fileToDataUrl: (file: File) => Promise<string>;
 };
 
 type AppStoreContextValue = {
@@ -586,7 +584,6 @@ export function AppStoreProvider({
       attachImageAsset: (blockId, asset) => {
         setState((currentState) => attachImageAsset(currentState, blockId, asset));
       },
-      fileToDataUrl,
     }),
     [replaceState],
   );

@@ -1243,6 +1243,127 @@ a {
   margin: 2px 0;
 }
 
+.media-block {
+  display: grid;
+  gap: 8px;
+  margin: 6px 0;
+  min-width: 0;
+}
+
+.media-block-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.media-block-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: #6f6d68;
+  font-size: 13px;
+}
+
+.media-block-label span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-block-replace,
+.media-block-upload {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid #ddd9d2;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #4f4b46;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.media-block-replace {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 10px;
+}
+
+.media-block-upload {
+  width: 100%;
+  min-height: 96px;
+  padding: 18px;
+  border-style: dashed;
+}
+
+.media-block-replace:hover,
+.media-block-upload:hover {
+  background: #f8f7f4;
+}
+
+.media-block-replace:disabled,
+.media-block-upload:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.media-block-preview {
+  min-width: 0;
+}
+
+.media-block-image,
+.media-block-video {
+  display: block;
+  width: 100%;
+  max-height: min(540px, 70vh);
+  border-radius: 6px;
+  object-fit: contain;
+  background: #f4f2ee;
+}
+
+.media-block-audio {
+  display: block;
+  width: 100%;
+}
+
+.media-block-missing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 72px;
+  padding: 14px;
+  border: 1px solid #ece8df;
+  border-radius: 6px;
+  background: #fbfaf8;
+  color: #8a8176;
+  font-size: 13px;
+}
+
+.media-block figcaption {
+  display: grid;
+  gap: 6px;
+}
+
+.media-block-caption {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #6f6d68;
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.media-block-caption::placeholder {
+  color: #aaa59e;
+}
+
 .block-menu-style-group {
   display: grid;
   gap: 4px;

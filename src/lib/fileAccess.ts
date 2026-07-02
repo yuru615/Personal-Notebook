@@ -11,6 +11,10 @@ export interface OpenBinaryFileOptions {
   filters: FileAccessFilter[]
 }
 
+export interface OpenLocalFilePathOptions {
+  filters: FileAccessFilter[]
+}
+
 export interface SaveTextFileOptions {
   defaultPath: string
   contents: string
@@ -32,6 +36,11 @@ export interface OpenedBinaryFile {
   name: string
   contents: Uint8Array
   file?: File
+}
+
+export interface OpenedLocalFilePath {
+  name: string
+  path: string
 }
 
 type TauriPath = string | string[] | null
@@ -134,6 +143,23 @@ export async function openBinaryFile(options: OpenBinaryFileOptions) {
     name: file.name,
     contents: new Uint8Array(await file.arrayBuffer()),
     file,
+  }
+}
+
+export async function openLocalFilePath(options: OpenLocalFilePathOptions) {
+  if (!isDesktopRuntime()) {
+    return null
+  }
+
+  const path = await pickOpenPath(options.filters)
+
+  if (!path) {
+    return null
+  }
+
+  return {
+    name: fileNameFromPath(path),
+    path,
   }
 }
 

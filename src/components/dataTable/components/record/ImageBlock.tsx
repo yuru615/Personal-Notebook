@@ -4,13 +4,12 @@ import { createPortal } from "react-dom";
 type ImageBlockProps = {
   src: string;
   alt: string;
-  onReplace?: (file: File) => void;
+  onReplace?: () => void;
 };
 
 const OPEN_IMAGE_PREVIEW_LABEL = "打开图片预览";
 const IMAGE_PREVIEW_DIALOG = "图片预览";
 const CLOSE_IMAGE_PREVIEW_LABEL = "关闭图片预览";
-const REPLACE_IMAGE_LABEL = "替换图片";
 const INLINE_REPLACE_LABEL = "替换";
 
 function ReplaceImageAction({
@@ -18,23 +17,12 @@ function ReplaceImageAction({
   onReplace,
 }: {
   className: string;
-  onReplace: (file: File) => void;
+  onReplace: () => void;
 }) {
   return (
-    <label className={className}>
+    <button type="button" className={className} onClick={onReplace}>
       <span>{INLINE_REPLACE_LABEL}</span>
-      <input
-        aria-label={REPLACE_IMAGE_LABEL}
-        type="file"
-        accept="image/*"
-        onChange={(event) => {
-          const file = event.currentTarget.files?.[0];
-          if (file) {
-            onReplace(file);
-          }
-        }}
-      />
-    </label>
+    </button>
   );
 }
 

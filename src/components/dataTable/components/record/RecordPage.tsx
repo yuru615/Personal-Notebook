@@ -6,7 +6,7 @@ import type {
   PageRecord as KnowledgePageRecord,
 } from "../../../../domain/types";
 import { BlockEditor as KnowledgeBlockEditor } from "../../../editor/BlockEditor";
-import { makeId, nowIso } from "../../domain/factory";
+import { nowIso } from "../../domain/factory";
 import type { Block, BlockType as RecordBlockType } from "../../domain/types";
 import { useAppStore } from "../../store/AppStore";
 import WorkspaceShell from "../layout/WorkspaceShell";
@@ -33,6 +33,7 @@ const KNOWLEDGE_RECORD_BLOCK_TYPES: KnowledgeBlockType[] = [
   "todo",
   "bulleted_list",
   "code",
+  "image",
 ];
 const KNOWLEDGE_EDITABLE_RECORD_TYPES: RecordBlockType[] = [
   "text",
@@ -40,6 +41,7 @@ const KNOWLEDGE_EDITABLE_RECORD_TYPES: RecordBlockType[] = [
   "todo",
   "bulletedList",
   "code",
+  "image",
 ];
 
 interface RecordPageProps {
@@ -126,7 +128,7 @@ export default function RecordPage({ basePath, showSidebar = true }: RecordPageP
     title: record.title,
     icon: null,
     cover: null,
-    blocks: blocks.map(toKnowledgeBlock),
+    blocks: blocks.map((block) => toKnowledgeBlock(block, state.assets)),
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };
@@ -155,6 +157,15 @@ export default function RecordPage({ basePath, showSidebar = true }: RecordPageP
     }
 
     actions.patchBlock(blockId, patch);
+    if (nextBlock.type === "image" && nextBlock.assetId) {
+      actions.attachImageAsset(blockId, {
+        id: nextBlock.assetId,
+        kind: "image",
+        name: nextBlock.name,
+        mimeType: nextBlock.mimeType,
+        createdAt: nowIso(),
+      });
+    }
   };
 
   const reorderKnowledgeBlock = (
@@ -276,14 +287,17 @@ export default function RecordPage({ basePath, showSidebar = true }: RecordPageP
                   onMoveUp={() => actions.moveBlock(block.id, "up")}
                   onMoveDown={() => actions.moveBlock(block.id, "down")}
                   onInsertBelow={(type) => actions.addBlock(record.id, block.id, type)}
-                  onImageUpload={async (file) => {
-                    const dataUrl = await actions.fileToDataUrl(file);
+                  onImageUpload={async () => {
+                    const { selectAndImportAsset } = await import("../../../../lib/assets");
+                    const asset = await selectAndImportAsset("image");
+                    if (!asset) {
+                      return;
+                    }
                     actions.attachImageAsset(block.id, {
-                      id: makeId("asset"),
+                      id: asset.id,
                       kind: "image",
-                      name: file.name,
-                      mimeType: file.type,
-                      dataUrl,
+                      name: asset.name,
+                      mimeType: asset.mimeType,
                       createdAt: nowIso(),
                     });
                   }}
@@ -316,7 +330,10 @@ function isKnowledgeEditableRecordBlock(block: Block) {
   return KNOWLEDGE_EDITABLE_RECORD_TYPES.includes(block.type);
 }
 
-function toKnowledgeBlock(block: Block): KnowledgeBlockRecord {
+function toKnowledgeBlock(
+  block: Block,
+  assets: Record<string, { name: string; mimeType: string }>,
+): KnowledgeBlockRecord {
   const textStyle = {
     textColor: block.textColor,
     backgroundColor: block.backgroundColor,
@@ -355,6 +372,18 @@ function toKnowledgeBlock(block: Block): KnowledgeBlockRecord {
         language: "text",
         text: block.content,
       };
+    case "image": {
+      const asset = block.imageAssetId ? assets[block.imageAssetId] : undefined;
+      return {
+        id: block.id,
+        type: "image",
+        assetId: block.imageAssetId ?? null,
+        name: asset?.name ?? "",
+        mimeType: asset?.mimeType ?? "",
+        caption: block.content,
+        alt: asset?.name ?? "",
+      };
+    }
     case "text":
     default:
       return {
@@ -381,6 +410,8 @@ function toRecordBlockType(type: KnowledgeBlockType): RecordBlockType | null {
       return "bulletedList";
     case "code":
       return "code";
+    case "image":
+      return "image";
     default:
       return null;
   }
@@ -444,6 +475,17 @@ function toRecordBlockPatch(block: KnowledgeBlockRecord): Partial<Block> | null 
         textAlign: undefined,
         checked: undefined,
         imageAssetId: undefined,
+      };
+    case "image":
+      return {
+        type: "image",
+        content: block.caption,
+        richText: undefined,
+        textColor: undefined,
+        backgroundColor: undefined,
+        textAlign: undefined,
+        checked: undefined,
+        imageAssetId: block.assetId ?? undefined,
       };
     default:
       return null;

@@ -7,6 +7,7 @@ mod search;
 
 use std::{
     fs,
+    io::{Cursor, Read, Write},
     path::{Path, PathBuf},
     sync::Mutex,
 };
@@ -19,8 +20,8 @@ use serde_json::Value;
 
 pub use error::{StorageError, StorageResult};
 pub use models::{
-    AssetMeta, BoardRecord, BootstrapPayload, DataTableRecord, DeleteResult, LoadedPage,
-    MindmapRecord, PageMeta, PageRecord, SaveResult, SearchResult, WorkspaceSettings,
+    AssetMeta, BoardRecord, BootstrapPayload, DataTableRecord, DeleteResult, ImportAssetFileInput,
+    LoadedPage, MindmapRecord, PageMeta, PageRecord, SaveResult, SearchResult, WorkspaceSettings,
     WorkspaceSnapshot, WriteAssetInput,
 };
 
@@ -275,12 +276,110 @@ impl Storage {
         assets::write_asset(&self.connection, &self.assets_dir, input)
     }
 
+    pub fn import_asset_file(&self, input: ImportAssetFileInput) -> StorageResult<AssetMeta> {
+        let path = PathBuf::from(&input.path);
+        let name = path
+            .file_name()
+            .and_then(|file_name| file_name.to_str())
+            .ok_or_else(|| StorageError::invalid_payload("asset path has no file name"))?
+            .to_string();
+        let bytes = fs::read(path)?;
+
+        self.write_asset(WriteAssetInput {
+            name,
+            mime_type: input.mime_type,
+            bytes,
+        })
+    }
+
     pub fn read_asset(&self, asset_id: &str) -> StorageResult<Vec<u8>> {
         assets::read_asset(&self.connection, &self.assets_dir, asset_id)
     }
 
+    pub fn get_asset_file_path(&self, asset_id: &str) -> StorageResult<String> {
+        assets::asset_file_path(&self.connection, &self.assets_dir, asset_id)?
+            .into_os_string()
+            .into_string()
+            .map_err(|_| StorageError::invalid_payload("asset path is not valid utf-8"))
+    }
+
     pub fn cleanup_orphan_assets(&self) -> StorageResult<usize> {
         assets::cleanup_orphan_assets(&self.connection, &self.assets_dir)
+    }
+
+    pub fn export_workspace_archive(&self) -> StorageResult<Vec<u8>> {
+        let snapshot = self.export_workspace_backup()?;
+        let assets = assets::load_assets(&self.connection)?;
+        let cursor = Cursor::new(Vec::new());
+        let mut archive = zip::ZipWriter::new(cursor);
+        let options =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+        archive
+            .start_file("workspace.json", options)
+            .map_err(zip_error)?;
+        archive.write_all(serde_json::to_string_pretty(&snapshot)?.as_bytes())?;
+
+        archive
+            .start_file("assets/manifest.json", options)
+            .map_err(zip_error)?;
+        archive.write_all(serde_json::to_string_pretty(&assets)?.as_bytes())?;
+
+        for asset in assets {
+            let path = assets::asset_file_path(&self.connection, &self.assets_dir, &asset.id)?;
+            let bytes = fs::read(path)?;
+            archive
+                .start_file(format!("assets/{}", asset.relative_path), options)
+                .map_err(zip_error)?;
+            archive.write_all(&bytes)?;
+        }
+
+        archive
+            .finish()
+            .map(|cursor| cursor.into_inner())
+            .map_err(zip_error)
+    }
+
+    pub fn import_workspace_archive(&self, bytes: Vec<u8>) -> StorageResult<()> {
+        let cursor = Cursor::new(bytes);
+        let mut archive = zip::ZipArchive::new(cursor).map_err(zip_error)?;
+        let workspace_json = {
+            let mut workspace_file = archive.by_name("workspace.json").map_err(zip_error)?;
+            let mut json = String::new();
+            workspace_file.read_to_string(&mut json)?;
+            json
+        };
+        let snapshot: WorkspaceSnapshot = serde_json::from_str(&workspace_json)?;
+        let assets_json = {
+            match archive.by_name("assets/manifest.json") {
+                Ok(mut manifest_file) => {
+                    let mut json = String::new();
+                    manifest_file.read_to_string(&mut json)?;
+                    json
+                }
+                Err(zip::result::ZipError::FileNotFound) => "[]".to_string(),
+                Err(error) => return Err(zip_error(error)),
+            }
+        };
+        let archive_assets: Vec<AssetMeta> = serde_json::from_str(&assets_json)?;
+
+        for asset in archive_assets {
+            let archive_path = format!("assets/{}", asset.relative_path);
+            let mut asset_file = match archive.by_name(&archive_path) {
+                Ok(file) => file,
+                Err(zip::result::ZipError::FileNotFound) => continue,
+                Err(error) => return Err(zip_error(error)),
+            };
+            let mut asset_bytes = Vec::new();
+            asset_file.read_to_end(&mut asset_bytes)?;
+            self.write_asset(WriteAssetInput {
+                name: asset.name,
+                mime_type: asset.mime_type,
+                bytes: asset_bytes,
+            })?;
+        }
+
+        self.replace_workspace_backup(snapshot)
     }
 
     pub fn search_workspace(&self, query: &str, limit: usize) -> StorageResult<Vec<SearchResult>> {
@@ -401,6 +500,10 @@ impl Storage {
     fn replace_block_refs(&self, page: &PageRecord) -> StorageResult<()> {
         self.connection
             .execute("DELETE FROM block_refs WHERE page_id = ?1", [&page.id])?;
+        self.connection.execute(
+            "DELETE FROM asset_refs WHERE owner_kind = 'page' AND owner_id = ?1",
+            [&page.id],
+        )?;
 
         for block in &page.blocks {
             let Some(block_id) = block.get("id").and_then(Value::as_str) else {
@@ -431,6 +534,17 @@ impl Storage {
                       VALUES (?1, ?2, ?3, ?4)",
                     params![page.id, block_id, ref_kind, ref_id],
                 )?;
+            }
+
+            if matches!(block_type, "image" | "video" | "audio") {
+                if let Some(asset_id) = block.get("assetId").and_then(Value::as_str) {
+                    self.connection.execute(
+                        "INSERT OR IGNORE INTO asset_refs (asset_id, owner_kind, owner_id)
+                          SELECT ?1, 'page', ?2
+                          WHERE EXISTS (SELECT 1 FROM assets WHERE id = ?1)",
+                        params![asset_id, &page.id],
+                    )?;
+                }
             }
         }
 
@@ -883,6 +997,14 @@ fn insert_ordered_object_rows(
     Ok(())
 }
 
+fn zip_error(error: zip::result::ZipError) -> StorageError {
+    match error {
+        zip::result::ZipError::Io(error) => StorageError::io(error),
+        zip::result::ZipError::FileNotFound => StorageError::not_found("archive entry not found"),
+        other => StorageError::invalid_payload(other.to_string()),
+    }
+}
+
 fn option_bool_to_i64(value: Option<bool>) -> Option<i64> {
     value.map(|flag| if flag { 1 } else { 0 })
 }
@@ -1151,6 +1273,86 @@ mod tests {
         assert_eq!(ref_count, 1);
         assert_eq!(storage.cleanup_orphan_assets().expect("cleanup"), 0);
         assert_eq!(storage.read_asset(&asset.id).expect("read asset"), b"image");
+    }
+
+    #[test]
+    fn page_media_assets_are_tracked_as_references() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let asset = storage
+            .write_asset(WriteAssetInput {
+                name: "clip.mp4".to_string(),
+                mime_type: "video/mp4".to_string(),
+                bytes: b"video".to_vec(),
+            })
+            .expect("write asset");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages[0].blocks.push(json!({
+            "id": "block_media",
+            "type": "video",
+            "assetId": asset.id,
+            "name": "clip.mp4",
+            "mimeType": "video/mp4",
+            "caption": "Demo"
+        }));
+
+        storage
+            .replace_workspace_backup(snapshot)
+            .expect("replace snapshot");
+
+        let ref_count: i64 = storage
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM asset_refs
+                  WHERE asset_id = ?1 AND owner_kind = 'page' AND owner_id = 'page_1'",
+                [&asset.id],
+                |row| row.get(0),
+            )
+            .expect("asset ref count");
+
+        assert_eq!(ref_count, 1);
+        assert_eq!(storage.cleanup_orphan_assets().expect("cleanup"), 0);
+    }
+
+    #[test]
+    fn workspace_archive_round_trips_assets_and_snapshot() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        let asset = source
+            .write_asset(WriteAssetInput {
+                name: "image.png".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes: b"image".to_vec(),
+            })
+            .expect("write asset");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages[0].blocks.push(json!({
+            "id": "block_image",
+            "type": "image",
+            "assetId": asset.id,
+            "name": "image.png",
+            "mimeType": "image/png",
+            "caption": "",
+            "alt": "image"
+        }));
+        source
+            .replace_workspace_backup(snapshot.clone())
+            .expect("replace snapshot");
+
+        let archive = source
+            .export_workspace_archive()
+            .expect("export workspace archive");
+        let target = Storage::open_in_memory_for_tests().expect("target opens");
+        target
+            .import_workspace_archive(archive)
+            .expect("import workspace archive");
+
+        assert_eq!(
+            target.export_workspace_backup().expect("export imported"),
+            snapshot
+        );
+        assert_eq!(
+            target.read_asset(&asset.id).expect("read imported"),
+            b"image"
+        );
     }
 
     #[test]

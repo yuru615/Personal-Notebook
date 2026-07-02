@@ -15,6 +15,12 @@ function createRepository() {
       calls.push('replaceWorkspaceBackup')
       snapshot = structuredClone(nextSnapshot)
     },
+    async exportWorkspaceArchive() {
+      return new Uint8Array()
+    },
+    async importWorkspaceArchive() {
+      return undefined
+    },
     async savePage(page) {
       calls.push(`savePage:${page.id}`)
       if (!snapshot) {
@@ -35,6 +41,21 @@ function createRepository() {
     },
     async saveMindmap(mindmap) {
       calls.push(`saveMindmap:${mindmap.id}`)
+    },
+    async writeAsset() {
+      throw new Error('not implemented')
+    },
+    async importAssetFile() {
+      throw new Error('not implemented')
+    },
+    async readAsset() {
+      return new Uint8Array()
+    },
+    async getAssetFilePath() {
+      return ''
+    },
+    async cleanupOrphanAssets() {
+      return 0
     },
     async searchWorkspace() {
       return []

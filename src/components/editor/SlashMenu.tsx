@@ -8,7 +8,7 @@ interface SlashMenuOption {
   label: string
   description: string
   icon: string
-  group: 'text' | 'list' | 'page_data'
+  group: 'text' | 'list' | 'media' | 'page_data'
 }
 
 const options: SlashMenuOption[] = [
@@ -83,6 +83,27 @@ const options: SlashMenuOption[] = [
     group: 'page_data',
   },
   {
+    type: 'image',
+    label: '图片',
+    description: '上传并嵌入本地图片媒体',
+    icon: 'IMG',
+    group: 'media',
+  },
+  {
+    type: 'video',
+    label: '视频',
+    description: '上传并嵌入本地视频媒体',
+    icon: 'VID',
+    group: 'media',
+  },
+  {
+    type: 'audio',
+    label: '音频',
+    description: '上传并嵌入本地音频媒体',
+    icon: 'AUD',
+    group: 'media',
+  },
+  {
     type: 'whiteboard',
     label: '白板',
     description: '插入一个可点击进入的白板卡片',
@@ -113,11 +134,12 @@ const options: SlashMenuOption[] = [
 ]
 
 const groups: Array<{
-  id: 'text' | 'list' | 'page_data'
+  id: 'text' | 'list' | 'media' | 'page_data'
   label: string
 }> = [
   { id: 'text', label: '文本' },
   { id: 'list', label: '列表' },
+  { id: 'media', label: '媒体' },
   { id: 'page_data', label: '页面与数据' },
 ]
 
