@@ -1830,6 +1830,7 @@ fn validate_page_package_manifest(manifest: &PagePackageManifest) -> StorageResu
             validate_json_ref(block, "assetId", &asset_ids, "asset")?;
         }
     }
+    validate_page_package_tree_connected(manifest)?;
 
     for data_table in &manifest.data_tables {
         if let Some(database_id) = data_table
@@ -1853,6 +1854,38 @@ fn validate_page_package_manifest(manifest: &PagePackageManifest) -> StorageResu
     }
 
     Ok(())
+}
+
+fn validate_page_package_tree_connected(manifest: &PagePackageManifest) -> StorageResult<()> {
+    let mut children_by_parent: std::collections::HashMap<&str, Vec<&str>> =
+        std::collections::HashMap::new();
+    for page in &manifest.pages {
+        if let Some(parent_id) = page.parent_id.as_deref() {
+            children_by_parent
+                .entry(parent_id)
+                .or_default()
+                .push(page.id.as_str());
+        }
+    }
+
+    let mut visited = std::collections::HashSet::new();
+    let mut stack = vec![manifest.root_page_id.as_str()];
+    while let Some(page_id) = stack.pop() {
+        if !visited.insert(page_id) {
+            continue;
+        }
+        if let Some(children) = children_by_parent.get(page_id) {
+            stack.extend(children.iter().copied());
+        }
+    }
+
+    if visited.len() == manifest.pages.len() {
+        return Ok(());
+    }
+
+    Err(StorageError::invalid_payload(
+        "page package pages must form one tree rooted at the package root",
+    ))
 }
 
 fn collect_unique_manifest_ids<'a>(
@@ -3121,6 +3154,62 @@ mod tests {
         let error = target
             .import_page_package(archive)
             .expect_err("extra top-level page rejected");
+
+        assert_eq!(error.code, "invalid_payload");
+        assert_eq!(
+            target.export_workspace_backup().expect("snapshot after"),
+            before
+        );
+    }
+
+    #[test]
+    fn page_package_import_rejects_disconnected_page_cycle() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        source
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed source");
+        let archive = source
+            .export_page_package("page_1")
+            .expect("export package");
+        let archive = rewrite_page_package_manifest(archive, |manifest| {
+            manifest.pages.push(PageRecord {
+                id: "page_cycle_a".to_string(),
+                parent_id: Some("page_cycle_b".to_string()),
+                title: "Cycle A".to_string(),
+                icon: None,
+                cover: None,
+                is_full_width: None,
+                is_small_text: None,
+                font_family: None,
+                show_outline: None,
+                blocks: vec![],
+                created_at: "2026-07-02T00:00:00.000Z".to_string(),
+                updated_at: "2026-07-02T00:00:00.000Z".to_string(),
+            });
+            manifest.pages.push(PageRecord {
+                id: "page_cycle_b".to_string(),
+                parent_id: Some("page_cycle_a".to_string()),
+                title: "Cycle B".to_string(),
+                icon: None,
+                cover: None,
+                is_full_width: None,
+                is_small_text: None,
+                font_family: None,
+                show_outline: None,
+                blocks: vec![],
+                created_at: "2026-07-02T00:00:00.000Z".to_string(),
+                updated_at: "2026-07-02T00:00:00.000Z".to_string(),
+            });
+        });
+        let target = Storage::open_in_memory_for_tests().expect("target opens");
+        target
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed target");
+        let before = target.export_workspace_backup().expect("snapshot before");
+
+        let error = target
+            .import_page_package(archive)
+            .expect_err("disconnected page cycle rejected");
 
         assert_eq!(error.code, "invalid_payload");
         assert_eq!(
