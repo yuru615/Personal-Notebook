@@ -1814,9 +1814,13 @@ fn validate_page_package_manifest(manifest: &PagePackageManifest) -> StorageResu
 
     for page in &manifest.pages {
         if page.id != manifest.root_page_id {
-            if let Some(parent_id) = page.parent_id.as_deref() {
-                validate_manifest_ref(&page_ids, parent_id, "page parent")?;
-            }
+            let parent_id = page.parent_id.as_deref().ok_or_else(|| {
+                StorageError::invalid_payload(format!(
+                    "page package non-root page has no parent: {}",
+                    page.id
+                ))
+            })?;
+            validate_manifest_ref(&page_ids, parent_id, "page parent")?;
         }
         for block in &page.blocks {
             validate_json_ref(block, "pageId", &page_ids, "page")?;
@@ -3075,6 +3079,48 @@ mod tests {
         let error = target
             .import_page_package(archive)
             .expect_err("missing page ref rejected");
+
+        assert_eq!(error.code, "invalid_payload");
+        assert_eq!(
+            target.export_workspace_backup().expect("snapshot after"),
+            before
+        );
+    }
+
+    #[test]
+    fn page_package_import_rejects_extra_non_root_top_level_page() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        source
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed source");
+        let archive = source
+            .export_page_package("page_1")
+            .expect("export package");
+        let archive = rewrite_page_package_manifest(archive, |manifest| {
+            manifest.pages.push(PageRecord {
+                id: "page_extra_root".to_string(),
+                parent_id: None,
+                title: "Extra root".to_string(),
+                icon: None,
+                cover: None,
+                is_full_width: None,
+                is_small_text: None,
+                font_family: None,
+                show_outline: None,
+                blocks: vec![],
+                created_at: "2026-07-02T00:00:00.000Z".to_string(),
+                updated_at: "2026-07-02T00:00:00.000Z".to_string(),
+            });
+        });
+        let target = Storage::open_in_memory_for_tests().expect("target opens");
+        target
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed target");
+        let before = target.export_workspace_backup().expect("snapshot before");
+
+        let error = target
+            .import_page_package(archive)
+            .expect_err("extra top-level page rejected");
 
         assert_eq!(error.code, "invalid_payload");
         assert_eq!(
