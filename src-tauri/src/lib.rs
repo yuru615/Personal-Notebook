@@ -45,6 +45,7 @@ pub fn run() {
             storage::commands::export_workspace_archive,
             storage::commands::export_workspace_archive_to_path,
             storage::commands::import_workspace_archive,
+            storage::commands::import_workspace_archive_from_path,
             storage::commands::load_page,
             storage::commands::save_page,
             storage::commands::delete_page_branch,

@@ -1,15 +1,33 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceSnapshot } from '../domain/types'
 
-const invoke = vi.fn()
+type TauriEventHandler = (event: { payload: unknown }) => void
+
+const eventApi = vi.hoisted(() => ({
+  invoke: vi.fn(),
+  listen: vi.fn(),
+  unlisten: vi.fn(),
+  handlers: [] as TauriEventHandler[],
+}))
 
 vi.mock('@tauri-apps/api/core', () => ({
-  invoke,
+  invoke: eventApi.invoke,
+}))
+
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: eventApi.listen,
 }))
 
 describe('createTauriStorageClient', () => {
   beforeEach(() => {
-    invoke.mockReset()
+    eventApi.invoke.mockReset()
+    eventApi.listen.mockReset()
+    eventApi.unlisten.mockReset()
+    eventApi.handlers = []
+    eventApi.listen.mockImplementation(async (_eventName, handler: TauriEventHandler) => {
+      eventApi.handlers.push(handler)
+      return eventApi.unlisten
+    })
   })
 
   it('exports and replaces workspace backups through typed Tauri commands', async () => {
@@ -23,7 +41,7 @@ describe('createTauriStorageClient', () => {
         lastOpenedPageId: null,
       },
     }
-    invoke.mockResolvedValueOnce(snapshot).mockResolvedValueOnce(undefined)
+    eventApi.invoke.mockResolvedValueOnce(snapshot).mockResolvedValueOnce(undefined)
 
     const client = createTauriStorageClient()
 
@@ -40,9 +58,9 @@ describe('createTauriStorageClient', () => {
       updatedAt: '2026-06-30T00:00:00.000Z',
     })
 
-    expect(invoke).toHaveBeenNthCalledWith(1, 'export_workspace_backup')
-    expect(invoke).toHaveBeenNthCalledWith(2, 'replace_workspace_backup', { payload: snapshot })
-    expect(invoke).toHaveBeenNthCalledWith(3, 'save_page', {
+    expect(eventApi.invoke).toHaveBeenNthCalledWith(1, 'export_workspace_backup')
+    expect(eventApi.invoke).toHaveBeenNthCalledWith(2, 'replace_workspace_backup', { payload: snapshot })
+    expect(eventApi.invoke).toHaveBeenNthCalledWith(3, 'save_page', {
       page: {
         id: 'page_1',
         parentId: null,
@@ -58,7 +76,7 @@ describe('createTauriStorageClient', () => {
 
   it('searches through the backend search command with a bounded limit', async () => {
     const { createTauriStorageClient } = await import('./storageClient')
-    invoke.mockResolvedValueOnce([
+    eventApi.invoke.mockResolvedValueOnce([
       {
         kind: 'page',
         pageId: 'page_1',
@@ -73,12 +91,12 @@ describe('createTauriStorageClient', () => {
     await expect(client.searchWorkspace('home', 12)).resolves.toMatchObject([
       { kind: 'page', pageId: 'page_1' },
     ])
-    expect(invoke).toHaveBeenCalledWith('search_workspace', { query: 'home', limit: 12 })
+    expect(eventApi.invoke).toHaveBeenCalledWith('search_workspace', { query: 'home', limit: 12 })
   })
 
   it('writes assets and resolves asset file paths through typed Tauri commands', async () => {
     const { createTauriStorageClient } = await import('./storageClient')
-    invoke
+    eventApi.invoke
       .mockResolvedValueOnce({
         id: 'asset_abc',
         sha256: 'abc',
@@ -102,14 +120,14 @@ describe('createTauriStorageClient', () => {
     ).resolves.toMatchObject({ id: 'asset_abc' })
     await expect(client.getAssetFilePath('asset_abc')).resolves.toBe('/app/assets/ab/abc.mp4')
 
-    expect(invoke).toHaveBeenNthCalledWith(1, 'write_asset', {
+    expect(eventApi.invoke).toHaveBeenNthCalledWith(1, 'write_asset', {
       input: {
         name: 'clip.mp4',
         mimeType: 'video/mp4',
         bytes,
       },
     })
-    expect(invoke).toHaveBeenNthCalledWith(2, 'get_asset_file_path', {
+    expect(eventApi.invoke).toHaveBeenNthCalledWith(2, 'get_asset_file_path', {
       assetId: 'asset_abc',
     })
   })
@@ -117,7 +135,7 @@ describe('createTauriStorageClient', () => {
   it('exports and imports complete workspace archive bytes', async () => {
     const { createTauriStorageClient } = await import('./storageClient')
     const bytes = new Uint8Array([80, 75, 3, 4])
-    invoke.mockResolvedValueOnce(undefined).mockResolvedValueOnce(bytes).mockResolvedValueOnce(undefined)
+    eventApi.invoke.mockResolvedValueOnce(undefined).mockResolvedValueOnce(bytes).mockResolvedValueOnce(undefined)
 
     const client = createTauriStorageClient()
 
@@ -125,16 +143,97 @@ describe('createTauriStorageClient', () => {
     await expect(client.exportWorkspaceArchive()).resolves.toBe(bytes)
     await client.importWorkspaceArchive(bytes)
 
-    expect(invoke).toHaveBeenNthCalledWith(1, 'export_workspace_archive_to_path', {
+    expect(eventApi.invoke).toHaveBeenNthCalledWith(1, 'export_workspace_archive_to_path', {
       path: '/tmp/page.zip',
     })
-    expect(invoke).toHaveBeenNthCalledWith(2, 'export_workspace_archive')
-    expect(invoke).toHaveBeenNthCalledWith(3, 'import_workspace_archive', { bytes })
+    expect(eventApi.invoke).toHaveBeenNthCalledWith(2, 'export_workspace_archive')
+    expect(eventApi.invoke).toHaveBeenNthCalledWith(3, 'import_workspace_archive', { bytes })
+  })
+
+  it('subscribes to archive progress while exporting directly to a path', async () => {
+    const { createTauriStorageClient, WORKSPACE_ARCHIVE_PROGRESS_EVENT } = await import('./storageClient')
+    const onProgress = vi.fn()
+
+    eventApi.invoke.mockImplementationOnce(async (_command, args) => {
+      eventApi.handlers[0]?.({
+        payload: {
+          taskId: args.taskId,
+          operation: 'export',
+          phase: 'processingAsset',
+          current: 1,
+          total: 2,
+          bytesProcessed: 512,
+          bytesTotal: 1024,
+          itemName: 'lesson.m4a',
+        },
+      })
+    })
+
+    const client = createTauriStorageClient()
+
+    await client.exportWorkspaceArchiveToPath('/tmp/page.zip', onProgress)
+
+    expect(eventApi.listen).toHaveBeenCalledWith(
+      WORKSPACE_ARCHIVE_PROGRESS_EVENT,
+      expect.any(Function),
+    )
+    expect(eventApi.invoke).toHaveBeenCalledWith('export_workspace_archive_to_path', {
+      path: '/tmp/page.zip',
+      taskId: expect.any(String),
+    })
+    expect(onProgress).toHaveBeenCalledWith({
+      taskId: expect.any(String),
+      operation: 'export',
+      phase: 'processingAsset',
+      current: 1,
+      total: 2,
+      bytesProcessed: 512,
+      bytesTotal: 1024,
+      itemName: 'lesson.m4a',
+    })
+    expect(eventApi.unlisten).toHaveBeenCalledTimes(1)
+  })
+
+  it('imports complete workspace archives directly from a desktop path with progress', async () => {
+    const { createTauriStorageClient } = await import('./storageClient')
+    const onProgress = vi.fn()
+
+    eventApi.invoke.mockImplementationOnce(async (_command, args) => {
+      eventApi.handlers[0]?.({
+        payload: {
+          taskId: args.taskId,
+          operation: 'import',
+          phase: 'processingAsset',
+          current: 1,
+          total: 1,
+          bytesProcessed: 2048,
+          bytesTotal: 2048,
+          itemName: 'recording.wav',
+        },
+      })
+    })
+
+    const client = createTauriStorageClient()
+
+    await client.importWorkspaceArchiveFromPath('/tmp/backup.zip', onProgress)
+
+    expect(eventApi.invoke).toHaveBeenCalledWith('import_workspace_archive_from_path', {
+      path: '/tmp/backup.zip',
+      taskId: expect.any(String),
+    })
+    expect(onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: 'import',
+        phase: 'processingAsset',
+        itemName: 'recording.wav',
+      }),
+    )
+    expect(eventApi.unlisten).toHaveBeenCalledTimes(1)
   })
 
   it('normalizes archive bytes returned from Tauri into a Uint8Array', async () => {
     const { createTauriStorageClient } = await import('./storageClient')
-    invoke.mockResolvedValueOnce([80, 75, 3, 4])
+    eventApi.invoke.mockResolvedValueOnce([80, 75, 3, 4])
 
     const client = createTauriStorageClient()
     const bytes = await client.exportWorkspaceArchive()
@@ -145,13 +244,13 @@ describe('createTauriStorageClient', () => {
 
   it('normalizes asset bytes returned from Tauri into a Uint8Array', async () => {
     const { createTauriStorageClient } = await import('./storageClient')
-    invoke.mockResolvedValueOnce([1, 2, 3])
+    eventApi.invoke.mockResolvedValueOnce([1, 2, 3])
 
     const client = createTauriStorageClient()
     const bytes = await client.readAsset('asset_abc')
 
     expect(bytes).toBeInstanceOf(Uint8Array)
     expect([...bytes]).toEqual([1, 2, 3])
-    expect(invoke).toHaveBeenCalledWith('read_asset', { assetId: 'asset_abc' })
+    expect(eventApi.invoke).toHaveBeenCalledWith('read_asset', { assetId: 'asset_abc' })
   })
 })

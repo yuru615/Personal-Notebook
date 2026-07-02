@@ -8,12 +8,19 @@ const CLEANUP_ORPHAN_DATA_TABLES_LABEL = '清理孤立数据表格'
 const DANGER_SECTION_LABEL = '\u5371\u9669\u64cd\u4f5c'
 const DELETE_CURRENT_PAGE_LABEL = '\u5220\u9664\u5f53\u524d\u9875\u9762'
 
+export interface ArchiveTaskStatus {
+  label: string
+  detail?: string
+  percent?: number
+}
+
 interface ExportImportPanelProps {
   status: SaveStatus
   adaptiveWidth: boolean
   smallText: boolean
   fontFamily: PageFontFamily
   outlineVisible: boolean
+  archiveTask?: ArchiveTaskStatus | null
   onToggleAdaptiveWidth: (value: boolean) => void
   onToggleSmallText: (value: boolean) => void
   onToggleFontFamily: (value: PageFontFamily) => void
@@ -31,6 +38,7 @@ export function ExportImportPanel({
   smallText,
   fontFamily,
   outlineVisible,
+  archiveTask,
   onToggleAdaptiveWidth,
   onToggleSmallText,
   onToggleFontFamily,
@@ -43,6 +51,8 @@ export function ExportImportPanel({
 }: ExportImportPanelProps) {
   const [open, setOpen] = useState(false)
   const panelRef = useRef<HTMLDivElement | null>(null)
+  const isArchiveBusy = Boolean(archiveTask)
+  const progressPercent = archiveTask?.percent == null ? null : clampPercent(archiveTask.percent)
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
@@ -62,11 +72,19 @@ export function ExportImportPanel({
   }
 
   function handleExportArchive() {
+    if (isArchiveBusy) {
+      return
+    }
+
     closeMenu()
     void onExportArchive()
   }
 
   function handleImportArchive() {
+    if (isArchiveBusy) {
+      return
+    }
+
     closeMenu()
     void onImportArchive()
   }
@@ -100,10 +118,30 @@ export function ExportImportPanel({
         aria-label={uiCopy.page.menu}
         aria-expanded={open}
         aria-haspopup="menu"
+        disabled={isArchiveBusy}
         onClick={() => setOpen((value) => !value)}
       >
         <span aria-hidden="true">⋯</span>
       </button>
+      {archiveTask ? (
+        <div className="page-menu-archive-progress" role="status" aria-live="polite">
+          <div className="page-menu-archive-progress-header">
+            <span className="page-menu-archive-progress-title">{archiveTask.label}</span>
+            {progressPercent == null ? null : (
+              <span className="page-menu-archive-progress-percent">{progressPercent}%</span>
+            )}
+          </div>
+          <div className="page-menu-archive-progress-track" aria-hidden="true">
+            <span
+              className="page-menu-archive-progress-bar"
+              style={{ width: `${progressPercent ?? 8}%` }}
+            />
+          </div>
+          {archiveTask.detail ? (
+            <div className="page-menu-archive-progress-detail">{archiveTask.detail}</div>
+          ) : null}
+        </div>
+      ) : null}
       {open ? (
         <div className="page-menu-popover">
           <div className="page-menu-meta">
@@ -160,10 +198,20 @@ export function ExportImportPanel({
           <div className="page-menu-divider" />
           <div className="page-menu-section">
             <div className="page-menu-section-title">{uiCopy.export.section}</div>
-            <button type="button" className="page-menu-action" onClick={handleExportArchive}>
+            <button
+              type="button"
+              className="page-menu-action"
+              disabled={isArchiveBusy}
+              onClick={handleExportArchive}
+            >
               <span className="page-menu-item-label">{uiCopy.export.archive}</span>
             </button>
-            <button type="button" className="page-menu-action" onClick={handleImportArchive}>
+            <button
+              type="button"
+              className="page-menu-action"
+              disabled={isArchiveBusy}
+              onClick={handleImportArchive}
+            >
               <span className="page-menu-item-label">{uiCopy.export.importArchive}</span>
             </button>
             <button type="button" className="page-menu-action" onClick={handleCleanupOrphanBoards}>
@@ -192,4 +240,8 @@ export function ExportImportPanel({
       ) : null}
     </div>
   )
+}
+
+function clampPercent(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)))
 }

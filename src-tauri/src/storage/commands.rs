@@ -1,9 +1,10 @@
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 use super::{
     AssetMeta, BoardRecord, BootstrapPayload, DataTableRecord, DeleteResult, ImportAssetFileInput,
     LoadedPage, MindmapRecord, PageRecord, SaveResult, SearchResult, StorageError, StorageResult,
-    StorageState, WorkspaceSnapshot, WriteAssetInput,
+    StorageState, WorkspaceArchiveProgress, WorkspaceSnapshot, WriteAssetInput,
+    WORKSPACE_ARCHIVE_PROGRESS_EVENT,
 };
 
 #[tauri::command]
@@ -33,10 +34,22 @@ pub fn export_workspace_archive(state: State<'_, StorageState>) -> StorageResult
 
 #[tauri::command]
 pub fn export_workspace_archive_to_path(
+    app: AppHandle,
     state: State<'_, StorageState>,
     path: String,
+    task_id: Option<String>,
 ) -> StorageResult<()> {
-    state.with_storage(|storage| storage.export_workspace_archive_to_path(path))
+    state.with_storage(|storage| {
+        if task_id.is_none() {
+            return storage.export_workspace_archive_to_path(path);
+        }
+
+        storage.export_workspace_archive_to_path_with_progress(
+            path,
+            task_id.as_deref(),
+            &mut |progress| emit_archive_progress(&app, progress),
+        )
+    })
 }
 
 #[tauri::command]
@@ -45,6 +58,30 @@ pub fn import_workspace_archive(
     bytes: Vec<u8>,
 ) -> StorageResult<()> {
     state.with_storage(|storage| storage.import_workspace_archive(bytes))
+}
+
+#[tauri::command]
+pub fn import_workspace_archive_from_path(
+    app: AppHandle,
+    state: State<'_, StorageState>,
+    path: String,
+    task_id: Option<String>,
+) -> StorageResult<()> {
+    state.with_storage(|storage| {
+        if task_id.is_none() {
+            return storage.import_workspace_archive_from_path(path);
+        }
+
+        storage.import_workspace_archive_from_path_with_progress(
+            path,
+            task_id.as_deref(),
+            &mut |progress| emit_archive_progress(&app, progress),
+        )
+    })
+}
+
+fn emit_archive_progress(app: &AppHandle, progress: WorkspaceArchiveProgress) {
+    let _ = app.emit(WORKSPACE_ARCHIVE_PROGRESS_EVENT, progress);
 }
 
 #[tauri::command]

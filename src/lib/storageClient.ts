@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import type { SearchResult } from '../domain/search'
 import type {
   BoardRecord,
@@ -29,12 +30,42 @@ export interface AssetMeta {
   createdAt: string
 }
 
+export const WORKSPACE_ARCHIVE_PROGRESS_EVENT = 'zhixi://workspace-archive-progress'
+
+export type WorkspaceArchiveOperation = 'export' | 'import'
+export type WorkspaceArchiveProgressPhase =
+  | 'preparing'
+  | 'writingMetadata'
+  | 'processingAsset'
+  | 'finalizing'
+  | 'complete'
+
+export interface WorkspaceArchiveProgress {
+  taskId: string
+  operation: WorkspaceArchiveOperation
+  phase: WorkspaceArchiveProgressPhase
+  current: number
+  total: number
+  bytesProcessed: number
+  bytesTotal: number
+  itemName?: string
+}
+
+export type WorkspaceArchiveProgressHandler = (progress: WorkspaceArchiveProgress) => void
+
 export interface WorkspaceStorageClient {
   exportWorkspaceBackup(): Promise<WorkspaceSnapshot | null>
   replaceWorkspaceBackup(snapshot: WorkspaceSnapshot): Promise<void>
-  exportWorkspaceArchiveToPath(path: string): Promise<void>
+  exportWorkspaceArchiveToPath(
+    path: string,
+    onProgress?: WorkspaceArchiveProgressHandler,
+  ): Promise<void>
   exportWorkspaceArchive(): Promise<Uint8Array>
   importWorkspaceArchive(bytes: Uint8Array): Promise<void>
+  importWorkspaceArchiveFromPath(
+    path: string,
+    onProgress?: WorkspaceArchiveProgressHandler,
+  ): Promise<void>
   savePage(page: PageRecord): Promise<void>
   saveBoard(board: BoardRecord): Promise<void>
   saveDataTable(dataTable: DataTableRecord): Promise<void>
@@ -57,8 +88,12 @@ export function createTauriStorageClient(): WorkspaceStorageClient {
       return invoke<void>('replace_workspace_backup', { payload: snapshot })
     },
 
-    exportWorkspaceArchiveToPath(path) {
-      return invoke<void>('export_workspace_archive_to_path', { path })
+    exportWorkspaceArchiveToPath(path, onProgress) {
+      return invokeArchiveCommandWithProgress(
+        'export_workspace_archive_to_path',
+        { path },
+        onProgress,
+      )
     },
 
     async exportWorkspaceArchive() {
@@ -67,6 +102,14 @@ export function createTauriStorageClient(): WorkspaceStorageClient {
 
     importWorkspaceArchive(bytes) {
       return invoke<void>('import_workspace_archive', { bytes })
+    },
+
+    importWorkspaceArchiveFromPath(path, onProgress) {
+      return invokeArchiveCommandWithProgress(
+        'import_workspace_archive_from_path',
+        { path },
+        onProgress,
+      )
     },
 
     async savePage(page) {
@@ -113,6 +156,41 @@ export function createTauriStorageClient(): WorkspaceStorageClient {
 
 function normalizeByteArray(bytes: Uint8Array | number[]) {
   return bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
+}
+
+async function invokeArchiveCommandWithProgress(
+  command: string,
+  args: Record<string, unknown>,
+  onProgress?: WorkspaceArchiveProgressHandler,
+) {
+  if (!onProgress) {
+    await invoke<void>(command, args)
+    return
+  }
+
+  const taskId = createArchiveTaskId()
+  const unlisten = await listen<WorkspaceArchiveProgress>(
+    WORKSPACE_ARCHIVE_PROGRESS_EVENT,
+    (event) => {
+      if (event.payload.taskId === taskId) {
+        onProgress(event.payload)
+      }
+    },
+  )
+
+  try {
+    await invoke<void>(command, { ...args, taskId })
+  } finally {
+    unlisten()
+  }
+}
+
+function createArchiveTaskId() {
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID()
+  }
+
+  return `archive_${Date.now()}_${Math.random().toString(36).slice(2)}`
 }
 
 const defaultStorageClient = createTauriStorageClient()

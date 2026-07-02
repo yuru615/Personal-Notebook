@@ -87,6 +87,21 @@ describe('ExportImportPanel', () => {
     expect(onImportArchive).toHaveBeenCalledTimes(1)
   })
 
+  it('shows active archive progress outside the closed menu', async () => {
+    renderPanel({
+      archiveTask: {
+        label: '正在导出完整备份',
+        detail: 'lesson.m4a',
+        percent: 50,
+      },
+    })
+
+    expect(screen.getByRole('status')).toHaveTextContent('正在导出完整备份')
+    expect(screen.getByRole('status')).toHaveTextContent('lesson.m4a')
+    expect(screen.getByRole('status')).toHaveTextContent('50%')
+    expect(screen.getByRole('button', { name: uiCopy.page.menu })).toBeDisabled()
+  })
+
   it('toggles adaptive content width from the page menu', async () => {
     const user = userEvent.setup()
     const onToggleAdaptiveWidth = vi.fn()

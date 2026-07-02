@@ -24,6 +24,9 @@ function createRepository() {
     async importWorkspaceArchive() {
       return undefined
     },
+    async importWorkspaceArchiveFromPath() {
+      return undefined
+    },
     async savePage(page) {
       calls.push(`savePage:${page.id}`)
       if (!snapshot) {

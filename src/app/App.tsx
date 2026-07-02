@@ -16,7 +16,10 @@ import { PageOutline } from '../components/editor/PageOutline'
 import { MindmapFrame } from '../components/mindmap/MindmapFrame'
 import { MindmapPage } from '../components/mindmap/MindmapPage'
 import { useDismissableLayer } from '../components/editor/useDismissableLayer'
-import { ExportImportPanel } from '../components/export/ExportImportPanel'
+import {
+  ExportImportPanel,
+  type ArchiveTaskStatus,
+} from '../components/export/ExportImportPanel'
 import { AppShell } from '../components/layout/AppShell'
 import { SearchDialog } from '../components/search/SearchDialog'
 import ConfirmDialog from '../components/dataTable/components/table/ConfirmDialog'
@@ -44,18 +47,23 @@ import {
 import {
   exportWorkspaceArchiveToPath,
   exportWorkspaceArchive,
+  importWorkspaceArchiveFromPath,
   importWorkspaceArchive,
 } from '../lib/assets'
 import { registerDesktopPendingSaveFlush } from '../lib/desktopLifecycle'
 import {
   isDesktopRuntime,
   openBinaryFile,
+  openLocalFilePath,
   openTextFile,
   pickSaveFilePath,
   saveBinaryFile,
   saveTextFile,
 } from '../lib/fileAccess'
-import { searchWorkspace } from '../lib/storageClient'
+import {
+  searchWorkspace,
+  type WorkspaceArchiveProgress,
+} from '../lib/storageClient'
 import { createWorkspaceStore } from '../store/createWorkspaceStore'
 import { uiCopy } from '../ui/copy'
 import { sanitizeFileNameSegment } from '../utils/fileName'
@@ -97,6 +105,30 @@ function isEditableShortcutTarget(target: EventTarget | null) {
   )
 }
 
+function progressToPercent(progress: WorkspaceArchiveProgress) {
+  if (progress.phase === 'complete') {
+    return 100
+  }
+
+  if (progress.bytesTotal > 0) {
+    return (progress.bytesProcessed / progress.bytesTotal) * 100
+  }
+
+  if (progress.total > 0) {
+    return (progress.current / progress.total) * 100
+  }
+
+  return undefined
+}
+
+function formatArchiveItemCount(progress: WorkspaceArchiveProgress) {
+  if (progress.total <= 0) {
+    return undefined
+  }
+
+  return `${progress.current}/${progress.total}`
+}
+
 interface AppProps {
   repository?: WorkspaceRepository
   store?: WorkspaceStore
@@ -110,7 +142,9 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState)
   const [isBootstrapped, setIsBootstrapped] = useState(false)
   const [bootstrapError, setBootstrapError] = useState<unknown>(null)
+  const [archiveTask, setArchiveTask] = useState<ArchiveTaskStatus | null>(null)
   const bootstrapPromiseRef = useRef<Promise<void> | null>(null)
+  const archiveTaskClearTimerRef = useRef<number | null>(null)
   const setCurrentPage = store.getState().setCurrentPage
 
   useEffect(() => {
@@ -216,6 +250,47 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
     }
   }, [store])
 
+  useEffect(() => {
+    return () => {
+      if (archiveTaskClearTimerRef.current !== null) {
+        window.clearTimeout(archiveTaskClearTimerRef.current)
+      }
+    }
+  }, [])
+
+  function showArchiveTask(nextTask: ArchiveTaskStatus) {
+    if (archiveTaskClearTimerRef.current !== null) {
+      window.clearTimeout(archiveTaskClearTimerRef.current)
+      archiveTaskClearTimerRef.current = null
+    }
+
+    setArchiveTask(nextTask)
+  }
+
+  function finishArchiveTask(label: string) {
+    showArchiveTask({ label, percent: 100 })
+    archiveTaskClearTimerRef.current = window.setTimeout(() => {
+      setArchiveTask(null)
+      archiveTaskClearTimerRef.current = null
+    }, 2200)
+  }
+
+  function failArchiveTask(label: string) {
+    showArchiveTask({ label })
+    archiveTaskClearTimerRef.current = window.setTimeout(() => {
+      setArchiveTask(null)
+      archiveTaskClearTimerRef.current = null
+    }, 3200)
+  }
+
+  function showArchiveProgress(label: string, progress: WorkspaceArchiveProgress) {
+    showArchiveTask({
+      label,
+      detail: progress.itemName ?? formatArchiveItemCount(progress),
+      percent: progressToPercent(progress),
+    })
+  }
+
   if (!isBootstrapped) {
     return <div className="page-empty">{uiCopy.app.loading}</div>
   }
@@ -231,6 +306,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       mindmaps={state.mindmaps}
       pages={state.pages}
       currentPageId={state.currentPageId}
+      archiveTask={archiveTask}
       onCreatePage={() => store.getState().createPage()}
       onRoutePageChange={setCurrentPage}
       onRenamePage={(pageId, title) => store.getState().renamePage(pageId, title)}
@@ -325,17 +401,62 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
             return
           }
 
-          await exportWorkspaceArchiveToPath(path)
+          showArchiveTask({ label: uiCopy.export.exportingArchive, percent: 0 })
+          try {
+            await exportWorkspaceArchiveToPath(path, (progress) => {
+              showArchiveProgress(uiCopy.export.exportingArchive, progress)
+            })
+            finishArchiveTask(uiCopy.export.exportComplete)
+          } catch {
+            failArchiveTask(uiCopy.export.exportError)
+            window.alert(uiCopy.export.exportError)
+          }
           return
         }
 
-        await saveBinaryFile({
-          defaultPath,
-          contents: await exportWorkspaceArchive(),
-          filters: ZIP_FILE_FILTER,
-        })
+        showArchiveTask({ label: uiCopy.export.exportingArchive, percent: 5 })
+        try {
+          const contents = await exportWorkspaceArchive()
+          showArchiveTask({ label: uiCopy.export.exportingArchive, percent: 85 })
+          await saveBinaryFile({
+            defaultPath,
+            contents,
+            filters: ZIP_FILE_FILTER,
+          })
+          finishArchiveTask(uiCopy.export.exportComplete)
+        } catch {
+          failArchiveTask(uiCopy.export.exportError)
+          window.alert(uiCopy.export.exportError)
+        }
       }}
       onImportArchive={async () => {
+        if (isDesktopRuntime()) {
+          const file = await openLocalFilePath({ filters: ZIP_FILE_FILTER })
+
+          if (!file) {
+            return store.getState().currentPageId
+          }
+
+          if (!window.confirm(uiCopy.export.importConfirm)) {
+            return store.getState().currentPageId
+          }
+
+          try {
+            showArchiveTask({ label: uiCopy.export.importingArchive, percent: 0 })
+            await importWorkspaceArchiveFromPath(file.path, (progress) => {
+              showArchiveProgress(uiCopy.export.importingArchive, progress)
+            })
+            showArchiveTask({ label: uiCopy.export.refreshingWorkspace, percent: 95 })
+            await store.getState().bootstrap()
+            finishArchiveTask(uiCopy.export.importComplete)
+            return store.getState().currentPageId
+          } catch {
+            failArchiveTask(uiCopy.export.importError)
+            window.alert(uiCopy.export.importError)
+            return store.getState().currentPageId
+          }
+        }
+
         const file = await openBinaryFile({ filters: ZIP_FILE_FILTER })
 
         if (!file) {
@@ -347,10 +468,14 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
         }
 
         try {
+          showArchiveTask({ label: uiCopy.export.importingArchive, percent: 20 })
           await importWorkspaceArchive(file.contents)
+          showArchiveTask({ label: uiCopy.export.refreshingWorkspace, percent: 95 })
           await store.getState().bootstrap()
+          finishArchiveTask(uiCopy.export.importComplete)
           return store.getState().currentPageId
         } catch {
+          failArchiveTask(uiCopy.export.importError)
           window.alert(uiCopy.export.importError)
           return store.getState().currentPageId
         }
@@ -373,6 +498,7 @@ interface AppRoutesProps {
   mindmaps: MindmapRecord[]
   pages: AppState['pages']
   currentPageId: AppState['currentPageId']
+  archiveTask: ArchiveTaskStatus | null
   onCreatePage: () => Promise<PageRecord>
   onRoutePageChange: (pageId: string) => Promise<void>
   onRenamePage: (pageId: string, title: string) => Promise<void>
@@ -442,6 +568,7 @@ function AppRoutes({
   mindmaps,
   pages,
   currentPageId,
+  archiveTask,
   onCreatePage,
   onRoutePageChange,
   onRenamePage,
@@ -600,6 +727,7 @@ function AppRoutes({
                 mindmaps={mindmaps}
                 pages={pages}
                 currentPageId={currentPageId}
+                archiveTask={archiveTask}
                 onRoutePageChange={onRoutePageChange}
                 onRenamePage={onRenamePage}
                 onDeletePage={handleRequestDeletePage}
@@ -654,6 +782,7 @@ function AppRoutes({
                 dataTables={dataTables}
                 currentPageId={currentPageId}
                 saveStatus={saveStatus}
+                archiveTask={archiveTask}
                 route="table"
                 onRoutePageChange={onRoutePageChange}
                 onUpdateDataTableSnapshot={onUpdateDataTableSnapshot}
@@ -680,6 +809,7 @@ function AppRoutes({
                 dataTables={dataTables}
                 currentPageId={currentPageId}
                 saveStatus={saveStatus}
+                archiveTask={archiveTask}
                 route="record"
                 onRoutePageChange={onRoutePageChange}
                 onUpdateDataTableSnapshot={onUpdateDataTableSnapshot}
@@ -736,6 +866,7 @@ interface PageRouteProps {
   mindmaps: MindmapRecord[]
   pages: PageRecord[]
   currentPageId: string | null
+  archiveTask: ArchiveTaskStatus | null
   onRoutePageChange: (pageId: string) => Promise<void>
   onRenamePage: (pageId: string, title: string) => Promise<void>
   onDeletePage: (pageId: string) => void
@@ -791,6 +922,7 @@ function PageRoute({
   mindmaps,
   pages,
   currentPageId,
+  archiveTask,
   onRoutePageChange,
   onRenamePage,
   onDeletePage,
@@ -874,6 +1006,7 @@ function PageRoute({
             smallText={page.isSmallText === true}
             fontFamily={page.fontFamily ?? 'default'}
             outlineVisible={outlineVisible}
+            archiveTask={archiveTask}
             onToggleAdaptiveWidth={(value) => {
               void onTogglePageFullWidth(page.id, value)
             }}
@@ -1036,6 +1169,7 @@ interface DataTableRouteProps {
   dataTables: DataTableRecord[]
   currentPageId: string | null
   saveStatus: SaveStatus
+  archiveTask: ArchiveTaskStatus | null
   route: 'table' | 'record'
   onRoutePageChange: (pageId: string) => Promise<void>
   onUpdateDataTableSnapshot: (databaseId: string, snapshot: unknown) => Promise<void>
@@ -1058,6 +1192,7 @@ function DataTableRoute({
   dataTables,
   currentPageId,
   saveStatus,
+  archiveTask,
   route,
   onRoutePageChange,
   onUpdateDataTableSnapshot,
@@ -1135,6 +1270,7 @@ function DataTableRoute({
             smallText={page.isSmallText === true}
             fontFamily={page.fontFamily ?? 'default'}
             outlineVisible={outlineVisible}
+            archiveTask={archiveTask}
             onToggleAdaptiveWidth={(value) => {
               void onTogglePageFullWidth(page.id, value)
             }}

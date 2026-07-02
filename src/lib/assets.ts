@@ -1,6 +1,10 @@
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { isDesktopRuntime, openBinaryFile, openLocalFilePath } from './fileAccess'
-import { createTauriStorageClient, type AssetMeta } from './storageClient'
+import {
+  createTauriStorageClient,
+  type AssetMeta,
+  type WorkspaceArchiveProgressHandler,
+} from './storageClient'
 
 const storageClient = createTauriStorageClient()
 
@@ -103,10 +107,20 @@ export function exportWorkspaceArchive() {
   return storageClient.exportWorkspaceArchive()
 }
 
-export function exportWorkspaceArchiveToPath(path: string) {
-  return storageClient.exportWorkspaceArchiveToPath(path)
+export function exportWorkspaceArchiveToPath(
+  path: string,
+  onProgress?: WorkspaceArchiveProgressHandler,
+) {
+  return storageClient.exportWorkspaceArchiveToPath(path, onProgress)
 }
 
 export function importWorkspaceArchive(bytes: Uint8Array) {
   return storageClient.importWorkspaceArchive(bytes)
+}
+
+export function importWorkspaceArchiveFromPath(
+  path: string,
+  onProgress?: WorkspaceArchiveProgressHandler,
+) {
+  return storageClient.importWorkspaceArchiveFromPath(path, onProgress)
 }

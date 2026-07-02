@@ -13,12 +13,21 @@ const desktopLifecycle = vi.hoisted(() => ({
   registerDesktopPendingSaveFlush: vi.fn(async () => () => undefined),
 }))
 const fileAccess = vi.hoisted(() => ({
+  openBinaryFile: vi.fn(async () => ({
+    name: '工作区备份.zip',
+    contents: new Uint8Array([80, 75, 3, 4]),
+  })),
+  openLocalFilePath: vi.fn(async () => ({
+    name: '工作区备份.zip',
+    path: '/tmp/工作区备份.zip',
+  })),
   pickSaveFilePath: vi.fn(async () => '/tmp/产品规划.zip'),
   saveBinaryFile: vi.fn(async () => undefined),
 }))
 const archiveStorage = vi.hoisted(() => ({
   exportWorkspaceArchiveToPath: vi.fn(async () => undefined),
   exportWorkspaceArchive: vi.fn(async () => new Uint8Array([80, 75, 3, 4])),
+  importWorkspaceArchiveFromPath: vi.fn(async () => undefined),
   importWorkspaceArchive: vi.fn(async () => undefined),
 }))
 
@@ -34,6 +43,8 @@ vi.mock('../lib/fileAccess', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/fileAccess')>()
   return {
     ...actual,
+    openBinaryFile: fileAccess.openBinaryFile,
+    openLocalFilePath: fileAccess.openLocalFilePath,
     pickSaveFilePath: fileAccess.pickSaveFilePath,
     saveBinaryFile: fileAccess.saveBinaryFile,
   }
@@ -45,6 +56,7 @@ vi.mock('../lib/assets', async (importOriginal) => {
     ...actual,
     exportWorkspaceArchiveToPath: archiveStorage.exportWorkspaceArchiveToPath,
     exportWorkspaceArchive: archiveStorage.exportWorkspaceArchive,
+    importWorkspaceArchiveFromPath: archiveStorage.importWorkspaceArchiveFromPath,
     importWorkspaceArchive: archiveStorage.importWorkspaceArchive,
   }
 })
@@ -80,11 +92,22 @@ describe('App', () => {
   beforeEach(() => {
     Reflect.deleteProperty(globalThis, '__TAURI_INTERNALS__')
     desktopLifecycle.registerDesktopPendingSaveFlush.mockResolvedValue(() => undefined)
+    fileAccess.openBinaryFile.mockClear()
+    fileAccess.openBinaryFile.mockResolvedValue({
+      name: '工作区备份.zip',
+      contents: new Uint8Array([80, 75, 3, 4]),
+    })
+    fileAccess.openLocalFilePath.mockClear()
+    fileAccess.openLocalFilePath.mockResolvedValue({
+      name: '工作区备份.zip',
+      path: '/tmp/工作区备份.zip',
+    })
     fileAccess.pickSaveFilePath.mockClear()
     fileAccess.pickSaveFilePath.mockResolvedValue('/tmp/产品规划.zip')
     fileAccess.saveBinaryFile.mockClear()
     archiveStorage.exportWorkspaceArchiveToPath.mockClear()
     archiveStorage.exportWorkspaceArchive.mockClear()
+    archiveStorage.importWorkspaceArchiveFromPath.mockClear()
     archiveStorage.importWorkspaceArchive.mockClear()
     scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
   })
@@ -511,9 +534,153 @@ describe('App', () => {
         filters: [{ name: 'ZIP', extensions: ['zip'] }],
       })
     })
-    expect(archiveStorage.exportWorkspaceArchiveToPath).toHaveBeenCalledWith('/tmp/产品规划.zip')
+    expect(archiveStorage.exportWorkspaceArchiveToPath).toHaveBeenCalledWith(
+      '/tmp/产品规划.zip',
+      expect.any(Function),
+    )
     expect(archiveStorage.exportWorkspaceArchive).not.toHaveBeenCalled()
     expect(fileAccess.saveBinaryFile).not.toHaveBeenCalled()
+  })
+
+  it('shows progress while exporting a complete desktop backup', async () => {
+    Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    })
+    const user = userEvent.setup()
+    const pageId = 'page_archive_progress'
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: '产品规划',
+          icon: null,
+          cover: null,
+          blocks: [],
+          createdAt: '2026-07-02T00:00:00.000Z',
+          updatedAt: '2026-07-02T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+    let resolveExport: () => void
+    const exportDone = new Promise<void>((resolve) => {
+      resolveExport = resolve
+    })
+    archiveStorage.exportWorkspaceArchiveToPath.mockImplementationOnce(async (_path, onProgress) => {
+      onProgress?.({
+        operation: 'export',
+        phase: 'processingAsset',
+        current: 1,
+        total: 2,
+        bytesProcessed: 512,
+        bytesTotal: 1024,
+        itemName: 'lesson.m4a',
+      })
+      await exportDone
+    })
+
+    render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={[`/pages/${pageId}`]}
+      />,
+    )
+
+    await screen.findByDisplayValue('产品规划')
+    await user.click(screen.getByRole('button', { name: '页面菜单' }))
+    await user.click(screen.getByRole('button', { name: '创建完整备份' }))
+
+    expect(await screen.findByText('正在导出完整备份')).toBeInTheDocument()
+    expect(screen.getByText('lesson.m4a')).toBeInTheDocument()
+    expect(screen.getByText('50%')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '页面菜单' })).toBeDisabled()
+
+    resolveExport!()
+    await waitFor(() => {
+      expect(screen.getByText('完整备份已导出')).toBeInTheDocument()
+    })
+  })
+
+  it('imports complete desktop backups from the selected path with progress', async () => {
+    Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = userEvent.setup()
+    const pageId = 'page_import_progress'
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: '产品规划',
+          icon: null,
+          cover: null,
+          blocks: [],
+          createdAt: '2026-07-02T00:00:00.000Z',
+          updatedAt: '2026-07-02T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+    let resolveImport: () => void
+    const importDone = new Promise<void>((resolve) => {
+      resolveImport = resolve
+    })
+    archiveStorage.importWorkspaceArchiveFromPath.mockImplementationOnce(async (_path, onProgress) => {
+      onProgress?.({
+        operation: 'import',
+        phase: 'processingAsset',
+        current: 1,
+        total: 2,
+        bytesProcessed: 256,
+        bytesTotal: 512,
+        itemName: 'recording.wav',
+      })
+      await importDone
+    })
+
+    render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={[`/pages/${pageId}`]}
+      />,
+    )
+
+    await screen.findByDisplayValue('产品规划')
+    await user.click(screen.getByRole('button', { name: '页面菜单' }))
+    await user.click(screen.getByRole('button', { name: '从备份恢复' }))
+
+    await waitFor(() => {
+      expect(fileAccess.openLocalFilePath).toHaveBeenCalledWith({
+        filters: [{ name: 'ZIP', extensions: ['zip'] }],
+      })
+    })
+    expect(confirm).toHaveBeenCalledWith('导入会覆盖当前本地内容，确认继续吗？')
+    expect(archiveStorage.importWorkspaceArchiveFromPath).toHaveBeenCalledWith(
+      '/tmp/工作区备份.zip',
+      expect.any(Function),
+    )
+    expect(fileAccess.openBinaryFile).not.toHaveBeenCalled()
+    expect(await screen.findByText('正在恢复完整备份')).toBeInTheDocument()
+    expect(screen.getByText('recording.wav')).toBeInTheDocument()
+    expect(screen.getByText('50%')).toBeInTheDocument()
+
+    resolveImport!()
+    await waitFor(() => {
+      expect(screen.getByText('备份恢复完成')).toBeInTheDocument()
+    })
+
+    confirm.mockRestore()
   })
 
   it('keeps the page directory visible on data table pages', async () => {
