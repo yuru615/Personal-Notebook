@@ -1,13 +1,13 @@
 [package]
-name = "personal-notebook"
+name = "zhixi"
 version = "0.0.1"
-description = "A local-first personal notebook desktop app."
-authors = ["Personal Notebook"]
+description = "A local-first knowledge base desktop app for Zhixi."
+authors = ["知栖"]
 edition = "2021"
 rust-version = "1.77.2"
 
 [lib]
-name = "personal_notebook_lib"
+name = "zhixi_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

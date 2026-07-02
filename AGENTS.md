@@ -4,9 +4,9 @@
 
 ## 项目定位
 
-Personal Notebook 是一个本地优先的类 Notion 个人知识库桌面应用。当前主运行形态是 Tauri 2 桌面应用：React 前端负责编辑体验和业务逻辑，Tauri 壳提供原生窗口、托盘、文件对话框、文件读写、SQLite 持久化和安装包构建。
+知栖是一个本地优先的类 Notion 个人知识库桌面应用。当前主运行形态是 Tauri 2 桌面应用：React 前端负责编辑体验和业务逻辑，Tauri 壳提供原生窗口、托盘、文件对话框、文件读写、SQLite 持久化和安装包构建。
 
-核心数据保存在本机 SQLite 数据库 `personal-notebook-v2.db` 中，不依赖后端服务。文件资产由应用管理在 `personal-notebook-assets-v2/`。导入、导出、删除和清理类改动必须保护 JSON 备份契约和用户本地数据。
+核心数据保存在本机 SQLite 数据库 `personal-notebook-v2.db` 中，不依赖后端服务。文件资产由应用管理在 `personal-notebook-assets-v2/`。这两个名称是历史兼容文件名，避免影响已有本地数据。导入、导出、删除和清理类改动必须保护 JSON 备份契约和用户本地数据。
 
 主要功能：
 

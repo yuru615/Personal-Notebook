@@ -127,4 +127,27 @@ describe('createTauriStorageClient', () => {
     expect(invoke).toHaveBeenNthCalledWith(1, 'export_workspace_archive')
     expect(invoke).toHaveBeenNthCalledWith(2, 'import_workspace_archive', { bytes })
   })
+
+  it('normalizes archive bytes returned from Tauri into a Uint8Array', async () => {
+    const { createTauriStorageClient } = await import('./storageClient')
+    invoke.mockResolvedValueOnce([80, 75, 3, 4])
+
+    const client = createTauriStorageClient()
+    const bytes = await client.exportWorkspaceArchive()
+
+    expect(bytes).toBeInstanceOf(Uint8Array)
+    expect([...bytes]).toEqual([80, 75, 3, 4])
+  })
+
+  it('normalizes asset bytes returned from Tauri into a Uint8Array', async () => {
+    const { createTauriStorageClient } = await import('./storageClient')
+    invoke.mockResolvedValueOnce([1, 2, 3])
+
+    const client = createTauriStorageClient()
+    const bytes = await client.readAsset('asset_abc')
+
+    expect(bytes).toBeInstanceOf(Uint8Array)
+    expect([...bytes]).toEqual([1, 2, 3])
+    expect(invoke).toHaveBeenCalledWith('read_asset', { assetId: 'asset_abc' })
+  })
 })

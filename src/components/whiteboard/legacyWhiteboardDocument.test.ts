@@ -172,7 +172,7 @@ describe('legacyWhiteboardDocument', () => {
     expect(srcDoc).toContain('function flowboardPersistSnapshot(snapshotValue) {')
     expect(srcDoc).toContain('window.__FLOWBOARD_HOST_FLUSH__ = () => {')
     expect(srcDoc).not.toContain('flowboardPersistToWorkspaceStore(snapshotValue);')
-    expect(srcDoc).not.toContain(['indexed', 'DB.open("notion-web")'].join(''))
+    expect(srcDoc).not.toMatch(/indexed[\s\S]*DB\.open\(/)
     expect(srcDoc).toContain('window.addEventListener("pagehide", () => {')
     expect(srcDoc).toContain('flowboardPersistSnapshot(snapshot());')
   })

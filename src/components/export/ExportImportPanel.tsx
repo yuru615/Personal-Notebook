@@ -5,28 +5,21 @@ import { SaveStatusBadge } from '../shared/SaveStatusBadge'
 
 const CLEANUP_ORPHAN_WHITEBOARDS_LABEL = '\u6e05\u7406\u5b64\u7acb\u767d\u677f'
 const CLEANUP_ORPHAN_DATA_TABLES_LABEL = '清理孤立数据表格'
-const IMPORT_MARKDOWN_LABEL = '\u5bfc\u5165 Markdown \u9875\u9762\u5305'
 const DANGER_SECTION_LABEL = '\u5371\u9669\u64cd\u4f5c'
 const DELETE_CURRENT_PAGE_LABEL = '\u5220\u9664\u5f53\u524d\u9875\u9762'
 
 interface ExportImportPanelProps {
   status: SaveStatus
-  reversible: boolean
   adaptiveWidth: boolean
   smallText: boolean
   fontFamily: PageFontFamily
   outlineVisible: boolean
-  onToggleReversible: (value: boolean) => void
   onToggleAdaptiveWidth: (value: boolean) => void
   onToggleSmallText: (value: boolean) => void
   onToggleFontFamily: (value: PageFontFamily) => void
   onToggleOutlineVisible: (value: boolean) => void
-  onExportJson: () => void | Promise<void>
   onExportArchive: () => void | Promise<void>
-  onExportMarkdown: () => void | Promise<void>
-  onImportJson: () => void | Promise<void>
   onImportArchive: () => void | Promise<void>
-  onImportMarkdown: () => void | Promise<void>
   onCleanupOrphanBoards: () => void | Promise<void>
   onCleanupOrphanDataTables: () => void | Promise<void>
   onDeletePage?: () => void | Promise<void>
@@ -34,22 +27,16 @@ interface ExportImportPanelProps {
 
 export function ExportImportPanel({
   status,
-  reversible,
   adaptiveWidth,
   smallText,
   fontFamily,
   outlineVisible,
-  onToggleReversible,
   onToggleAdaptiveWidth,
   onToggleSmallText,
   onToggleFontFamily,
   onToggleOutlineVisible,
-  onExportJson,
   onExportArchive,
-  onExportMarkdown,
-  onImportJson,
   onImportArchive,
-  onImportMarkdown,
   onCleanupOrphanBoards,
   onCleanupOrphanDataTables,
   onDeletePage,
@@ -74,34 +61,14 @@ export function ExportImportPanel({
     setOpen(false)
   }
 
-  function handleExportJson() {
-    closeMenu()
-    void onExportJson()
-  }
-
-  function handleExportMarkdown() {
-    closeMenu()
-    void onExportMarkdown()
-  }
-
   function handleExportArchive() {
     closeMenu()
     void onExportArchive()
   }
 
-  function handleImportJson() {
-    closeMenu()
-    void onImportJson()
-  }
-
   function handleImportArchive() {
     closeMenu()
     void onImportArchive()
-  }
-
-  function handleImportMarkdown() {
-    closeMenu()
-    void onImportMarkdown()
   }
 
   function handleCleanupOrphanBoards() {
@@ -193,23 +160,11 @@ export function ExportImportPanel({
           <div className="page-menu-divider" />
           <div className="page-menu-section">
             <div className="page-menu-section-title">{uiCopy.export.section}</div>
-            <button type="button" className="page-menu-action" onClick={handleExportJson}>
-              <span className="page-menu-item-label">{uiCopy.export.json}</span>
-            </button>
             <button type="button" className="page-menu-action" onClick={handleExportArchive}>
               <span className="page-menu-item-label">{uiCopy.export.archive}</span>
             </button>
-            <button type="button" className="page-menu-action" onClick={handleExportMarkdown}>
-              <span className="page-menu-item-label">{uiCopy.export.markdown}</span>
-            </button>
-            <button type="button" className="page-menu-action" onClick={handleImportJson}>
-              <span className="page-menu-item-label">{uiCopy.export.import}</span>
-            </button>
             <button type="button" className="page-menu-action" onClick={handleImportArchive}>
               <span className="page-menu-item-label">{uiCopy.export.importArchive}</span>
-            </button>
-            <button type="button" className="page-menu-action" onClick={handleImportMarkdown}>
-              <span className="page-menu-item-label">{IMPORT_MARKDOWN_LABEL}</span>
             </button>
             <button type="button" className="page-menu-action" onClick={handleCleanupOrphanBoards}>
               <span className="page-menu-item-label">{CLEANUP_ORPHAN_WHITEBOARDS_LABEL}</span>
@@ -217,14 +172,6 @@ export function ExportImportPanel({
             <button type="button" className="page-menu-action" onClick={handleCleanupOrphanDataTables}>
               <span className="page-menu-item-label">{CLEANUP_ORPHAN_DATA_TABLES_LABEL}</span>
             </button>
-            <label className="page-menu-toggle">
-              <span className="page-menu-item-label">{uiCopy.export.reversible}</span>
-              <input
-                type="checkbox"
-                checked={reversible}
-                onChange={(event) => onToggleReversible(event.target.checked)}
-              />
-            </label>
           </div>
           {onDeletePage ? (
             <>

@@ -12,7 +12,7 @@
 
 ## Summary
 
-Build a desktop-first storage engine for Personal Notebook: Rust owns SQLite, file assets, transactions, and search; React uses typed Tauri commands through one storage client. Do not migrate old data. Use a new database file, `personal-notebook-v2.db`, and leave the old `personal-notebook.db` untouched.
+Build a desktop-first storage engine for 知栖: Rust owns SQLite, file assets, transactions, and search; React uses typed Tauri commands through one storage client. Do not migrate old data. Use a new database file, `personal-notebook-v2.db`, and leave the old `personal-notebook.db` untouched.
 
 ## Architecture Decisions
 

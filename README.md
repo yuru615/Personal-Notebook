@@ -1,12 +1,12 @@
-# Personal Notebook
+# 知栖
 
-Personal Notebook 是一个本地优先的个人知识库桌面应用，使用 Tauri 2、React 和 SQLite 构建。它提供类 Notion 的层级页面、块编辑器、白板、数据表格、思维导图、搜索以及导入导出能力；数据默认保存在本机，不依赖后端服务。
+知栖是一个本地优先的个人知识库桌面应用，使用 Tauri 2、React 和 SQLite 构建。它提供类 Notion 的层级页面、块编辑器、白板、数据表格、思维导图、搜索以及导入导出能力；数据默认保存在本机，不依赖后端服务。
 
 ## 功能
 
 - 页面与块编辑：层级页面树、面包屑、页面目录、富文本、待办、列表、代码块、普通表格和子页面。
 - 内嵌创作工具：白板、数据表格、思维导图均支持独立页面和页内入口。
-- 数据管理：全局搜索、JSON 工作区备份/恢复、Markdown 页面包导入导出。
+- 数据管理：全局搜索、完整 ZIP 工作区备份/恢复。
 - 桌面体验：Tauri 原生窗口、系统托盘、文件对话框、本地 SQLite 持久化和 macOS/Windows 打包。
 
 ## 技术栈
@@ -33,7 +33,7 @@ npm run tauri:dev
 npm run dev
 ```
 
-首次启动会创建默认工作区。桌面端数据保存在 Tauri 应用数据目录中的 `personal-notebook-v2.db`；应用管理的文件资产保存在同目录下的 `personal-notebook-assets-v2/`。
+首次启动会创建默认工作区。桌面端数据保存在 Tauri 应用数据目录中的 `personal-notebook-v2.db`；应用管理的文件资产保存在同目录下的 `personal-notebook-assets-v2/`。这两个路径是历史兼容文件名，用于保护已有本地数据。
 
 ## 常用命令
 
@@ -68,7 +68,7 @@ npx vitest run src/lib/workspaceRepository.test.ts
 
 ## 数据与导入导出
 
-工作区核心数据保存在本地 SQLite 数据库 `personal-notebook-v2.db` 中。JSON 导出会生成完整工作区备份，JSON 导入会覆盖当前本地工作区；执行导入或清理前建议先导出备份。
+工作区核心数据保存在本地 SQLite 数据库 `personal-notebook-v2.db` 中。该文件名为历史兼容标识。完整 ZIP 导出会生成工作区备份并包含应用管理的文件资产；完整 ZIP 导入会覆盖当前本地工作区。执行导入或清理前建议先导出备份。
 
 ## 打包
 

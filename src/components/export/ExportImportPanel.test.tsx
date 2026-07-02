@@ -7,28 +7,27 @@ import { ExportImportPanel } from './ExportImportPanel'
 
 const CLEANUP_ORPHAN_WHITEBOARDS_LABEL = '\u6e05\u7406\u5b64\u7acb\u767d\u677f'
 const CLEANUP_ORPHAN_DATA_TABLES_LABEL = '清理孤立数据表格'
-const IMPORT_MARKDOWN_LABEL = '\u5bfc\u5165 Markdown \u9875\u9762\u5305'
+const OLD_EXPORT_JSON_LABEL = '导出 JSON 备份'
+const OLD_EXPORT_MARKDOWN_LABEL = '导出 Markdown 页面包'
+const OLD_IMPORT_JSON_LABEL = '导入 JSON 备份'
+const BACKUP_SECTION_LABEL = '备份与恢复'
+const CREATE_BACKUP_LABEL = '创建完整备份'
+const RESTORE_BACKUP_LABEL = '从备份恢复'
 
 function renderPanel(overrides: Partial<ComponentProps<typeof ExportImportPanel>> = {}) {
   return render(
     <ExportImportPanel
       status="saved"
-      reversible={false}
       adaptiveWidth={false}
       smallText={false}
       fontFamily="default"
       outlineVisible={true}
-      onToggleReversible={vi.fn()}
       onToggleAdaptiveWidth={vi.fn()}
       onToggleSmallText={vi.fn()}
       onToggleFontFamily={vi.fn()}
       onToggleOutlineVisible={vi.fn()}
-      onExportJson={vi.fn()}
       onExportArchive={vi.fn()}
-      onExportMarkdown={vi.fn()}
-      onImportJson={vi.fn()}
       onImportArchive={vi.fn()}
-      onImportMarkdown={vi.fn()}
       onCleanupOrphanBoards={vi.fn()}
       onCleanupOrphanDataTables={vi.fn()}
       {...overrides}
@@ -43,7 +42,7 @@ describe('ExportImportPanel', () => {
     renderPanel()
 
     expect(screen.getByRole('button', { name: uiCopy.page.menu })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: uiCopy.export.json })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: CREATE_BACKUP_LABEL })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: uiCopy.page.menu }))
 
@@ -55,51 +54,37 @@ describe('ExportImportPanel', () => {
     expect(screen.getByRole('button', { name: uiCopy.page.fontSerif })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: uiCopy.page.fontMono })).toBeInTheDocument()
     expect(screen.getByLabelText(uiCopy.page.outlineVisible)).toBeInTheDocument()
-    expect(screen.getByText(uiCopy.export.section)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: uiCopy.export.json })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: uiCopy.export.archive })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: uiCopy.export.markdown })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: uiCopy.export.import })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: uiCopy.export.importArchive })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: IMPORT_MARKDOWN_LABEL })).toBeInTheDocument()
-    expect(screen.getByLabelText(uiCopy.export.reversible)).toBeInTheDocument()
+    expect(screen.getByText(BACKUP_SECTION_LABEL)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: CREATE_BACKUP_LABEL })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: RESTORE_BACKUP_LABEL })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: OLD_EXPORT_JSON_LABEL })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: OLD_EXPORT_MARKDOWN_LABEL })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: OLD_IMPORT_JSON_LABEL })).not.toBeInTheDocument()
   })
 
   it('closes the menu after triggering an export action', async () => {
     const user = userEvent.setup()
-    const onExportJson = vi.fn()
+    const onExportArchive = vi.fn()
 
-    renderPanel({ onExportJson })
+    renderPanel({ onExportArchive })
 
     await user.click(screen.getByRole('button', { name: uiCopy.page.menu }))
-    await user.click(screen.getByRole('button', { name: uiCopy.export.json }))
+    await user.click(screen.getByRole('button', { name: CREATE_BACKUP_LABEL }))
 
-    expect(onExportJson).toHaveBeenCalledTimes(1)
-    expect(screen.queryByRole('button', { name: uiCopy.export.markdown })).not.toBeInTheDocument()
+    expect(onExportArchive).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: RESTORE_BACKUP_LABEL })).not.toBeInTheDocument()
   })
 
-  it('requests a json import from the menu', async () => {
+  it('requests a complete zip import from the menu', async () => {
     const user = userEvent.setup()
-    const onImportJson = vi.fn()
+    const onImportArchive = vi.fn()
 
-    renderPanel({ onImportJson })
+    renderPanel({ onImportArchive })
 
     await user.click(screen.getByRole('button', { name: uiCopy.page.menu }))
-    await user.click(screen.getByRole('button', { name: uiCopy.export.import }))
+    await user.click(screen.getByRole('button', { name: RESTORE_BACKUP_LABEL }))
 
-    expect(onImportJson).toHaveBeenCalledTimes(1)
-  })
-
-  it('requests a markdown page package import from the menu', async () => {
-    const user = userEvent.setup()
-    const onImportMarkdown = vi.fn()
-
-    renderPanel({ onImportMarkdown })
-
-    await user.click(screen.getByRole('button', { name: uiCopy.page.menu }))
-    await user.click(screen.getByRole('button', { name: IMPORT_MARKDOWN_LABEL }))
-
-    expect(onImportMarkdown).toHaveBeenCalledTimes(1)
+    expect(onImportArchive).toHaveBeenCalledTimes(1)
   })
 
   it('toggles adaptive content width from the page menu', async () => {

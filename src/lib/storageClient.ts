@@ -56,8 +56,8 @@ export function createTauriStorageClient(): WorkspaceStorageClient {
       return invoke<void>('replace_workspace_backup', { payload: snapshot })
     },
 
-    exportWorkspaceArchive() {
-      return invoke<Uint8Array>('export_workspace_archive')
+    async exportWorkspaceArchive() {
+      return normalizeByteArray(await invoke<Uint8Array | number[]>('export_workspace_archive'))
     },
 
     importWorkspaceArchive(bytes) {
@@ -88,8 +88,8 @@ export function createTauriStorageClient(): WorkspaceStorageClient {
       return invoke<AssetMeta>('import_asset_file', { input })
     },
 
-    readAsset(assetId) {
-      return invoke<Uint8Array>('read_asset', { assetId })
+    async readAsset(assetId) {
+      return normalizeByteArray(await invoke<Uint8Array | number[]>('read_asset', { assetId }))
     },
 
     getAssetFilePath(assetId) {
@@ -104,6 +104,10 @@ export function createTauriStorageClient(): WorkspaceStorageClient {
       return invoke<SearchResult[]>('search_workspace', { query, limit })
     },
   }
+}
+
+function normalizeByteArray(bytes: Uint8Array | number[]) {
+  return bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
 }
 
 const defaultStorageClient = createTauriStorageClient()

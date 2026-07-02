@@ -1020,7 +1020,7 @@ fn unique_test_assets_dir() -> PathBuf {
         .map(|duration| duration.as_nanos())
         .unwrap_or_default();
     std::env::temp_dir().join(format!(
-        "personal-notebook-storage-test-{}-{nanos}",
+        "zhixi-storage-test-{}-{nanos}",
         std::process::id()
     ))
 }

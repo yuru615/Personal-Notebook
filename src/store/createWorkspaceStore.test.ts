@@ -163,65 +163,6 @@ describe('createWorkspaceStore data tables', () => {
     ])
   })
 
-  it('exports and imports data table blocks with their snapshots', async () => {
-    const workspace = createWorkspace()
-    workspace.pages[0].blocks = [
-      {
-        id: 'block_database',
-        type: 'data_table',
-        databaseId: 'database_live',
-      },
-    ]
-    workspace.dataTables = [
-      {
-        id: 'database_live',
-        title: 'Roadmap Database',
-        snapshot: {
-          version: 1,
-          records: {
-            record_launch: {
-              id: 'record_launch',
-              title: 'Launch Checklist',
-              values: {},
-              createdAt: '2026-06-22T00:00:00.000Z',
-              updatedAt: '2026-06-22T00:00:00.000Z',
-            },
-          },
-        },
-        createdAt: '2026-06-22T00:00:00.000Z',
-        updatedAt: '2026-06-22T00:00:00.000Z',
-      },
-    ]
-    const sourceStore = createWorkspaceStore(createMemoryRepository(workspace))
-    await sourceStore.getState().bootstrap()
-
-    const payload = JSON.parse(await sourceStore.getState().exportJson()) as unknown
-    const targetStore = createWorkspaceStore(createMemoryRepository(createWorkspace()))
-    await targetStore.getState().bootstrap()
-    await targetStore.getState().importJson(payload)
-
-    expect(targetStore.getState().pages[0].blocks).toMatchObject([
-      {
-        type: 'data_table',
-        databaseId: 'database_live',
-      },
-    ])
-    expect(targetStore.getState().dataTables).toMatchObject([
-      {
-        id: 'database_live',
-        title: 'Roadmap Database',
-        snapshot: {
-          records: {
-            record_launch: {
-              title: 'Launch Checklist',
-            },
-          },
-        },
-      },
-    ])
-    expect(targetStore.getState().currentPageId).toBe('page_1')
-  })
-
   it('renames a data table and keeps the internal database name in sync', async () => {
     const workspace = createWorkspace()
     const snapshot = createDefaultAppState()
@@ -480,53 +421,6 @@ describe('createWorkspaceStore mindmaps', () => {
     expect(state.mindmaps[1]?.id).not.toBe((block as { mindmapId: string }).mindmapId)
     expect(state.mindmaps[1]?.snapshot).toEqual(state.mindmaps[0]?.snapshot)
     expect(state.mindmaps[1]?.title).toContain('副本')
-  })
-
-  it('includes mindmaps in exported workspace json', async () => {
-    const repository = createMemoryRepository(createWorkspace())
-    const store = createWorkspaceStore(repository)
-
-    await store.getState().bootstrap()
-    await store.getState().insertBlock('page_1', 'mindmap')
-
-    const payload = JSON.parse(await store.getState().exportJson()) as { mindmaps?: unknown[] }
-
-    expect(payload.mindmaps).toHaveLength(1)
-  })
-
-  it('exports and imports mindmap blocks with their records', async () => {
-    const sourceStore = createWorkspaceStore(createMemoryRepository(createWorkspace()))
-    await sourceStore.getState().bootstrap()
-    const block = await sourceStore.getState().insertBlock('page_1', 'mindmap')
-    const mindmapId = (block as { mindmapId: string }).mindmapId
-    const snapshot = structuredClone(sourceStore.getState().mindmaps[0]!.snapshot) as {
-      title: string
-      updatedAt: string
-    }
-    snapshot.title = 'Project Map'
-    snapshot.updatedAt = '2026-06-23T00:00:00.000Z'
-    await sourceStore.getState().updateMindmapSnapshot(mindmapId, snapshot)
-
-    const payload = JSON.parse(await sourceStore.getState().exportJson()) as unknown
-    const targetStore = createWorkspaceStore(createMemoryRepository(createWorkspace()))
-    await targetStore.getState().bootstrap()
-    await targetStore.getState().importJson(payload)
-
-    expect(targetStore.getState().pages[0]?.blocks).toMatchObject([
-      {
-        type: 'mindmap',
-        mindmapId,
-      },
-    ])
-    expect(targetStore.getState().mindmaps).toMatchObject([
-      {
-        id: mindmapId,
-        title: 'Project Map',
-        snapshot: {
-          title: 'Project Map',
-        },
-      },
-    ])
   })
 
   it('restores a missing mindmap record with the same id', async () => {

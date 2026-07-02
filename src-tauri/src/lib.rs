@@ -11,7 +11,7 @@ const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_SHOW_WINDOW_ID: &str = "show-window";
 const TRAY_HIDE_WINDOW_ID: &str = "hide-window";
 const TRAY_QUIT_APP_ID: &str = "quit-app";
-const FRONTEND_QUIT_REQUESTED_EVENT: &str = "personal-notebook://quit-requested";
+const FRONTEND_QUIT_REQUESTED_EVENT: &str = "zhixi://quit-requested";
 const ALLOWED_EXTERNAL_URL_SCHEMES: [&str; 3] = ["http://", "https://", "mailto:"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,7 +144,7 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
     let mut tray = TrayIconBuilder::with_id("main-tray")
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .tooltip("Personal Notebook")
+        .tooltip("知栖")
         .on_menu_event(|app, event| {
             if let Some(action) = TrayMenuAction::from_menu_id(event.id().as_ref()) {
                 handle_tray_menu_action(app, action);

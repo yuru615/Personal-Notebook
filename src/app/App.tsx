@@ -44,13 +44,10 @@ import {
 import {
   exportWorkspaceArchive,
   importWorkspaceArchive,
-  readAsset,
-  writeAssetBytes,
 } from '../lib/assets'
 import { registerDesktopPendingSaveFlush } from '../lib/desktopLifecycle'
 import {
   openBinaryFile,
-  openedBinaryFileToFile,
   openTextFile,
   saveBinaryFile,
   saveTextFile,
@@ -111,7 +108,6 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
   const [isBootstrapped, setIsBootstrapped] = useState(false)
   const [bootstrapError, setBootstrapError] = useState<unknown>(null)
   const bootstrapPromiseRef = useRef<Promise<void> | null>(null)
-  const [reversibleExport, setReversibleExport] = useState(false)
   const setCurrentPage = store.getState().setCurrentPage
 
   useEffect(() => {
@@ -311,58 +307,15 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
         store.getState().turnBlockInto(pageId, blockId, type)
       }
       saveStatus={state.saveStatus}
-      reversibleExport={reversibleExport}
-      onToggleReversibleExport={setReversibleExport}
-      onExportJson={async () => {
-        const payload = await store.getState().exportJson()
-        await saveTextFile({
-          defaultPath: 'personal-notebook-backup.json',
-          contents: payload,
-          filters: JSON_FILE_FILTER,
-        })
-      }}
       onExportArchive={async () => {
+        const latestState = store.getState()
+        const currentPage = latestState.pages.find((page) => page.id === latestState.currentPageId)
+
         await saveBinaryFile({
-          defaultPath: 'personal-notebook-complete-backup.zip',
+          defaultPath: `${sanitizeFileName(currentPage?.title ?? '')}.zip`,
           contents: await exportWorkspaceArchive(),
           filters: ZIP_FILE_FILTER,
         })
-      }}
-      onExportMarkdown={async (page) => {
-        const { buildMarkdownZip } = await import('../domain/markdown')
-        const blob = await buildMarkdownZip({
-          rootPage: page,
-          allPages: store.getState().pages,
-          boards: store.getState().boards,
-          reversible: reversibleExport,
-          readAsset,
-        })
-
-        await saveBinaryFile({
-          defaultPath: `${sanitizeFileName(page.title)}.zip`,
-          contents: blob,
-          filters: ZIP_FILE_FILTER,
-        })
-      }}
-      onImportJson={async () => {
-        const file = await openTextFile({ filters: JSON_FILE_FILTER })
-
-        if (!file) {
-          return store.getState().currentPageId
-        }
-
-        if (!window.confirm(uiCopy.export.importConfirm)) {
-          return store.getState().currentPageId
-        }
-
-        try {
-          const payload = JSON.parse(file.contents) as unknown
-          await store.getState().importJson(payload)
-          return store.getState().currentPageId
-        } catch {
-          window.alert(uiCopy.export.importError)
-          return store.getState().currentPageId
-        }
       }}
       onImportArchive={async () => {
         const file = await openBinaryFile({ filters: ZIP_FILE_FILTER })
@@ -381,24 +334,6 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
           return store.getState().currentPageId
         } catch {
           window.alert(uiCopy.export.importError)
-          return store.getState().currentPageId
-        }
-      }}
-      onImportMarkdown={async () => {
-        const file = await openBinaryFile({ filters: ZIP_FILE_FILTER })
-
-        if (!file) {
-          return store.getState().currentPageId
-        }
-
-        try {
-          const { importMarkdownZip } = await import('../domain/markdown')
-          const payload = await importMarkdownZip(openedBinaryFileToFile(file, 'application/zip'), {
-            writeAsset: writeAssetBytes,
-          })
-          return await store.getState().importPagePackage(payload)
-        } catch {
-          window.alert('导入失败，请检查页面包格式。')
           return store.getState().currentPageId
         }
       }}
@@ -477,14 +412,8 @@ interface AppRoutesProps {
     type: BlockType,
   ) => Promise<void>
   saveStatus: SaveStatus
-  reversibleExport: boolean
-  onToggleReversibleExport: (value: boolean) => void
-  onExportJson: () => Promise<void>
   onExportArchive: () => Promise<void>
-  onExportMarkdown: (page: PageRecord) => Promise<void>
-  onImportJson: () => Promise<string | null>
   onImportArchive: () => Promise<string | null>
-  onImportMarkdown: () => Promise<string | null>
   onCleanupOrphanBoards: () => Promise<void>
   onCleanupOrphanDataTables: () => Promise<void>
 }
@@ -529,14 +458,8 @@ function AppRoutes({
   onDuplicateBlock,
   onTurnBlockInto,
   saveStatus,
-  reversibleExport,
-  onToggleReversibleExport,
-  onExportJson,
   onExportArchive,
-  onExportMarkdown,
-  onImportJson,
   onImportArchive,
-  onImportMarkdown,
   onCleanupOrphanBoards,
   onCleanupOrphanDataTables,
 }: AppRoutesProps) {
@@ -678,14 +601,8 @@ function AppRoutes({
                 onDuplicateBlock={onDuplicateBlock}
                 onTurnBlockInto={onTurnBlockInto}
                 saveStatus={saveStatus}
-                reversibleExport={reversibleExport}
-                onToggleReversibleExport={onToggleReversibleExport}
-                onExportJson={onExportJson}
                 onExportArchive={onExportArchive}
-                onExportMarkdown={onExportMarkdown}
-                onImportJson={onImportJson}
                 onImportArchive={onImportArchive}
-                onImportMarkdown={onImportMarkdown}
                 onCleanupOrphanBoards={onCleanupOrphanBoards}
                 onCleanupOrphanDataTables={onCleanupOrphanDataTables}
                 onUpdateDataTableSnapshot={onUpdateDataTableSnapshot}
@@ -730,14 +647,8 @@ function AppRoutes({
                 onTogglePageSmallText={onTogglePageSmallText}
                 onTogglePageFontFamily={onTogglePageFontFamily}
                 onTogglePageOutlineVisible={onTogglePageOutlineVisible}
-                reversibleExport={reversibleExport}
-                onToggleReversibleExport={onToggleReversibleExport}
-                onExportJson={onExportJson}
                 onExportArchive={onExportArchive}
-                onExportMarkdown={onExportMarkdown}
-                onImportJson={onImportJson}
                 onImportArchive={onImportArchive}
-                onImportMarkdown={onImportMarkdown}
                 onCleanupOrphanBoards={onCleanupOrphanBoards}
                 onCleanupOrphanDataTables={onCleanupOrphanDataTables}
               />
@@ -762,14 +673,8 @@ function AppRoutes({
                 onTogglePageSmallText={onTogglePageSmallText}
                 onTogglePageFontFamily={onTogglePageFontFamily}
                 onTogglePageOutlineVisible={onTogglePageOutlineVisible}
-                reversibleExport={reversibleExport}
-                onToggleReversibleExport={onToggleReversibleExport}
-                onExportJson={onExportJson}
                 onExportArchive={onExportArchive}
-                onExportMarkdown={onExportMarkdown}
-                onImportJson={onImportJson}
                 onImportArchive={onImportArchive}
-                onImportMarkdown={onImportMarkdown}
                 onCleanupOrphanBoards={onCleanupOrphanBoards}
                 onCleanupOrphanDataTables={onCleanupOrphanDataTables}
               />
@@ -852,14 +757,8 @@ interface PageRouteProps {
     type: BlockType,
   ) => Promise<void>
   saveStatus: SaveStatus
-  reversibleExport: boolean
-  onToggleReversibleExport: (value: boolean) => void
-  onExportJson: () => Promise<void>
   onExportArchive: () => Promise<void>
-  onExportMarkdown: (page: PageRecord) => Promise<void>
-  onImportJson: () => Promise<string | null>
   onImportArchive: () => Promise<string | null>
-  onImportMarkdown: () => Promise<string | null>
   onCleanupOrphanBoards: () => Promise<void>
   onCleanupOrphanDataTables: () => Promise<void>
   onUpdateDataTableSnapshot: (databaseId: string, snapshot: unknown) => Promise<void>
@@ -893,14 +792,8 @@ function PageRoute({
   onDuplicateBlock,
   onTurnBlockInto,
   saveStatus,
-  reversibleExport,
-  onToggleReversibleExport,
-  onExportJson,
   onExportArchive,
-  onExportMarkdown,
-  onImportJson,
   onImportArchive,
-  onImportMarkdown,
   onCleanupOrphanBoards,
   onCleanupOrphanDataTables,
   onUpdateDataTableSnapshot,
@@ -959,12 +852,10 @@ function PageRoute({
         actions={
           <ExportImportPanel
             status={saveStatus}
-            reversible={reversibleExport}
             adaptiveWidth={page.isFullWidth === true}
             smallText={page.isSmallText === true}
             fontFamily={page.fontFamily ?? 'default'}
             outlineVisible={outlineVisible}
-            onToggleReversible={onToggleReversibleExport}
             onToggleAdaptiveWidth={(value) => {
               void onTogglePageFullWidth(page.id, value)
             }}
@@ -977,19 +868,9 @@ function PageRoute({
             onToggleOutlineVisible={(value) => {
               void onTogglePageOutlineVisible(page.id, value)
             }}
-            onExportJson={() => void onExportJson()}
             onExportArchive={() => void onExportArchive()}
-            onExportMarkdown={() => void onExportMarkdown(page)}
-            onImportJson={async () => {
-              const nextPageId = await onImportJson()
-              navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
-            }}
             onImportArchive={async () => {
               const nextPageId = await onImportArchive()
-              navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
-            }}
-            onImportMarkdown={async () => {
-              const nextPageId = await onImportMarkdown()
               navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
             }}
             onCleanupOrphanBoards={() => void onCleanupOrphanBoards()}
@@ -1148,14 +1029,8 @@ interface DataTableRouteProps {
   onTogglePageSmallText: (pageId: string, isSmallText: boolean) => Promise<void>
   onTogglePageFontFamily: (pageId: string, fontFamily: PageFontFamily) => Promise<void>
   onTogglePageOutlineVisible: (pageId: string, showOutline: boolean) => Promise<void>
-  reversibleExport: boolean
-  onToggleReversibleExport: (value: boolean) => void
-  onExportJson: () => Promise<void>
   onExportArchive: () => Promise<void>
-  onExportMarkdown: (page: PageRecord) => Promise<void>
-  onImportJson: () => Promise<string | null>
   onImportArchive: () => Promise<string | null>
-  onImportMarkdown: () => Promise<string | null>
   onCleanupOrphanBoards: () => Promise<void>
   onCleanupOrphanDataTables: () => Promise<void>
 }
@@ -1176,14 +1051,8 @@ function DataTableRoute({
   onTogglePageSmallText,
   onTogglePageFontFamily,
   onTogglePageOutlineVisible,
-  reversibleExport,
-  onToggleReversibleExport,
-  onExportJson,
   onExportArchive,
-  onExportMarkdown,
-  onImportJson,
   onImportArchive,
-  onImportMarkdown,
   onCleanupOrphanBoards,
   onCleanupOrphanDataTables,
 }: DataTableRouteProps) {
@@ -1244,12 +1113,10 @@ function DataTableRoute({
         headerActions={
           <ExportImportPanel
             status={saveStatus}
-            reversible={reversibleExport}
             adaptiveWidth={page.isFullWidth === true}
             smallText={page.isSmallText === true}
             fontFamily={page.fontFamily ?? 'default'}
             outlineVisible={outlineVisible}
-            onToggleReversible={onToggleReversibleExport}
             onToggleAdaptiveWidth={(value) => {
               void onTogglePageFullWidth(page.id, value)
             }}
@@ -1262,19 +1129,9 @@ function DataTableRoute({
             onToggleOutlineVisible={(value) => {
               void onTogglePageOutlineVisible(page.id, value)
             }}
-            onExportJson={() => void onExportJson()}
             onExportArchive={() => void onExportArchive()}
-            onExportMarkdown={() => void onExportMarkdown(page)}
-            onImportJson={async () => {
-              const nextPageId = await onImportJson()
-              navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
-            }}
             onImportArchive={async () => {
               const nextPageId = await onImportArchive()
-              navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
-            }}
-            onImportMarkdown={async () => {
-              const nextPageId = await onImportMarkdown()
               navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
             }}
             onCleanupOrphanBoards={() => void onCleanupOrphanBoards()}

@@ -12,12 +12,36 @@ import { App } from './App'
 const desktopLifecycle = vi.hoisted(() => ({
   registerDesktopPendingSaveFlush: vi.fn(async () => () => undefined),
 }))
+const fileAccess = vi.hoisted(() => ({
+  saveBinaryFile: vi.fn(async () => undefined),
+}))
+const archiveStorage = vi.hoisted(() => ({
+  exportWorkspaceArchive: vi.fn(async () => new Uint8Array([80, 75, 3, 4])),
+  importWorkspaceArchive: vi.fn(async () => undefined),
+}))
 
 vi.mock('../lib/desktopLifecycle', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/desktopLifecycle')>()
   return {
     ...actual,
     registerDesktopPendingSaveFlush: desktopLifecycle.registerDesktopPendingSaveFlush,
+  }
+})
+
+vi.mock('../lib/fileAccess', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/fileAccess')>()
+  return {
+    ...actual,
+    saveBinaryFile: fileAccess.saveBinaryFile,
+  }
+})
+
+vi.mock('../lib/assets', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/assets')>()
+  return {
+    ...actual,
+    exportWorkspaceArchive: archiveStorage.exportWorkspaceArchive,
+    importWorkspaceArchive: archiveStorage.importWorkspaceArchive,
   }
 })
 
@@ -51,6 +75,9 @@ describe('App', () => {
 
   beforeEach(() => {
     desktopLifecycle.registerDesktopPendingSaveFlush.mockResolvedValue(() => undefined)
+    fileAccess.saveBinaryFile.mockClear()
+    archiveStorage.exportWorkspaceArchive.mockClear()
+    archiveStorage.importWorkspaceArchive.mockClear()
     scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
   })
 
@@ -388,6 +415,48 @@ describe('App', () => {
     )
 
     expect(deletePage).toHaveBeenCalledWith(pageId)
+  })
+
+  it('uses the current page title as the complete backup default file name', async () => {
+    const user = userEvent.setup()
+    const pageId = 'page_archive_title'
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: '产品规划',
+          icon: null,
+          cover: null,
+          blocks: [],
+          createdAt: '2026-07-02T00:00:00.000Z',
+          updatedAt: '2026-07-02T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+
+    render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={[`/pages/${pageId}`]}
+      />,
+    )
+
+    await screen.findByDisplayValue('产品规划')
+    await user.click(screen.getByRole('button', { name: '页面菜单' }))
+    await user.click(screen.getByRole('button', { name: '创建完整备份' }))
+
+    await waitFor(() => {
+      expect(fileAccess.saveBinaryFile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          defaultPath: '产品规划.zip',
+        }),
+      )
+    })
   })
 
   it('keeps the page directory visible on data table pages', async () => {

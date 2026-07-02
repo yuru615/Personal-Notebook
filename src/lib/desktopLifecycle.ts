@@ -2,7 +2,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
-export const DESKTOP_QUIT_REQUESTED_EVENT = 'personal-notebook://quit-requested'
+export const DESKTOP_QUIT_REQUESTED_EVENT = 'zhixi://quit-requested'
 export const QUIT_AFTER_PENDING_SAVES_COMMAND = 'quit_app_after_pending_saves'
 
 type FlushPendingSaves = () => Promise<void>

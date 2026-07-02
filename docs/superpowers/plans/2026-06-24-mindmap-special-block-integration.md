@@ -328,7 +328,7 @@ class WorkspaceDatabase extends Dexie {
   settings!: Table<WorkspaceSettingsRow, string>
 
   constructor() {
-    super('notion-web')
+    super('zhixi')
 
     this.version(8).stores({
       boards: 'id',
@@ -1207,8 +1207,8 @@ git commit -m "feat: add mindmap entry card and route shell"
 Run:
 
 ```powershell
-New-Item -ItemType Directory -Force -Path 'E:\Workspace\P001_Notion个人知识库\notion-web\public\mindmap-web' | Out-Null
-Copy-Item -Recurse -Force 'E:\Workspace\实验软件\mindmap-web\dist\*' 'E:\Workspace\P001_Notion个人知识库\notion-web\public\mindmap-web\'
+New-Item -ItemType Directory -Force -Path 'E:\Workspace\P001_知栖\zhixi\public\mindmap-web' | Out-Null
+Copy-Item -Recurse -Force 'E:\Workspace\实验软件\mindmap-web\dist\*' 'E:\Workspace\P001_知栖\zhixi\public\mindmap-web\'
 ```
 
 Then edit `public/mindmap-web/index.html` to:

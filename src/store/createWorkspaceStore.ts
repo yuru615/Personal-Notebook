@@ -2,7 +2,6 @@
 import { extractMindmapTitle } from '../components/mindmap/mindmapModel'
 import { normalizeWhiteboardSnapshot } from '../components/whiteboard/whiteboardModel'
 import { getTextBlockStyle, isTextStyleableBlock } from '../domain/blockTextStyle'
-import type { ImportedMarkdownPackage } from '../domain/markdown'
 import { normalizeRichText, richTextFromPlainText } from '../domain/richText'
 import { createSeedWorkspace } from '../domain/seed'
 import type {
@@ -16,7 +15,6 @@ import type {
   PageRecord,
   RichTextSegment,
   SaveStatus,
-  WorkspaceBackup,
   WorkspaceSnapshot,
   WorkspaceSettings,
 } from '../domain/types'
@@ -35,7 +33,6 @@ import { deletePageBranch } from '../utils/pageTree'
 import { reorderItems, type ReorderPosition } from '../utils/reorder'
 
 const UNTITLED_PAGE_TITLE = '未命名'
-const BACKUP_VERSION = 1
 const COPY_SUFFIX = ' \u526f\u672c'
 const BLOCK_SAVE_DEBOUNCE_MS = 600
 
@@ -99,9 +96,6 @@ export interface WorkspaceState {
   turnBlockInto: (pageId: PageId, blockId: string, type: BlockType) => Promise<void>
   undo: () => Promise<void>
   redo: () => Promise<void>
-  exportJson: () => Promise<string>
-  importPagePackage: (payload: ImportedMarkdownPackage) => Promise<PageId | null>
-  importJson: (payload: unknown) => Promise<void>
 }
 
 function createEmptyState(): WorkspaceState {
@@ -226,15 +220,6 @@ function createEmptyState(): WorkspaceState {
       throw new Error('not implemented')
     },
     redo: async () => {
-      throw new Error('not implemented')
-    },
-    exportJson: async () => {
-      throw new Error('not implemented')
-    },
-    importPagePackage: async () => {
-      throw new Error('not implemented')
-    },
-    importJson: async () => {
       throw new Error('not implemented')
     },
   }
@@ -512,59 +497,6 @@ function resolveCurrentPageId(snapshot: Pick<WorkspaceSnapshot, 'pages' | 'setti
   }
 
   return snapshot.pages[0]?.id ?? null
-}
-
-function createBackupPayload(snapshot: WorkspaceSnapshot): WorkspaceBackup {
-  return {
-    version: BACKUP_VERSION,
-    exportedAt: new Date().toISOString(),
-    boards: snapshot.boards,
-    dataTables: snapshot.dataTables ?? [],
-    mindmaps: snapshot.mindmaps ?? [],
-    pages: snapshot.pages,
-    settings: snapshot.settings,
-  }
-}
-
-function normalizeImportedSnapshot(payload: unknown): WorkspaceSnapshot {
-  if (!payload || typeof payload !== 'object') {
-    throw new Error('Invalid workspace payload')
-  }
-
-  const candidate = payload as {
-    boards?: unknown
-    dataTables?: unknown
-    mindmaps?: unknown
-    pages?: unknown
-    settings?: {
-      lastOpenedPageId?: unknown
-    }
-  }
-
-  if (!Array.isArray(candidate.pages)) {
-    throw new Error('Invalid workspace pages')
-  }
-
-  if (!candidate.settings) {
-    throw new Error('Invalid workspace settings')
-  }
-
-  const lastOpenedPageId = candidate.settings.lastOpenedPageId
-  if (lastOpenedPageId !== null && typeof lastOpenedPageId !== 'string') {
-    throw new Error('Invalid workspace settings')
-  }
-
-  return {
-    boards: Array.isArray(candidate.boards) ? structuredClone(candidate.boards as BoardRecord[]) : [],
-    dataTables: Array.isArray(candidate.dataTables)
-      ? structuredClone(candidate.dataTables as DataTableRecord[])
-      : [],
-    mindmaps: Array.isArray(candidate.mindmaps)
-      ? structuredClone(candidate.mindmaps as MindmapRecord[])
-      : [],
-    pages: structuredClone(candidate.pages as PageRecord[]),
-    settings: createSettings(lastOpenedPageId ?? null),
-  }
 }
 
 function getPlainTextFromBlock(block: BlockRecord): string {
@@ -2415,88 +2347,6 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       }
     },
 
-    exportJson: async () => {
-      const state = get()
-
-      return JSON.stringify(
-        createBackupPayload({
-          boards: state.boards,
-          dataTables: state.dataTables,
-          mindmaps: state.mindmaps,
-          pages: state.pages,
-          settings: state.settings,
-        }),
-        null,
-        2,
-      )
-    },
-
-    importPagePackage: async ({ rootPageId, pages, boards }) => {
-      if (!rootPageId || pages.length === 0 || !pages.some((page) => page.id === rootPageId)) {
-        return null
-      }
-
-      const state = get()
-      const nextSnapshot = normalizeWorkspaceSnapshot({
-        boards: [...state.boards, ...boards],
-        dataTables: state.dataTables,
-        mindmaps: state.mindmaps,
-        pages: [...state.pages, ...pages],
-        settings: createSettings(rootPageId),
-      }).snapshot
-
-      pushUndoSnapshot(state)
-      set({ saveStatus: 'saving' })
-
-      try {
-        await repository.save(nextSnapshot)
-        set({
-          boards: nextSnapshot.boards,
-          dataTables: nextSnapshot.dataTables ?? [],
-          mindmaps: nextSnapshot.mindmaps ?? [],
-          pages: nextSnapshot.pages,
-          settings: nextSnapshot.settings,
-          currentPageId: rootPageId,
-          saveStatus: 'saved',
-        })
-
-        return rootPageId
-      } catch {
-        set({ saveStatus: 'error' })
-        throw new Error('Failed to import markdown page package')
-      }
-    },
-
-    importJson: async (payload: unknown) => {
-      const snapshot = normalizeWorkspaceSnapshot(normalizeImportedSnapshot(payload)).snapshot
-      const currentPageId = resolveCurrentPageId(snapshot)
-      const nextSnapshot = {
-        boards: snapshot.boards,
-        dataTables: snapshot.dataTables ?? [],
-        mindmaps: snapshot.mindmaps ?? [],
-        pages: snapshot.pages,
-        settings: createSettings(currentPageId),
-      }
-
-      pushUndoSnapshot(get())
-      set({ saveStatus: 'saving' })
-
-      try {
-        await repository.replace(nextSnapshot)
-        set({
-          boards: nextSnapshot.boards,
-          dataTables: nextSnapshot.dataTables,
-          mindmaps: nextSnapshot.mindmaps,
-          pages: nextSnapshot.pages,
-          settings: nextSnapshot.settings,
-          currentPageId,
-          saveStatus: 'saved',
-        })
-      } catch {
-        set({ saveStatus: 'error' })
-        throw new Error('Failed to import workspace')
-      }
-    },
     }
   })
 }
