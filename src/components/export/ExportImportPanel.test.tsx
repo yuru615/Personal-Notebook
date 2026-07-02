@@ -10,8 +10,6 @@ const CLEANUP_ORPHAN_DATA_TABLES_LABEL = '清理孤立数据表格'
 const OLD_EXPORT_JSON_LABEL = '导出 JSON 备份'
 const OLD_EXPORT_MARKDOWN_LABEL = '导出 Markdown 页面包'
 const OLD_IMPORT_JSON_LABEL = '导入 JSON 备份'
-const OLD_CREATE_BACKUP_LABEL = '创建完整备份'
-const OLD_RESTORE_BACKUP_LABEL = '从备份恢复'
 const PAGE_PACKAGE_SECTION_LABEL = '页面导入导出'
 const EXPORT_PAGE_LABEL = '导出当前页面'
 const IMPORT_PAGE_PACKAGE_LABEL = '导入页面包'
@@ -59,8 +57,6 @@ describe('ExportImportPanel', () => {
     expect(screen.getByText(PAGE_PACKAGE_SECTION_LABEL)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: EXPORT_PAGE_LABEL })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: IMPORT_PAGE_PACKAGE_LABEL })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: OLD_CREATE_BACKUP_LABEL })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: OLD_RESTORE_BACKUP_LABEL })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: OLD_EXPORT_JSON_LABEL })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: OLD_EXPORT_MARKDOWN_LABEL })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: OLD_IMPORT_JSON_LABEL })).not.toBeInTheDocument()
@@ -94,13 +90,13 @@ describe('ExportImportPanel', () => {
   it('shows active archive progress outside the closed menu', async () => {
     renderPanel({
       archiveTask: {
-        label: '正在导出完整备份',
+        label: '正在导出当前页面',
         detail: 'lesson.m4a',
         percent: 50,
       },
     })
 
-    expect(screen.getByRole('status')).toHaveTextContent('正在导出完整备份')
+    expect(screen.getByRole('status')).toHaveTextContent('正在导出当前页面')
     expect(screen.getByRole('status')).toHaveTextContent('lesson.m4a')
     expect(screen.getByRole('status')).toHaveTextContent('50%')
     expect(screen.getByRole('button', { name: uiCopy.page.menu })).toBeDisabled()
