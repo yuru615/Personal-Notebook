@@ -60,16 +60,6 @@ export type WorkspaceArchiveProgressHandler = (progress: WorkspaceArchiveProgres
 export interface WorkspaceStorageClient {
   exportWorkspaceBackup(): Promise<WorkspaceSnapshot | null>
   replaceWorkspaceBackup(snapshot: WorkspaceSnapshot): Promise<void>
-  exportWorkspaceArchiveToPath(
-    path: string,
-    onProgress?: WorkspaceArchiveProgressHandler,
-  ): Promise<void>
-  exportWorkspaceArchive(): Promise<Uint8Array>
-  importWorkspaceArchive(bytes: Uint8Array): Promise<void>
-  importWorkspaceArchiveFromPath(
-    path: string,
-    onProgress?: WorkspaceArchiveProgressHandler,
-  ): Promise<void>
   exportPagePackageToPath(
     pageId: string,
     path: string,
@@ -101,30 +91,6 @@ export function createTauriStorageClient(): WorkspaceStorageClient {
 
     replaceWorkspaceBackup(snapshot) {
       return invoke<void>('replace_workspace_backup', { payload: snapshot })
-    },
-
-    exportWorkspaceArchiveToPath(path, onProgress) {
-      return invokeArchiveCommandWithProgress(
-        'export_workspace_archive_to_path',
-        { path },
-        onProgress,
-      )
-    },
-
-    async exportWorkspaceArchive() {
-      return normalizeByteArray(await invoke<Uint8Array | number[]>('export_workspace_archive'))
-    },
-
-    importWorkspaceArchive(bytes) {
-      return invoke<void>('import_workspace_archive', { bytes })
-    },
-
-    importWorkspaceArchiveFromPath(path, onProgress) {
-      return invokeArchiveCommandWithProgress(
-        'import_workspace_archive_from_path',
-        { path },
-        onProgress,
-      )
     },
 
     exportPagePackageToPath(pageId, path, onProgress) {

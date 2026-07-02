@@ -351,33 +351,6 @@ impl Storage {
         assets::cleanup_orphan_assets(&self.connection, &self.assets_dir)
     }
 
-    pub fn export_workspace_archive(&self) -> StorageResult<Vec<u8>> {
-        let mut ignore_progress = |_| {};
-        self.write_workspace_archive(Cursor::new(Vec::new()), None, &mut ignore_progress)
-            .map(|cursor| cursor.into_inner())
-    }
-
-    pub fn export_workspace_archive_to_path(&self, path: impl AsRef<Path>) -> StorageResult<()> {
-        let mut ignore_progress = |_| {};
-        self.export_workspace_archive_to_path_with_progress(path, None, &mut ignore_progress)
-    }
-
-    pub fn export_workspace_archive_to_path_with_progress<F>(
-        &self,
-        path: impl AsRef<Path>,
-        task_id: Option<&str>,
-        progress: &mut F,
-    ) -> StorageResult<()>
-    where
-        F: FnMut(WorkspaceArchiveProgress),
-    {
-        let file = fs::File::create(path)?;
-        let writer = BufWriter::new(file);
-        let mut writer = self.write_workspace_archive(writer, task_id, progress)?;
-        writer.flush()?;
-        Ok(())
-    }
-
     #[allow(dead_code)]
     pub fn export_page_package(&self, page_id: &str) -> StorageResult<Vec<u8>> {
         let mut ignore_progress = |_| {};
@@ -438,125 +411,6 @@ impl Storage {
     {
         let file = fs::File::open(path)?;
         self.import_page_package_reader(BufReader::new(file), task_id, progress)
-    }
-
-    fn write_workspace_archive<W, F>(
-        &self,
-        writer: W,
-        task_id: Option<&str>,
-        progress: &mut F,
-    ) -> StorageResult<W>
-    where
-        W: Write + Seek,
-        F: FnMut(WorkspaceArchiveProgress),
-    {
-        let snapshot = self.export_workspace_backup()?;
-        let assets = assets::load_referenced_assets(&self.connection)?;
-        let total_assets = assets.len() as u64;
-        let bytes_total = total_asset_bytes(&assets);
-        let mut bytes_processed = 0;
-        let mut archive = zip::ZipWriter::new(writer);
-        let metadata_options =
-            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-
-        report_archive_progress(
-            task_id,
-            progress,
-            WorkspaceArchiveOperation::Export,
-            WorkspaceArchiveProgressPhase::Preparing,
-            0,
-            total_assets,
-            0,
-            bytes_total,
-            None,
-        );
-
-        archive
-            .start_file("workspace.json", metadata_options)
-            .map_err(zip_error)?;
-        serde_json::to_writer_pretty(&mut archive, &snapshot)?;
-
-        report_archive_progress(
-            task_id,
-            progress,
-            WorkspaceArchiveOperation::Export,
-            WorkspaceArchiveProgressPhase::WritingMetadata,
-            0,
-            total_assets,
-            0,
-            bytes_total,
-            None,
-        );
-
-        archive
-            .start_file("assets/manifest.json", metadata_options)
-            .map_err(zip_error)?;
-        serde_json::to_writer_pretty(&mut archive, &assets)?;
-
-        for (index, asset) in assets.iter().enumerate() {
-            let path = assets::asset_file_path(&self.connection, &self.assets_dir, &asset.id)?;
-            let mut asset_file = fs::File::open(path)?;
-            let current = index as u64 + 1;
-            archive
-                .start_file(
-                    format!("assets/{}", asset.relative_path),
-                    archive_options_for_asset(&asset),
-                )
-                .map_err(zip_error)?;
-
-            report_archive_progress(
-                task_id,
-                progress,
-                WorkspaceArchiveOperation::Export,
-                WorkspaceArchiveProgressPhase::ProcessingAsset,
-                current,
-                total_assets,
-                bytes_processed,
-                bytes_total,
-                Some(asset.name.clone()),
-            );
-
-            let copied = copy_with_progress(&mut asset_file, &mut archive, |asset_copied| {
-                report_archive_progress(
-                    task_id,
-                    progress,
-                    WorkspaceArchiveOperation::Export,
-                    WorkspaceArchiveProgressPhase::ProcessingAsset,
-                    current,
-                    total_assets,
-                    bytes_processed + asset_copied,
-                    bytes_total,
-                    Some(asset.name.clone()),
-                );
-            })?;
-            bytes_processed += copied;
-        }
-
-        report_archive_progress(
-            task_id,
-            progress,
-            WorkspaceArchiveOperation::Export,
-            WorkspaceArchiveProgressPhase::Finalizing,
-            total_assets,
-            total_assets,
-            bytes_processed,
-            bytes_total,
-            None,
-        );
-
-        let writer = archive.finish().map_err(zip_error)?;
-        report_archive_progress(
-            task_id,
-            progress,
-            WorkspaceArchiveOperation::Export,
-            WorkspaceArchiveProgressPhase::Complete,
-            total_assets,
-            total_assets,
-            bytes_total,
-            bytes_total,
-            None,
-        );
-        Ok(writer)
     }
 
     #[allow(dead_code)]
@@ -745,155 +599,6 @@ impl Storage {
         Ok(writer)
     }
 
-    pub fn import_workspace_archive(&self, bytes: Vec<u8>) -> StorageResult<()> {
-        let mut ignore_progress = |_| {};
-        let cursor = Cursor::new(bytes);
-        self.import_workspace_archive_reader(cursor, None, &mut ignore_progress)
-    }
-
-    pub fn import_workspace_archive_from_path(&self, path: impl AsRef<Path>) -> StorageResult<()> {
-        let mut ignore_progress = |_| {};
-        self.import_workspace_archive_from_path_with_progress(path, None, &mut ignore_progress)
-    }
-
-    pub fn import_workspace_archive_from_path_with_progress<F>(
-        &self,
-        path: impl AsRef<Path>,
-        task_id: Option<&str>,
-        progress: &mut F,
-    ) -> StorageResult<()>
-    where
-        F: FnMut(WorkspaceArchiveProgress),
-    {
-        let file = fs::File::open(path)?;
-        self.import_workspace_archive_reader(BufReader::new(file), task_id, progress)
-    }
-
-    fn import_workspace_archive_reader<R, F>(
-        &self,
-        reader: R,
-        task_id: Option<&str>,
-        progress: &mut F,
-    ) -> StorageResult<()>
-    where
-        R: Read + Seek,
-        F: FnMut(WorkspaceArchiveProgress),
-    {
-        let mut archive = zip::ZipArchive::new(reader).map_err(zip_error)?;
-        report_archive_progress(
-            task_id,
-            progress,
-            WorkspaceArchiveOperation::Import,
-            WorkspaceArchiveProgressPhase::Preparing,
-            0,
-            0,
-            0,
-            0,
-            None,
-        );
-        let snapshot: WorkspaceSnapshot = {
-            let mut workspace_file = archive.by_name("workspace.json").map_err(zip_error)?;
-            serde_json::from_reader(&mut workspace_file)?
-        };
-        let archive_assets: Vec<AssetMeta> = {
-            match archive.by_name("assets/manifest.json") {
-                Ok(mut manifest_file) => serde_json::from_reader(&mut manifest_file)?,
-                Err(zip::result::ZipError::FileNotFound) => Vec::new(),
-                Err(error) => return Err(zip_error(error)),
-            }
-        };
-        let total_assets = archive_assets.len() as u64;
-        let bytes_total = total_asset_bytes(&archive_assets);
-        let mut bytes_processed = 0;
-
-        report_archive_progress(
-            task_id,
-            progress,
-            WorkspaceArchiveOperation::Import,
-            WorkspaceArchiveProgressPhase::WritingMetadata,
-            0,
-            total_assets,
-            0,
-            bytes_total,
-            None,
-        );
-
-        for (index, asset) in archive_assets.into_iter().enumerate() {
-            let archive_path = format!("assets/{}", asset.relative_path);
-            let mut asset_file = match archive.by_name(&archive_path) {
-                Ok(file) => file,
-                Err(zip::result::ZipError::FileNotFound) => continue,
-                Err(error) => return Err(zip_error(error)),
-            };
-            let current = index as u64 + 1;
-            let item_name = asset.name.clone();
-
-            report_archive_progress(
-                task_id,
-                progress,
-                WorkspaceArchiveOperation::Import,
-                WorkspaceArchiveProgressPhase::ProcessingAsset,
-                current,
-                total_assets,
-                bytes_processed,
-                bytes_total,
-                Some(item_name.clone()),
-            );
-
-            let mut copied_for_asset = 0;
-            assets::write_asset_from_reader(
-                &self.connection,
-                &self.assets_dir,
-                asset.name,
-                asset.mime_type,
-                &mut asset_file,
-                &mut |asset_copied| {
-                    copied_for_asset = asset_copied;
-                    report_archive_progress(
-                        task_id,
-                        progress,
-                        WorkspaceArchiveOperation::Import,
-                        WorkspaceArchiveProgressPhase::ProcessingAsset,
-                        current,
-                        total_assets,
-                        bytes_processed + asset_copied,
-                        bytes_total,
-                        Some(item_name.clone()),
-                    );
-                },
-            )?;
-            bytes_processed += copied_for_asset;
-        }
-
-        report_archive_progress(
-            task_id,
-            progress,
-            WorkspaceArchiveOperation::Import,
-            WorkspaceArchiveProgressPhase::Finalizing,
-            total_assets,
-            total_assets,
-            bytes_processed,
-            bytes_total,
-            None,
-        );
-
-        self.replace_workspace_backup(snapshot)?;
-
-        report_archive_progress(
-            task_id,
-            progress,
-            WorkspaceArchiveOperation::Import,
-            WorkspaceArchiveProgressPhase::Complete,
-            total_assets,
-            total_assets,
-            bytes_total,
-            bytes_total,
-            None,
-        );
-
-        Ok(())
-    }
-
     fn import_page_package_reader<R, F>(
         &self,
         reader: R,
@@ -955,9 +660,9 @@ impl Storage {
             let archive_path = format!("assets/{}", asset.relative_path);
             if let Err(error) = archive.by_name(&archive_path) {
                 return Err(match error {
-                    zip::result::ZipError::FileNotFound => StorageError::invalid_payload(
-                        format!("page package asset entry is missing: {archive_path}"),
-                    ),
+                    zip::result::ZipError::FileNotFound => StorageError::invalid_payload(format!(
+                        "page package asset entry is missing: {archive_path}"
+                    )),
                     other => zip_error(other),
                 });
             }
@@ -1005,8 +710,7 @@ impl Storage {
             .get(&manifest.root_page_id)
             .cloned()
             .ok_or_else(|| StorageError::invalid_payload("page package root is missing"))?;
-        let ordered_pages =
-            ordered_page_package_pages(&manifest.pages, &manifest.root_page_id)?;
+        let ordered_pages = ordered_page_package_pages(&manifest.pages, &manifest.root_page_id)?;
         let mut asset_id_map = std::collections::HashMap::new();
         let mut bytes_processed = 0;
         let mut imported_asset_paths = Vec::new();
@@ -2660,48 +2364,6 @@ mod tests {
     }
 
     #[test]
-    fn workspace_archive_round_trips_assets_and_snapshot() {
-        let source = Storage::open_in_memory_for_tests().expect("source opens");
-        let asset = source
-            .write_asset(WriteAssetInput {
-                name: "image.png".to_string(),
-                mime_type: "image/png".to_string(),
-                bytes: b"image".to_vec(),
-            })
-            .expect("write asset");
-        let mut snapshot = sample_snapshot();
-        snapshot.pages[0].blocks.push(json!({
-            "id": "block_image",
-            "type": "image",
-            "assetId": asset.id,
-            "name": "image.png",
-            "mimeType": "image/png",
-            "caption": "",
-            "alt": "image"
-        }));
-        source
-            .replace_workspace_backup(snapshot.clone())
-            .expect("replace snapshot");
-
-        let archive = source
-            .export_workspace_archive()
-            .expect("export workspace archive");
-        let target = Storage::open_in_memory_for_tests().expect("target opens");
-        target
-            .import_workspace_archive(archive)
-            .expect("import workspace archive");
-
-        assert_eq!(
-            target.export_workspace_backup().expect("export imported"),
-            snapshot
-        );
-        assert_eq!(
-            target.read_asset(&asset.id).expect("read imported"),
-            b"image"
-        );
-    }
-
-    #[test]
     fn page_package_exports_current_page_tree_only() {
         let source = Storage::open_in_memory_for_tests().expect("source opens");
         let asset = source
@@ -3143,13 +2805,19 @@ mod tests {
 
     #[test]
     fn page_package_import_rejects_workspace_archives() {
-        let source = Storage::open_in_memory_for_tests().expect("source opens");
-        source
-            .replace_workspace_backup(sample_snapshot())
-            .expect("seed source");
-        let workspace_archive = source
-            .export_workspace_archive()
-            .expect("export workspace archive");
+        let mut workspace_archive = Cursor::new(Vec::new());
+        {
+            let mut archive = zip::ZipWriter::new(&mut workspace_archive);
+            archive
+                .start_file(
+                    "workspace.json",
+                    zip::write::FileOptions::default()
+                        .compression_method(zip::CompressionMethod::Deflated),
+                )
+                .expect("start workspace file");
+            serde_json::to_writer(&mut archive, &sample_snapshot()).expect("write workspace");
+            archive.finish().expect("finish workspace archive");
+        }
         let target = Storage::open_in_memory_for_tests().expect("target opens");
         target
             .replace_workspace_backup(sample_snapshot())
@@ -3157,7 +2825,7 @@ mod tests {
         let before = target.export_workspace_backup().expect("snapshot before");
 
         let error = target
-            .import_page_package(workspace_archive)
+            .import_page_package(workspace_archive.into_inner())
             .expect_err("workspace archive rejected");
 
         assert_eq!(error.code, "invalid_payload");
@@ -3966,269 +3634,6 @@ mod tests {
             target.export_workspace_backup().expect("snapshot after"),
             before
         );
-    }
-
-    #[test]
-    fn workspace_archive_skips_replaced_media_assets_without_refs() {
-        let source = Storage::open_in_memory_for_tests().expect("source opens");
-        let old_asset = source
-            .write_asset(WriteAssetInput {
-                name: "old.png".to_string(),
-                mime_type: "image/png".to_string(),
-                bytes: b"old image".to_vec(),
-            })
-            .expect("write old asset");
-        let new_asset = source
-            .write_asset(WriteAssetInput {
-                name: "new.png".to_string(),
-                mime_type: "image/png".to_string(),
-                bytes: b"new image".to_vec(),
-            })
-            .expect("write new asset");
-        let mut snapshot = sample_snapshot();
-        snapshot.pages[0].blocks.push(json!({
-            "id": "block_image",
-            "type": "image",
-            "assetId": old_asset.id,
-            "name": "old.png",
-            "mimeType": "image/png",
-            "caption": "",
-            "alt": "old"
-        }));
-        source
-            .replace_workspace_backup(snapshot.clone())
-            .expect("replace snapshot");
-        snapshot.pages[0].blocks.pop();
-        snapshot.pages[0].blocks.push(json!({
-            "id": "block_image",
-            "type": "image",
-            "assetId": new_asset.id,
-            "name": "new.png",
-            "mimeType": "image/png",
-            "caption": "",
-            "alt": "new"
-        }));
-        source
-            .save_page(snapshot.pages[0].clone())
-            .expect("save page after media replacement");
-
-        let archive = source
-            .export_workspace_archive()
-            .expect("export workspace archive");
-        let cursor = Cursor::new(archive);
-        let mut archive = zip::ZipArchive::new(cursor).expect("read archive");
-        let manifest: Vec<AssetMeta> = {
-            let mut manifest_entry = archive
-                .by_name("assets/manifest.json")
-                .expect("asset manifest entry");
-            serde_json::from_reader(&mut manifest_entry).expect("parse asset manifest")
-        };
-        let manifest_ids = manifest
-            .iter()
-            .map(|asset| asset.id.as_str())
-            .collect::<Vec<_>>();
-
-        assert_eq!(manifest_ids, vec![new_asset.id.as_str()]);
-        assert!(archive
-            .by_name(&format!("assets/{}", old_asset.relative_path))
-            .is_err());
-        let mut new_entry = archive
-            .by_name(&format!("assets/{}", new_asset.relative_path))
-            .expect("new asset entry");
-        let mut new_bytes = Vec::new();
-        new_entry
-            .read_to_end(&mut new_bytes)
-            .expect("read new asset entry");
-        assert_eq!(new_bytes, b"new image");
-    }
-
-    #[test]
-    fn workspace_archive_exports_directly_to_file_path() {
-        let source = Storage::open_in_memory_for_tests().expect("source opens");
-        let asset = source
-            .write_asset(WriteAssetInput {
-                name: "image.png".to_string(),
-                mime_type: "image/png".to_string(),
-                bytes: b"image".to_vec(),
-            })
-            .expect("write asset");
-        let mut snapshot = sample_snapshot();
-        snapshot.pages[0].blocks.push(json!({
-            "id": "block_image",
-            "type": "image",
-            "assetId": asset.id,
-            "name": "image.png",
-            "mimeType": "image/png",
-            "caption": "",
-            "alt": "image"
-        }));
-        source
-            .replace_workspace_backup(snapshot.clone())
-            .expect("replace snapshot");
-        let archive_path = unique_test_assets_dir().with_extension("zip");
-
-        source
-            .export_workspace_archive_to_path(&archive_path)
-            .expect("export workspace archive to path");
-
-        let target = Storage::open_in_memory_for_tests().expect("target opens");
-        target
-            .import_workspace_archive(std::fs::read(&archive_path).expect("read archive file"))
-            .expect("import workspace archive");
-
-        assert_eq!(
-            target.export_workspace_backup().expect("export imported"),
-            snapshot
-        );
-        assert_eq!(
-            target.read_asset(&asset.id).expect("read imported"),
-            b"image"
-        );
-
-        let _ = std::fs::remove_file(archive_path);
-    }
-
-    #[test]
-    fn workspace_archive_reports_progress_when_exporting_to_file_path() {
-        let source = Storage::open_in_memory_for_tests().expect("source opens");
-        let asset = source
-            .write_asset(WriteAssetInput {
-                name: "voice.m4a".to_string(),
-                mime_type: "audio/mp4".to_string(),
-                bytes: b"audio bytes".to_vec(),
-            })
-            .expect("write asset");
-        let mut snapshot = sample_snapshot();
-        snapshot.pages[0].blocks.push(json!({
-            "id": "block_audio",
-            "type": "audio",
-            "assetId": asset.id,
-            "name": "voice.m4a",
-            "mimeType": "audio/mp4",
-            "caption": ""
-        }));
-        source
-            .replace_workspace_backup(snapshot)
-            .expect("replace snapshot");
-        let archive_path = unique_test_assets_dir().with_extension("zip");
-        let mut progress_events = Vec::new();
-
-        source
-            .export_workspace_archive_to_path_with_progress(
-                &archive_path,
-                Some("task_export"),
-                &mut |event| progress_events.push(event),
-            )
-            .expect("export workspace archive to path");
-
-        assert!(progress_events.iter().any(|event| {
-            event.task_id == "task_export"
-                && event.operation == WorkspaceArchiveOperation::Export
-                && event.phase == WorkspaceArchiveProgressPhase::ProcessingAsset
-                && event.item_name.as_deref() == Some("voice.m4a")
-                && event.bytes_total == b"audio bytes".len() as u64
-        }));
-        assert!(progress_events.iter().any(|event| {
-            event.phase == WorkspaceArchiveProgressPhase::Complete
-                && event.bytes_processed == event.bytes_total
-        }));
-
-        let _ = std::fs::remove_file(archive_path);
-    }
-
-    #[test]
-    fn workspace_archive_imports_from_file_path_with_progress() {
-        let source = Storage::open_in_memory_for_tests().expect("source opens");
-        let asset = source
-            .write_asset(WriteAssetInput {
-                name: "recording.wav".to_string(),
-                mime_type: "audio/wav".to_string(),
-                bytes: b"wave bytes".to_vec(),
-            })
-            .expect("write asset");
-        let mut snapshot = sample_snapshot();
-        snapshot.pages[0].blocks.push(json!({
-            "id": "block_audio",
-            "type": "audio",
-            "assetId": asset.id,
-            "name": "recording.wav",
-            "mimeType": "audio/wav",
-            "caption": ""
-        }));
-        source
-            .replace_workspace_backup(snapshot.clone())
-            .expect("replace snapshot");
-        let archive_path = unique_test_assets_dir().with_extension("zip");
-        source
-            .export_workspace_archive_to_path(&archive_path)
-            .expect("export workspace archive to path");
-        let target = Storage::open_in_memory_for_tests().expect("target opens");
-        let mut progress_events = Vec::new();
-
-        target
-            .import_workspace_archive_from_path_with_progress(
-                &archive_path,
-                Some("task_import"),
-                &mut |event| progress_events.push(event),
-            )
-            .expect("import workspace archive from path");
-
-        assert_eq!(
-            target.export_workspace_backup().expect("export imported"),
-            snapshot
-        );
-        assert_eq!(
-            target.read_asset(&asset.id).expect("read imported"),
-            b"wave bytes"
-        );
-        assert!(progress_events.iter().any(|event| {
-            event.task_id == "task_import"
-                && event.operation == WorkspaceArchiveOperation::Import
-                && event.phase == WorkspaceArchiveProgressPhase::ProcessingAsset
-                && event.item_name.as_deref() == Some("recording.wav")
-                && event.bytes_total == b"wave bytes".len() as u64
-        }));
-        assert!(progress_events.iter().any(|event| {
-            event.phase == WorkspaceArchiveProgressPhase::Complete
-                && event.bytes_processed == event.bytes_total
-        }));
-
-        let _ = std::fs::remove_file(archive_path);
-    }
-
-    #[test]
-    fn workspace_archive_stores_media_assets_without_recompressing_them() {
-        let source = Storage::open_in_memory_for_tests().expect("source opens");
-        let asset = source
-            .write_asset(WriteAssetInput {
-                name: "voice.m4a".to_string(),
-                mime_type: "audio/mp4".to_string(),
-                bytes: b"audio bytes".to_vec(),
-            })
-            .expect("write asset");
-        let mut snapshot = sample_snapshot();
-        snapshot.pages[0].blocks.push(json!({
-            "id": "block_audio",
-            "type": "audio",
-            "assetId": asset.id,
-            "name": "voice.m4a",
-            "mimeType": "audio/mp4",
-            "caption": ""
-        }));
-        source
-            .replace_workspace_backup(snapshot)
-            .expect("replace snapshot");
-
-        let archive = source
-            .export_workspace_archive()
-            .expect("export workspace archive");
-        let cursor = Cursor::new(archive);
-        let mut archive = zip::ZipArchive::new(cursor).expect("read archive");
-        let asset_entry = archive
-            .by_name(&format!("assets/{}", asset.relative_path))
-            .expect("asset entry");
-
-        assert_eq!(asset_entry.compression(), zip::CompressionMethod::Stored);
     }
 
     #[test]

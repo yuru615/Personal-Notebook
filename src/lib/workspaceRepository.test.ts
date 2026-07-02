@@ -15,17 +15,17 @@ function createRepository() {
       calls.push('replaceWorkspaceBackup')
       snapshot = structuredClone(nextSnapshot)
     },
-    async exportWorkspaceArchiveToPath() {
+    async exportPagePackageToPath() {
       return undefined
     },
-    async exportWorkspaceArchive() {
+    async exportPagePackage() {
       return new Uint8Array()
     },
-    async importWorkspaceArchive() {
-      return undefined
+    async importPagePackage() {
+      return { rootPageId: 'page_imported' }
     },
-    async importWorkspaceArchiveFromPath() {
-      return undefined
+    async importPagePackageFromPath() {
+      return { rootPageId: 'page_imported' }
     },
     async savePage(page) {
       calls.push(`savePage:${page.id}`)

@@ -103,28 +103,6 @@ export async function getAssetUrl(assetId: string): Promise<string> {
   return convertFileSrc(await storageClient.getAssetFilePath(assetId))
 }
 
-export function exportWorkspaceArchive() {
-  return storageClient.exportWorkspaceArchive()
-}
-
-export function exportWorkspaceArchiveToPath(
-  path: string,
-  onProgress?: WorkspaceArchiveProgressHandler,
-) {
-  return storageClient.exportWorkspaceArchiveToPath(path, onProgress)
-}
-
-export function importWorkspaceArchive(bytes: Uint8Array) {
-  return storageClient.importWorkspaceArchive(bytes)
-}
-
-export function importWorkspaceArchiveFromPath(
-  path: string,
-  onProgress?: WorkspaceArchiveProgressHandler,
-) {
-  return storageClient.importWorkspaceArchiveFromPath(path, onProgress)
-}
-
 export function exportPagePackage(pageId: string) {
   return storageClient.exportPagePackage(pageId)
 }
