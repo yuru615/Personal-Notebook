@@ -10,9 +10,11 @@ const CLEANUP_ORPHAN_DATA_TABLES_LABEL = '清理孤立数据表格'
 const OLD_EXPORT_JSON_LABEL = '导出 JSON 备份'
 const OLD_EXPORT_MARKDOWN_LABEL = '导出 Markdown 页面包'
 const OLD_IMPORT_JSON_LABEL = '导入 JSON 备份'
-const BACKUP_SECTION_LABEL = '备份与恢复'
-const CREATE_BACKUP_LABEL = '创建完整备份'
-const RESTORE_BACKUP_LABEL = '从备份恢复'
+const OLD_CREATE_BACKUP_LABEL = '创建完整备份'
+const OLD_RESTORE_BACKUP_LABEL = '从备份恢复'
+const PAGE_PACKAGE_SECTION_LABEL = '页面导入导出'
+const EXPORT_PAGE_LABEL = '导出当前页面'
+const IMPORT_PAGE_PACKAGE_LABEL = '导入页面包'
 
 function renderPanel(overrides: Partial<ComponentProps<typeof ExportImportPanel>> = {}) {
   return render(
@@ -42,7 +44,7 @@ describe('ExportImportPanel', () => {
     renderPanel()
 
     expect(screen.getByRole('button', { name: uiCopy.page.menu })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: CREATE_BACKUP_LABEL })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: EXPORT_PAGE_LABEL })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: uiCopy.page.menu }))
 
@@ -54,9 +56,11 @@ describe('ExportImportPanel', () => {
     expect(screen.getByRole('button', { name: uiCopy.page.fontSerif })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: uiCopy.page.fontMono })).toBeInTheDocument()
     expect(screen.getByLabelText(uiCopy.page.outlineVisible)).toBeInTheDocument()
-    expect(screen.getByText(BACKUP_SECTION_LABEL)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: CREATE_BACKUP_LABEL })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: RESTORE_BACKUP_LABEL })).toBeInTheDocument()
+    expect(screen.getByText(PAGE_PACKAGE_SECTION_LABEL)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: EXPORT_PAGE_LABEL })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: IMPORT_PAGE_PACKAGE_LABEL })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: OLD_CREATE_BACKUP_LABEL })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: OLD_RESTORE_BACKUP_LABEL })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: OLD_EXPORT_JSON_LABEL })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: OLD_EXPORT_MARKDOWN_LABEL })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: OLD_IMPORT_JSON_LABEL })).not.toBeInTheDocument()
@@ -69,20 +73,20 @@ describe('ExportImportPanel', () => {
     renderPanel({ onExportArchive })
 
     await user.click(screen.getByRole('button', { name: uiCopy.page.menu }))
-    await user.click(screen.getByRole('button', { name: CREATE_BACKUP_LABEL }))
+    await user.click(screen.getByRole('button', { name: EXPORT_PAGE_LABEL }))
 
     expect(onExportArchive).toHaveBeenCalledTimes(1)
-    expect(screen.queryByRole('button', { name: RESTORE_BACKUP_LABEL })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: IMPORT_PAGE_PACKAGE_LABEL })).not.toBeInTheDocument()
   })
 
-  it('requests a complete zip import from the menu', async () => {
+  it('requests a page package import from the menu', async () => {
     const user = userEvent.setup()
     const onImportArchive = vi.fn()
 
     renderPanel({ onImportArchive })
 
     await user.click(screen.getByRole('button', { name: uiCopy.page.menu }))
-    await user.click(screen.getByRole('button', { name: RESTORE_BACKUP_LABEL }))
+    await user.click(screen.getByRole('button', { name: IMPORT_PAGE_PACKAGE_LABEL }))
 
     expect(onImportArchive).toHaveBeenCalledTimes(1)
   })

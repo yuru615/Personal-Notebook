@@ -45,10 +45,10 @@ import {
   type WorkspaceRepository,
 } from '../lib/workspaceRepository'
 import {
-  exportWorkspaceArchiveToPath,
-  exportWorkspaceArchive,
-  importWorkspaceArchiveFromPath,
-  importWorkspaceArchive,
+  exportPagePackageToPath,
+  exportPagePackage,
+  importPagePackageFromPath,
+  importPagePackage,
 } from '../lib/assets'
 import { registerDesktopPendingSaveFlush } from '../lib/desktopLifecycle'
 import {
@@ -388,7 +388,13 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       saveStatus={state.saveStatus}
       onExportArchive={async () => {
         const latestState = store.getState()
-        const currentPage = latestState.pages.find((page) => page.id === latestState.currentPageId)
+        const currentPageId = latestState.currentPageId
+        const currentPage = latestState.pages.find((page) => page.id === currentPageId)
+
+        if (!currentPageId) {
+          return
+        }
+
         const defaultPath = `${sanitizeFileName(currentPage?.title ?? '')}.zip`
 
         if (isDesktopRuntime()) {
@@ -403,7 +409,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
 
           showArchiveTask({ label: uiCopy.export.exportingArchive, percent: 0 })
           try {
-            await exportWorkspaceArchiveToPath(path, (progress) => {
+            await exportPagePackageToPath(currentPageId, path, (progress) => {
               showArchiveProgress(uiCopy.export.exportingArchive, progress)
             })
             finishArchiveTask(uiCopy.export.exportComplete)
@@ -416,7 +422,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
 
         showArchiveTask({ label: uiCopy.export.exportingArchive, percent: 5 })
         try {
-          const contents = await exportWorkspaceArchive()
+          const contents = await exportPagePackage(currentPageId)
           showArchiveTask({ label: uiCopy.export.exportingArchive, percent: 85 })
           await saveBinaryFile({
             defaultPath,
@@ -445,13 +451,13 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
             showArchiveTask({ label: uiCopy.export.preparingImport, percent: 0 })
             await store.getState().flushPendingSaves()
             showArchiveTask({ label: uiCopy.export.importingArchive, percent: 0 })
-            await importWorkspaceArchiveFromPath(file.path, (progress) => {
+            const result = await importPagePackageFromPath(file.path, (progress) => {
               showArchiveProgress(uiCopy.export.importingArchive, progress)
             })
             showArchiveTask({ label: uiCopy.export.refreshingWorkspace, percent: 95 })
             await store.getState().bootstrap()
             finishArchiveTask(uiCopy.export.importComplete)
-            return store.getState().currentPageId
+            return result.rootPageId
           } catch {
             failArchiveTask(uiCopy.export.importError)
             window.alert(uiCopy.export.importError)
@@ -473,11 +479,11 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
           showArchiveTask({ label: uiCopy.export.preparingImport, percent: 0 })
           await store.getState().flushPendingSaves()
           showArchiveTask({ label: uiCopy.export.importingArchive, percent: 20 })
-          await importWorkspaceArchive(file.contents)
+          const result = await importPagePackage(file.contents)
           showArchiveTask({ label: uiCopy.export.refreshingWorkspace, percent: 95 })
           await store.getState().bootstrap()
           finishArchiveTask(uiCopy.export.importComplete)
-          return store.getState().currentPageId
+          return result.rootPageId
         } catch {
           failArchiveTask(uiCopy.export.importError)
           window.alert(uiCopy.export.importError)

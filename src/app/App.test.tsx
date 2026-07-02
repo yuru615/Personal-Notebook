@@ -24,11 +24,11 @@ const fileAccess = vi.hoisted(() => ({
   pickSaveFilePath: vi.fn(async () => '/tmp/产品规划.zip'),
   saveBinaryFile: vi.fn(async () => undefined),
 }))
-const archiveStorage = vi.hoisted(() => ({
-  exportWorkspaceArchiveToPath: vi.fn(async () => undefined),
-  exportWorkspaceArchive: vi.fn(async () => new Uint8Array([80, 75, 3, 4])),
-  importWorkspaceArchiveFromPath: vi.fn(async () => undefined),
-  importWorkspaceArchive: vi.fn(async () => undefined),
+const pagePackageStorage = vi.hoisted(() => ({
+  exportPagePackageToPath: vi.fn(async () => undefined),
+  exportPagePackage: vi.fn(async () => new Uint8Array([80, 75, 3, 4])),
+  importPagePackageFromPath: vi.fn(async () => ({ rootPageId: 'page_imported' })),
+  importPagePackage: vi.fn(async () => ({ rootPageId: 'page_imported' })),
 }))
 
 vi.mock('../lib/desktopLifecycle', async (importOriginal) => {
@@ -54,10 +54,10 @@ vi.mock('../lib/assets', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/assets')>()
   return {
     ...actual,
-    exportWorkspaceArchiveToPath: archiveStorage.exportWorkspaceArchiveToPath,
-    exportWorkspaceArchive: archiveStorage.exportWorkspaceArchive,
-    importWorkspaceArchiveFromPath: archiveStorage.importWorkspaceArchiveFromPath,
-    importWorkspaceArchive: archiveStorage.importWorkspaceArchive,
+    exportPagePackageToPath: pagePackageStorage.exportPagePackageToPath,
+    exportPagePackage: pagePackageStorage.exportPagePackage,
+    importPagePackageFromPath: pagePackageStorage.importPagePackageFromPath,
+    importPagePackage: pagePackageStorage.importPagePackage,
   }
 })
 
@@ -105,10 +105,12 @@ describe('App', () => {
     fileAccess.pickSaveFilePath.mockClear()
     fileAccess.pickSaveFilePath.mockResolvedValue('/tmp/产品规划.zip')
     fileAccess.saveBinaryFile.mockClear()
-    archiveStorage.exportWorkspaceArchiveToPath.mockClear()
-    archiveStorage.exportWorkspaceArchive.mockClear()
-    archiveStorage.importWorkspaceArchiveFromPath.mockClear()
-    archiveStorage.importWorkspaceArchive.mockClear()
+    pagePackageStorage.exportPagePackageToPath.mockClear()
+    pagePackageStorage.exportPagePackage.mockClear()
+    pagePackageStorage.importPagePackageFromPath.mockClear()
+    pagePackageStorage.importPagePackage.mockClear()
+    pagePackageStorage.importPagePackageFromPath.mockResolvedValue({ rootPageId: 'page_imported' })
+    pagePackageStorage.importPagePackage.mockResolvedValue({ rootPageId: 'page_imported' })
     scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
   })
 
@@ -450,7 +452,7 @@ describe('App', () => {
     expect(deletePage).toHaveBeenCalledWith(pageId)
   })
 
-  it('uses the current page title as the complete backup default file name', async () => {
+  it('uses the current page title as the page package default file name', async () => {
     const user = userEvent.setup()
     const pageId = 'page_archive_title'
     const snapshot: WorkspaceSnapshot = {
@@ -481,7 +483,7 @@ describe('App', () => {
 
     await screen.findByDisplayValue('产品规划')
     await user.click(screen.getByRole('button', { name: '页面菜单' }))
-    await user.click(screen.getByRole('button', { name: '创建完整备份' }))
+    await user.click(screen.getByRole('button', { name: '导出当前页面' }))
 
     await waitFor(() => {
       expect(fileAccess.saveBinaryFile).toHaveBeenCalledWith(
@@ -492,7 +494,7 @@ describe('App', () => {
     })
   })
 
-  it('exports complete backups directly to the selected desktop path without loading archive bytes in the webview', async () => {
+  it('exports the current page package directly to the selected desktop path', async () => {
     Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
       configurable: true,
       value: {},
@@ -527,7 +529,7 @@ describe('App', () => {
 
     await screen.findByDisplayValue('产品规划')
     await user.click(screen.getByRole('button', { name: '页面菜单' }))
-    await user.click(screen.getByRole('button', { name: '创建完整备份' }))
+    await user.click(screen.getByRole('button', { name: '导出当前页面' }))
 
     await waitFor(() => {
       expect(fileAccess.pickSaveFilePath).toHaveBeenCalledWith({
@@ -535,15 +537,16 @@ describe('App', () => {
         filters: [{ name: 'ZIP', extensions: ['zip'] }],
       })
     })
-    expect(archiveStorage.exportWorkspaceArchiveToPath).toHaveBeenCalledWith(
+    expect(pagePackageStorage.exportPagePackageToPath).toHaveBeenCalledWith(
+      pageId,
       '/tmp/产品规划.zip',
       expect.any(Function),
     )
-    expect(archiveStorage.exportWorkspaceArchive).not.toHaveBeenCalled()
+    expect(pagePackageStorage.exportPagePackage).not.toHaveBeenCalled()
     expect(fileAccess.saveBinaryFile).not.toHaveBeenCalled()
   })
 
-  it('shows progress while exporting a complete desktop backup', async () => {
+  it('shows progress while exporting a desktop page package', async () => {
     Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
       configurable: true,
       value: {},
@@ -572,18 +575,20 @@ describe('App', () => {
     const exportDone = new Promise<void>((resolve) => {
       resolveExport = resolve
     })
-    archiveStorage.exportWorkspaceArchiveToPath.mockImplementationOnce(async (_path, onProgress) => {
-      onProgress?.({
-        operation: 'export',
-        phase: 'processingAsset',
-        current: 1,
-        total: 2,
-        bytesProcessed: 512,
-        bytesTotal: 1024,
-        itemName: 'lesson.m4a',
-      })
-      await exportDone
-    })
+    pagePackageStorage.exportPagePackageToPath.mockImplementationOnce(
+      async (_pageId, _path, onProgress) => {
+        onProgress?.({
+          operation: 'export',
+          phase: 'processingAsset',
+          current: 1,
+          total: 2,
+          bytesProcessed: 512,
+          bytesTotal: 1024,
+          itemName: 'lesson.m4a',
+        })
+        await exportDone
+      },
+    )
 
     render(
       <App
@@ -594,27 +599,27 @@ describe('App', () => {
 
     await screen.findByDisplayValue('产品规划')
     await user.click(screen.getByRole('button', { name: '页面菜单' }))
-    await user.click(screen.getByRole('button', { name: '创建完整备份' }))
+    await user.click(screen.getByRole('button', { name: '导出当前页面' }))
 
-    expect(await screen.findByText('正在导出完整备份')).toBeInTheDocument()
+    expect(await screen.findByText('正在导出当前页面')).toBeInTheDocument()
     expect(screen.getByText('lesson.m4a')).toBeInTheDocument()
     expect(screen.getByText('50%')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '页面菜单' })).toBeDisabled()
 
     resolveExport!()
     await waitFor(() => {
-      expect(screen.getByText('完整备份已导出')).toBeInTheDocument()
+      expect(screen.getByText('当前页面已导出')).toBeInTheDocument()
     })
   })
 
-  it('imports complete desktop backups from the selected path with progress', async () => {
+  it('imports a page package as a new top-level page and navigates to it', async () => {
     Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
       configurable: true,
       value: {},
     })
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const user = userEvent.setup()
-    const pageId = 'page_import_progress'
+    const pageId = 'page_import_source'
     const snapshot: WorkspaceSnapshot = {
       boards: [],
       dataTables: [],
@@ -623,7 +628,7 @@ describe('App', () => {
         {
           id: pageId,
           parentId: null,
-          title: '产品规划',
+          title: '当前页面',
           icon: null,
           cover: null,
           blocks: [],
@@ -633,21 +638,8 @@ describe('App', () => {
       ],
       settings: { lastOpenedPageId: pageId },
     }
-    let resolveImport: () => void
-    const importDone = new Promise<void>((resolve) => {
-      resolveImport = resolve
-    })
-    archiveStorage.importWorkspaceArchiveFromPath.mockImplementationOnce(async (_path, onProgress) => {
-      onProgress?.({
-        operation: 'import',
-        phase: 'processingAsset',
-        current: 1,
-        total: 2,
-        bytesProcessed: 256,
-        bytesTotal: 512,
-        itemName: 'recording.wav',
-      })
-      await importDone
+    pagePackageStorage.importPagePackageFromPath.mockResolvedValueOnce({
+      rootPageId: 'page_imported',
     })
 
     render(
@@ -657,34 +649,25 @@ describe('App', () => {
       />,
     )
 
-    await screen.findByDisplayValue('产品规划')
+    await screen.findByDisplayValue('当前页面')
     await user.click(screen.getByRole('button', { name: '页面菜单' }))
-    await user.click(screen.getByRole('button', { name: '从备份恢复' }))
+    await user.click(screen.getByRole('button', { name: '导入页面包' }))
 
     await waitFor(() => {
       expect(fileAccess.openLocalFilePath).toHaveBeenCalledWith({
         filters: [{ name: 'ZIP', extensions: ['zip'] }],
       })
     })
-    expect(confirm).toHaveBeenCalledWith('导入会覆盖当前本地内容，确认继续吗？')
-    expect(archiveStorage.importWorkspaceArchiveFromPath).toHaveBeenCalledWith(
+    expect(confirm).toHaveBeenCalledWith('导入会新增为一个顶层页面，确认继续吗？')
+    expect(pagePackageStorage.importPagePackageFromPath).toHaveBeenCalledWith(
       '/tmp/工作区备份.zip',
       expect.any(Function),
     )
-    expect(fileAccess.openBinaryFile).not.toHaveBeenCalled()
-    expect(await screen.findByText('正在恢复完整备份')).toBeInTheDocument()
-    expect(screen.getByText('recording.wav')).toBeInTheDocument()
-    expect(screen.getByText('50%')).toBeInTheDocument()
-
-    resolveImport!()
-    await waitFor(() => {
-      expect(screen.getByText('备份恢复完成')).toBeInTheDocument()
-    })
 
     confirm.mockRestore()
   })
 
-  it('flushes pending workspace saves before importing a desktop backup', async () => {
+  it('flushes pending workspace saves before importing a desktop page package', async () => {
     Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
       configurable: true,
       value: {},
@@ -724,17 +707,17 @@ describe('App', () => {
 
     await screen.findByDisplayValue('待恢复页面')
     await user.click(screen.getByRole('button', { name: '页面菜单' }))
-    await user.click(screen.getByRole('button', { name: '从备份恢复' }))
+    await user.click(screen.getByRole('button', { name: '导入页面包' }))
 
     await waitFor(() => {
       expect(flushPendingSaves).toHaveBeenCalledTimes(1)
     })
-    expect(archiveStorage.importWorkspaceArchiveFromPath).not.toHaveBeenCalled()
+    expect(pagePackageStorage.importPagePackageFromPath).not.toHaveBeenCalled()
 
     resolveFlush!()
 
     await waitFor(() => {
-      expect(archiveStorage.importWorkspaceArchiveFromPath).toHaveBeenCalledWith(
+      expect(pagePackageStorage.importPagePackageFromPath).toHaveBeenCalledWith(
         '/tmp/工作区备份.zip',
         expect.any(Function),
       )
