@@ -80,7 +80,7 @@ const DELETE_PAGE_CONFIRM_LABEL = '\u786e\u8ba4\u5220\u9664'
 const CANCEL_DELETE_PAGE_LABEL = '\u53d6\u6d88'
 const DELETE_PAGE_DESCRIPTION_PREFIX = '\u9875\u9762\u201c'
 const DELETE_PAGE_DESCRIPTION_SUFFIX =
-  '\u201d\u53ca\u5176\u6240\u6709\u5b50\u9875\u9762\u5c06\u88ab\u5220\u9664\u3002\u5982\u679c\u8bef\u5220\uff0c\u53ef\u4f7f\u7528\u64a4\u9500\u6062\u590d\u3002'
+  '\u201d\u53ca\u5176\u6240\u6709\u5b50\u9875\u9762\u5c06\u88ab\u5220\u9664\u3002\u672a\u88ab\u5176\u4ed6\u9875\u9762\u6216\u8d44\u6e90\u4f7f\u7528\u7684\u5173\u8054\u6587\u4ef6\u3001\u767d\u677f\u3001\u6570\u636e\u8868\u683c\u548c\u601d\u7ef4\u5bfc\u56fe\u4e5f\u4f1a\u88ab\u6e05\u7406\u3002'
 const JSON_FILE_FILTER = [{ name: 'JSON', extensions: ['json'] }]
 const ZIP_FILE_FILTER = [{ name: 'ZIP', extensions: ['zip'] }]
 const DataTablePage = lazy(() =>

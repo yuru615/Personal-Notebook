@@ -379,7 +379,7 @@ impl Storage {
         F: FnMut(WorkspaceArchiveProgress),
     {
         let snapshot = self.export_workspace_backup()?;
-        let assets = assets::load_assets(&self.connection)?;
+        let assets = assets::load_referenced_assets(&self.connection)?;
         let total_assets = assets.len() as u64;
         let bytes_total = total_asset_bytes(&assets);
         let mut bytes_processed = 0;
@@ -1712,6 +1712,80 @@ mod tests {
             target.read_asset(&asset.id).expect("read imported"),
             b"image"
         );
+    }
+
+    #[test]
+    fn workspace_archive_skips_replaced_media_assets_without_refs() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        let old_asset = source
+            .write_asset(WriteAssetInput {
+                name: "old.png".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes: b"old image".to_vec(),
+            })
+            .expect("write old asset");
+        let new_asset = source
+            .write_asset(WriteAssetInput {
+                name: "new.png".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes: b"new image".to_vec(),
+            })
+            .expect("write new asset");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages[0].blocks.push(json!({
+            "id": "block_image",
+            "type": "image",
+            "assetId": old_asset.id,
+            "name": "old.png",
+            "mimeType": "image/png",
+            "caption": "",
+            "alt": "old"
+        }));
+        source
+            .replace_workspace_backup(snapshot.clone())
+            .expect("replace snapshot");
+        snapshot.pages[0].blocks.pop();
+        snapshot.pages[0].blocks.push(json!({
+            "id": "block_image",
+            "type": "image",
+            "assetId": new_asset.id,
+            "name": "new.png",
+            "mimeType": "image/png",
+            "caption": "",
+            "alt": "new"
+        }));
+        source
+            .save_page(snapshot.pages[0].clone())
+            .expect("save page after media replacement");
+
+        let archive = source
+            .export_workspace_archive()
+            .expect("export workspace archive");
+        let cursor = Cursor::new(archive);
+        let mut archive = zip::ZipArchive::new(cursor).expect("read archive");
+        let manifest: Vec<AssetMeta> = {
+            let mut manifest_entry = archive
+                .by_name("assets/manifest.json")
+                .expect("asset manifest entry");
+            serde_json::from_reader(&mut manifest_entry).expect("parse asset manifest")
+        };
+        let manifest_ids = manifest
+            .iter()
+            .map(|asset| asset.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(manifest_ids, vec![new_asset.id.as_str()]);
+        assert!(archive
+            .by_name(&format!("assets/{}", old_asset.relative_path))
+            .is_err());
+        let mut new_entry = archive
+            .by_name(&format!("assets/{}", new_asset.relative_path))
+            .expect("new asset entry");
+        let mut new_bytes = Vec::new();
+        new_entry
+            .read_to_end(&mut new_bytes)
+            .expect("read new asset entry");
+        assert_eq!(new_bytes, b"new image");
     }
 
     #[test]

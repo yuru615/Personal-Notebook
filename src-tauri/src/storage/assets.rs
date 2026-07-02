@@ -178,10 +178,14 @@ pub fn asset_file_path(
     asset_path(assets_dir, &relative_path)
 }
 
-pub fn load_assets(connection: &Connection) -> StorageResult<Vec<AssetMeta>> {
+pub fn load_referenced_assets(connection: &Connection) -> StorageResult<Vec<AssetMeta>> {
     let mut statement = connection.prepare(
         "SELECT id, sha256, name, mime_type, byte_size, relative_path, created_at
-          FROM zhixi_assets ORDER BY created_at ASC, id ASC",
+          FROM zhixi_assets
+          WHERE EXISTS (
+            SELECT 1 FROM zhixi_asset_refs WHERE zhixi_asset_refs.asset_id = zhixi_assets.id
+          )
+          ORDER BY created_at ASC, id ASC",
     )?;
     let rows = statement.query_map([], |row| {
         Ok(AssetMeta {

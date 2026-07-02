@@ -6,6 +6,7 @@ export interface WorkspaceRepository {
   load(): Promise<WorkspaceSnapshot | null>
   save(snapshot: WorkspaceSnapshot): Promise<void>
   replace(snapshot: WorkspaceSnapshot): Promise<void>
+  cleanupOrphanAssets(): Promise<number>
 }
 
 export async function ensureSnapshot(
@@ -31,9 +32,9 @@ export function createStorageWorkspaceRepository({
 }: CreateStorageWorkspaceRepositoryOptions = {}): WorkspaceRepository {
   let writeQueue: Promise<void> = Promise.resolve()
 
-  function queueWrite(task: () => Promise<void>) {
+  function queueWrite<T>(task: () => Promise<T>) {
     const queuedTask = writeQueue.then(task, task)
-    writeQueue = queuedTask.catch(() => undefined)
+    writeQueue = queuedTask.then(() => undefined, () => undefined)
     return queuedTask
   }
 
@@ -67,6 +68,10 @@ export function createStorageWorkspaceRepository({
       return queueWrite(async () => {
         await client.replaceWorkspaceBackup(snapshot)
       })
+    },
+
+    async cleanupOrphanAssets() {
+      return queueWrite(() => client.cleanupOrphanAssets())
     },
   }
 }

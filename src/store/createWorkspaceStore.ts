@@ -659,6 +659,35 @@ function collectReferencedDataTableIds(pages: PageRecord[]) {
   return referencedDataTableIds
 }
 
+function collectReferencedMindmapIds(pages: PageRecord[]) {
+  const referencedMindmapIds = new Set<string>()
+
+  for (const page of pages) {
+    for (const block of page.blocks) {
+      if (block.type === 'mindmap') {
+        referencedMindmapIds.add(block.mindmapId)
+      }
+    }
+  }
+
+  return referencedMindmapIds
+}
+
+function filterResourcesReferencedByPages(
+  state: Pick<WorkspaceState, 'boards' | 'dataTables' | 'mindmaps'>,
+  pages: PageRecord[],
+) {
+  const referencedBoardIds = collectReferencedBoardIds(pages)
+  const referencedDataTableIds = collectReferencedDataTableIds(pages)
+  const referencedMindmapIds = collectReferencedMindmapIds(pages)
+
+  return {
+    boards: state.boards.filter((board) => referencedBoardIds.has(board.id)),
+    dataTables: state.dataTables.filter((dataTable) => referencedDataTableIds.has(dataTable.id)),
+    mindmaps: state.mindmaps.filter((mindmap) => referencedMindmapIds.has(mindmap.id)),
+  }
+}
+
 export function createWorkspaceStore(repository: WorkspaceRepository) {
   const undoStack: WorkspaceSnapshot[] = []
   const redoStack: WorkspaceSnapshot[] = []
@@ -1621,6 +1650,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
     deletePage: async (pageId: PageId) => {
       const state = get()
       const nextPages = deletePageBranch(state.pages, pageId)
+      const nextResources = filterResourcesReferencedByPages(state, nextPages)
       const currentPageDeleted =
         state.currentPageId !== null && !nextPages.some((page) => page.id === state.currentPageId)
       const nextCurrentPageId = currentPageDeleted ? (nextPages[0]?.id ?? null) : state.currentPageId
@@ -1630,9 +1660,18 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, pages: nextPages, settings: nextSettings })
+        await repository.save({
+          boards: nextResources.boards,
+          dataTables: nextResources.dataTables,
+          mindmaps: nextResources.mindmaps,
+          pages: nextPages,
+          settings: nextSettings,
+        })
+        await repository.cleanupOrphanAssets()
         set({
-          boards: state.boards,
+          boards: nextResources.boards,
+          dataTables: nextResources.dataTables,
+          mindmaps: nextResources.mindmaps,
           pages: nextPages,
           currentPageId: nextCurrentPageId,
           settings: nextSettings,

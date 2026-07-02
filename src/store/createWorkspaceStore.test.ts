@@ -8,6 +8,7 @@ function createCountingRepository(initialSnapshot: WorkspaceSnapshot | null = nu
   let snapshot = initialSnapshot ? structuredClone(initialSnapshot) : null
   let saveCalls = 0
   let replaceCalls = 0
+  let cleanupCalls = 0
 
   return {
     repository: {
@@ -22,6 +23,10 @@ function createCountingRepository(initialSnapshot: WorkspaceSnapshot | null = nu
         replaceCalls += 1
         snapshot = structuredClone(nextSnapshot)
       },
+      async cleanupOrphanAssets() {
+        cleanupCalls += 1
+        return 0
+      },
     },
     getSnapshot() {
       return snapshot ? structuredClone(snapshot) : null
@@ -31,6 +36,9 @@ function createCountingRepository(initialSnapshot: WorkspaceSnapshot | null = nu
     },
     getReplaceCalls() {
       return replaceCalls
+    },
+    getCleanupCalls() {
+      return cleanupCalls
     },
   }
 }
@@ -92,6 +100,80 @@ describe('createWorkspaceStore data tables', () => {
     expect(store.getState().currentPageId).toBe('page_next')
     expect(store.getState().settings.lastOpenedPageId).toBe('page_next')
     expect(counted.getSnapshot()?.pages.map((page) => page.id)).toEqual(['page_next'])
+  })
+
+  it('removes orphan page resources on page deletion and keeps resources referenced elsewhere', async () => {
+    const workspace = createWorkspace()
+    const now = '2026-06-22T00:00:00.000Z'
+    workspace.boards = [
+      { id: 'board_orphan', title: 'Orphan board', snapshot: {}, createdAt: now, updatedAt: now },
+      { id: 'board_shared', title: 'Shared board', snapshot: {}, createdAt: now, updatedAt: now },
+    ]
+    workspace.dataTables = [
+      {
+        id: 'database_orphan',
+        title: 'Orphan database',
+        snapshot: { version: 1 },
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: 'database_shared',
+        title: 'Shared database',
+        snapshot: { version: 1 },
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]
+    workspace.mindmaps = [
+      { id: 'mindmap_orphan', title: 'Orphan mindmap', snapshot: {}, createdAt: now, updatedAt: now },
+      { id: 'mindmap_shared', title: 'Shared mindmap', snapshot: {}, createdAt: now, updatedAt: now },
+    ]
+    workspace.pages = [
+      {
+        ...workspace.pages[0],
+        id: 'page_delete',
+        title: 'Delete me',
+        blocks: [
+          { id: 'block_board_orphan', type: 'whiteboard', boardId: 'board_orphan' },
+          { id: 'block_board_shared', type: 'whiteboard', boardId: 'board_shared' },
+          { id: 'block_database_orphan', type: 'data_table', databaseId: 'database_orphan' },
+          { id: 'block_database_shared', type: 'data_table', databaseId: 'database_shared' },
+          { id: 'block_mindmap_orphan', type: 'mindmap', mindmapId: 'mindmap_orphan' },
+          { id: 'block_mindmap_shared', type: 'mindmap', mindmapId: 'mindmap_shared' },
+        ],
+      },
+      {
+        ...workspace.pages[0],
+        id: 'page_keep',
+        title: 'Keep me',
+        blocks: [
+          { id: 'block_keep_board', type: 'whiteboard', boardId: 'board_shared' },
+          { id: 'block_keep_database', type: 'data_table', databaseId: 'database_shared' },
+          { id: 'block_keep_mindmap', type: 'mindmap', mindmapId: 'mindmap_shared' },
+        ],
+      },
+    ]
+    workspace.settings.lastOpenedPageId = 'page_delete'
+    const counted = createCountingRepository(workspace)
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+    await store.getState().deletePage('page_delete')
+
+    expect(store.getState().pages.map((page) => page.id)).toEqual(['page_keep'])
+    expect(store.getState().boards.map((board) => board.id)).toEqual(['board_shared'])
+    expect(store.getState().dataTables.map((dataTable) => dataTable.id)).toEqual([
+      'database_shared',
+    ])
+    expect(store.getState().mindmaps.map((mindmap) => mindmap.id)).toEqual(['mindmap_shared'])
+    expect(counted.getSnapshot()).toMatchObject({
+      boards: [{ id: 'board_shared' }],
+      dataTables: [{ id: 'database_shared' }],
+      mindmaps: [{ id: 'mindmap_shared' }],
+      pages: [{ id: 'page_keep' }],
+    })
+    expect(counted.getCleanupCalls()).toBe(1)
   })
 
   it('creates a data table asset when inserting a data table block', async () => {

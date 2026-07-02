@@ -431,6 +431,7 @@ describe('App', () => {
 
     const dialog = await screen.findByRole('dialog', { name: '删除当前页面' })
     expect(within(dialog).getByText(/Delete me/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/未被其他页面或资源使用的关联文件/)).toBeInTheDocument()
     expect(deletePage).not.toHaveBeenCalled()
 
     await user.click(within(dialog).getByRole('button', { name: '取消' }))

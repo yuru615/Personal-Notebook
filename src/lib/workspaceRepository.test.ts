@@ -61,6 +61,7 @@ function createRepository() {
       return ''
     },
     async cleanupOrphanAssets() {
+      calls.push('cleanupOrphanAssets')
       return 0
     },
     async searchWorkspace() {
@@ -289,5 +290,13 @@ describe('createStorageWorkspaceRepository', () => {
 
     expect(calls).toEqual(['replaceWorkspaceBackup'])
     await expect(repository.load()).resolves.toEqual(next)
+  })
+
+  it('delegates orphan asset cleanup to the storage client', async () => {
+    const { calls, repository } = createRepository()
+
+    await expect(repository.cleanupOrphanAssets()).resolves.toBe(0)
+
+    expect(calls).toEqual(['cleanupOrphanAssets'])
   })
 })

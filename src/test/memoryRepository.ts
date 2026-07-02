@@ -18,5 +18,9 @@ export function createMemoryRepository(
     async replace(nextSnapshot) {
       snapshot = structuredClone(nextSnapshot)
     },
+
+    async cleanupOrphanAssets() {
+      return 0
+    },
   }
 }
