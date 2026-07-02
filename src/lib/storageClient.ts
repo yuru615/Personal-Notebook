@@ -30,6 +30,10 @@ export interface AssetMeta {
   createdAt: string
 }
 
+export interface PagePackageImportResult {
+  rootPageId: string
+}
+
 export const WORKSPACE_ARCHIVE_PROGRESS_EVENT = 'zhixi://workspace-archive-progress'
 
 export type WorkspaceArchiveOperation = 'export' | 'import'
@@ -66,6 +70,17 @@ export interface WorkspaceStorageClient {
     path: string,
     onProgress?: WorkspaceArchiveProgressHandler,
   ): Promise<void>
+  exportPagePackageToPath(
+    pageId: string,
+    path: string,
+    onProgress?: WorkspaceArchiveProgressHandler,
+  ): Promise<void>
+  exportPagePackage(pageId: string): Promise<Uint8Array>
+  importPagePackage(bytes: Uint8Array): Promise<PagePackageImportResult>
+  importPagePackageFromPath(
+    path: string,
+    onProgress?: WorkspaceArchiveProgressHandler,
+  ): Promise<PagePackageImportResult>
   savePage(page: PageRecord): Promise<void>
   saveBoard(board: BoardRecord): Promise<void>
   saveDataTable(dataTable: DataTableRecord): Promise<void>
@@ -107,6 +122,30 @@ export function createTauriStorageClient(): WorkspaceStorageClient {
     importWorkspaceArchiveFromPath(path, onProgress) {
       return invokeArchiveCommandWithProgress(
         'import_workspace_archive_from_path',
+        { path },
+        onProgress,
+      )
+    },
+
+    exportPagePackageToPath(pageId, path, onProgress) {
+      return invokeArchiveCommandWithProgress(
+        'export_page_package_to_path',
+        { pageId, path },
+        onProgress,
+      )
+    },
+
+    async exportPagePackage(pageId) {
+      return normalizeByteArray(await invoke<Uint8Array | number[]>('export_page_package', { pageId }))
+    },
+
+    importPagePackage(bytes) {
+      return invoke<PagePackageImportResult>('import_page_package', { bytes })
+    },
+
+    importPagePackageFromPath(path, onProgress) {
+      return invokeArchiveCommandWithProgress<PagePackageImportResult>(
+        'import_page_package_from_path',
         { path },
         onProgress,
       )
@@ -158,14 +197,13 @@ function normalizeByteArray(bytes: Uint8Array | number[]) {
   return bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
 }
 
-async function invokeArchiveCommandWithProgress(
+async function invokeArchiveCommandWithProgress<T = void>(
   command: string,
   args: Record<string, unknown>,
   onProgress?: WorkspaceArchiveProgressHandler,
-) {
+): Promise<T> {
   if (!onProgress) {
-    await invoke<void>(command, args)
-    return
+    return invoke<T>(command, args)
   }
 
   const taskId = createArchiveTaskId()
@@ -179,7 +217,7 @@ async function invokeArchiveCommandWithProgress(
   )
 
   try {
-    await invoke<void>(command, { ...args, taskId })
+    return await invoke<T>(command, { ...args, taskId })
   } finally {
     unlisten()
   }

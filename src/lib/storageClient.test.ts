@@ -231,6 +231,82 @@ describe('createTauriStorageClient', () => {
     expect(eventApi.unlisten).toHaveBeenCalledTimes(1)
   })
 
+  it('exports and imports page packages through typed Tauri commands', async () => {
+    const { createTauriStorageClient } = await import('./storageClient')
+    const bytes = new Uint8Array([80, 75, 3, 4])
+    eventApi.invoke
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(bytes)
+      .mockResolvedValueOnce({ rootPageId: 'page_imported' })
+      .mockResolvedValueOnce({ rootPageId: 'page_imported_bytes' })
+
+    const client = createTauriStorageClient()
+
+    await client.exportPagePackageToPath('page_source', '/tmp/page.zip')
+    await expect(client.exportPagePackage('page_source')).resolves.toBe(bytes)
+    await expect(client.importPagePackageFromPath('/tmp/page.zip')).resolves.toEqual({
+      rootPageId: 'page_imported',
+    })
+    await expect(client.importPagePackage(bytes)).resolves.toEqual({
+      rootPageId: 'page_imported_bytes',
+    })
+
+    expect(eventApi.invoke).toHaveBeenNthCalledWith(1, 'export_page_package_to_path', {
+      pageId: 'page_source',
+      path: '/tmp/page.zip',
+    })
+    expect(eventApi.invoke).toHaveBeenNthCalledWith(2, 'export_page_package', {
+      pageId: 'page_source',
+    })
+    expect(eventApi.invoke).toHaveBeenNthCalledWith(3, 'import_page_package_from_path', {
+      path: '/tmp/page.zip',
+    })
+    expect(eventApi.invoke).toHaveBeenNthCalledWith(4, 'import_page_package', { bytes })
+  })
+
+  it('subscribes to archive progress for page-package path commands', async () => {
+    const { createTauriStorageClient, WORKSPACE_ARCHIVE_PROGRESS_EVENT } = await import('./storageClient')
+    const onProgress = vi.fn()
+
+    eventApi.invoke.mockImplementationOnce(async (_command, args) => {
+      eventApi.handlers[0]?.({
+        payload: {
+          taskId: args.taskId,
+          operation: 'export',
+          phase: 'processingAsset',
+          current: 1,
+          total: 1,
+          bytesProcessed: 32,
+          bytesTotal: 32,
+          itemName: 'image.png',
+        },
+      })
+    })
+
+    const client = createTauriStorageClient()
+
+    await client.exportPagePackageToPath('page_source', '/tmp/page.zip', onProgress)
+
+    expect(eventApi.listen).toHaveBeenCalledWith(
+      WORKSPACE_ARCHIVE_PROGRESS_EVENT,
+      expect.any(Function),
+    )
+    expect(eventApi.invoke).toHaveBeenCalledWith('export_page_package_to_path', {
+      pageId: 'page_source',
+      path: '/tmp/page.zip',
+      taskId: expect.any(String),
+    })
+    expect(onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: expect.any(String),
+        operation: 'export',
+        phase: 'processingAsset',
+        itemName: 'image.png',
+      }),
+    )
+    expect(eventApi.unlisten).toHaveBeenCalledTimes(1)
+  })
+
   it('normalizes archive bytes returned from Tauri into a Uint8Array', async () => {
     const { createTauriStorageClient } = await import('./storageClient')
     eventApi.invoke.mockResolvedValueOnce([80, 75, 3, 4])

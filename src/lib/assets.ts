@@ -124,3 +124,26 @@ export function importWorkspaceArchiveFromPath(
 ) {
   return storageClient.importWorkspaceArchiveFromPath(path, onProgress)
 }
+
+export function exportPagePackage(pageId: string) {
+  return storageClient.exportPagePackage(pageId)
+}
+
+export function exportPagePackageToPath(
+  pageId: string,
+  path: string,
+  onProgress?: WorkspaceArchiveProgressHandler,
+) {
+  return storageClient.exportPagePackageToPath(pageId, path, onProgress)
+}
+
+export function importPagePackage(bytes: Uint8Array) {
+  return storageClient.importPagePackage(bytes)
+}
+
+export function importPagePackageFromPath(
+  path: string,
+  onProgress?: WorkspaceArchiveProgressHandler,
+) {
+  return storageClient.importPagePackageFromPath(path, onProgress)
+}
