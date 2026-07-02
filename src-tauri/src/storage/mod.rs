@@ -719,8 +719,6 @@ impl Storage {
             for (index, asset) in manifest.assets.iter().enumerate() {
                 let archive_path = format!("assets/{}", asset.relative_path);
                 let mut asset_file = archive.by_name(&archive_path).map_err(zip_error)?;
-                let asset_was_present =
-                    self.id_exists("zhixi_assets", &format!("asset_{}", asset.sha256))?;
                 let current = index as u64 + 1;
                 let item_name = asset.name.clone();
                 let mut copied_for_asset = 0;
@@ -759,14 +757,14 @@ impl Storage {
                     },
                 )?;
                 bytes_processed += copied_for_asset;
-                if !asset_was_present {
+                if imported.created {
                     imported_asset_paths.push(assets::asset_file_path(
                         &self.connection,
                         &self.assets_dir,
-                        &imported.id,
+                        &imported.meta.id,
                     )?);
                 }
-                asset_id_map.insert(asset.id.clone(), imported.id);
+                asset_id_map.insert(asset.id.clone(), imported.meta.id);
             }
 
             let mut board_position = self.next_position("zhixi_boards");
@@ -3491,6 +3489,72 @@ mod tests {
                 )
                 .expect("query asset rows"),
             0
+        );
+    }
+
+    #[test]
+    fn page_package_import_keeps_existing_asset_file_when_manifest_sha_is_wrong() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        let asset = source
+            .write_asset(WriteAssetInput {
+                name: "existing.png".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes: b"existing image".to_vec(),
+            })
+            .expect("write source asset");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages[0].blocks.push(json!({
+            "id": "block_image",
+            "type": "image",
+            "assetId": asset.id,
+            "name": "existing.png",
+            "mimeType": "image/png"
+        }));
+        source
+            .replace_workspace_backup(snapshot)
+            .expect("replace snapshot");
+        let archive = source
+            .export_page_package("page_1")
+            .expect("export package");
+        let archive = rewrite_page_package_manifest(archive, |manifest| {
+            manifest.assets[0].sha256 = "0".repeat(64);
+        });
+        let target = Storage::open_in_memory_for_tests().expect("target opens");
+        target
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed target");
+        let existing = target
+            .write_asset(WriteAssetInput {
+                name: "existing.png".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes: b"existing image".to_vec(),
+            })
+            .expect("write existing target asset");
+        target
+            .connection
+            .execute(
+                "CREATE TRIGGER fail_imported_page_insert
+                 BEFORE INSERT ON zhixi_pages
+                 WHEN NEW.id LIKE 'page_import_%'
+                 BEGIN
+                   SELECT RAISE(FAIL, 'forced page import failure');
+                 END",
+                [],
+            )
+            .expect("install failure trigger");
+        let existing_asset_path = target.assets_dir.join(&existing.relative_path);
+
+        let error = target
+            .import_page_package(archive)
+            .expect_err("late database failure");
+
+        assert_eq!(error.code, "database_error");
+        assert!(existing_asset_path.exists());
+        assert_eq!(
+            target
+                .read_asset(&existing.id)
+                .expect("read existing asset"),
+            b"existing image"
         );
     }
 

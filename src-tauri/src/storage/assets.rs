@@ -14,6 +14,11 @@ use super::{
     models::{AssetMeta, WriteAssetInput},
 };
 
+pub struct WrittenAsset {
+    pub meta: AssetMeta,
+    pub created: bool,
+}
+
 pub fn write_asset(
     connection: &Connection,
     assets_dir: &Path,
@@ -71,7 +76,7 @@ pub fn write_asset_from_reader<R, F>(
     mime_type: String,
     reader: &mut R,
     progress: &mut F,
-) -> StorageResult<AssetMeta>
+) -> StorageResult<WrittenAsset>
 where
     R: Read,
     F: FnMut(u64),
@@ -92,7 +97,10 @@ where
 
     if let Some(existing) = load_asset_by_sha(connection, &sha256)? {
         let _ = fs::remove_file(&temp_path);
-        return Ok(existing);
+        return Ok(WrittenAsset {
+            meta: existing,
+            created: false,
+        });
     }
 
     let extension = file_extension(&name);
@@ -115,7 +123,7 @@ where
         created_at: now_iso_like(),
     };
 
-    connection.execute(
+    let insert_result = connection.execute(
         "INSERT INTO zhixi_assets
           (id, sha256, name, mime_type, byte_size, relative_path, created_at)
           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -128,9 +136,16 @@ where
             meta.relative_path,
             meta.created_at
         ],
-    )?;
+    );
+    if insert_result.is_err() {
+        let _ = fs::remove_file(&absolute_path);
+    }
+    insert_result?;
 
-    Ok(meta)
+    Ok(WrittenAsset {
+        meta,
+        created: true,
+    })
 }
 
 pub fn read_asset(
