@@ -4,7 +4,7 @@
 
 **Goal:** Replace frontend-driven SQLite persistence with a desktop-first Rust storage engine that owns SQLite, file assets, transactions, and search.
 
-**Architecture:** Rust/Tauri exposes typed storage commands backed by `rusqlite` and an app-managed asset directory. React talks to one TypeScript storage client and no longer sends business SQL through `@tauri-apps/plugin-sql`. The rewrite starts from a new `personal-notebook-v2.db` and does not migrate old data.
+**Architecture:** Rust/Tauri exposes typed storage commands backed by `rusqlite` and an app-managed asset directory. React talks to one TypeScript storage client and no longer sends business SQL through `@tauri-apps/plugin-sql`. The rewrite starts from a new `zhixi.db` and does not migrate old data.
 
 **Tech Stack:** Tauri 2, Rust, `rusqlite` with bundled SQLite, React 19, TypeScript, Vitest.
 
@@ -12,7 +12,7 @@
 
 ## Summary
 
-Build a desktop-first storage engine for 知栖: Rust owns SQLite, file assets, transactions, and search; React uses typed Tauri commands through one storage client. Do not migrate old data. Use a new database file, `personal-notebook-v2.db`, and leave the old `personal-notebook.db` untouched.
+Build a desktop-first storage engine for 知栖: Rust owns SQLite, file assets, transactions, and search; React uses typed Tauri commands through one storage client. Do not migrate old data. Use a new database file, `zhixi.db`.
 
 ## Architecture Decisions
 
@@ -44,6 +44,6 @@ Build a desktop-first storage engine for 知栖: Rust owns SQLite, file assets, 
 
 - No migration from old SQLite data is required.
 - Desktop is the product target; browser mode may keep lightweight test fakes but is not a full storage target.
-- New storage starts with `personal-notebook-v2.db`.
+- New storage starts with `zhixi.db`.
 - File assets live under the app-managed data directory, not a user-visible workspace folder.
 - Existing UI/UX remains functionally the same unless storage changes require loading/error states.

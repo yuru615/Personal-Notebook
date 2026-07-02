@@ -45,7 +45,7 @@ pub fn write_asset(
     };
 
     connection.execute(
-        "INSERT INTO assets
+        "INSERT INTO zhixi_assets
           (id, sha256, name, mime_type, byte_size, relative_path, created_at)
           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
@@ -69,7 +69,7 @@ pub fn read_asset(
 ) -> StorageResult<Vec<u8>> {
     let relative_path: String = connection
         .query_row(
-            "SELECT relative_path FROM assets WHERE id = ?1",
+            "SELECT relative_path FROM zhixi_assets WHERE id = ?1",
             [asset_id],
             |row| row.get(0),
         )
@@ -92,7 +92,7 @@ pub fn asset_file_path(
 ) -> StorageResult<PathBuf> {
     let relative_path: String = connection
         .query_row(
-            "SELECT relative_path FROM assets WHERE id = ?1",
+            "SELECT relative_path FROM zhixi_assets WHERE id = ?1",
             [asset_id],
             |row| row.get(0),
         )
@@ -110,7 +110,7 @@ pub fn asset_file_path(
 pub fn load_assets(connection: &Connection) -> StorageResult<Vec<AssetMeta>> {
     let mut statement = connection.prepare(
         "SELECT id, sha256, name, mime_type, byte_size, relative_path, created_at
-          FROM assets ORDER BY created_at ASC, id ASC",
+          FROM zhixi_assets ORDER BY created_at ASC, id ASC",
     )?;
     let rows = statement.query_map([], |row| {
         Ok(AssetMeta {
@@ -129,8 +129,8 @@ pub fn load_assets(connection: &Connection) -> StorageResult<Vec<AssetMeta>> {
 
 pub fn cleanup_orphan_assets(connection: &Connection, assets_dir: &Path) -> StorageResult<usize> {
     let mut statement = connection.prepare(
-        "SELECT id, relative_path FROM assets
-          WHERE id NOT IN (SELECT asset_id FROM asset_refs)",
+        "SELECT id, relative_path FROM zhixi_assets
+          WHERE id NOT IN (SELECT asset_id FROM zhixi_asset_refs)",
     )?;
     let assets = statement
         .query_map([], |row| {
@@ -140,7 +140,7 @@ pub fn cleanup_orphan_assets(connection: &Connection, assets_dir: &Path) -> Stor
 
     for (asset_id, relative_path) in &assets {
         let _ = fs::remove_file(asset_path(assets_dir, relative_path)?);
-        connection.execute("DELETE FROM assets WHERE id = ?1", [asset_id])?;
+        connection.execute("DELETE FROM zhixi_assets WHERE id = ?1", [asset_id])?;
     }
 
     Ok(assets.len())
@@ -177,7 +177,7 @@ fn asset_path(assets_dir: &Path, relative_path: &str) -> StorageResult<PathBuf> 
 fn load_asset_by_sha(connection: &Connection, sha256: &str) -> StorageResult<Option<AssetMeta>> {
     let mut statement = connection.prepare(
         "SELECT id, sha256, name, mime_type, byte_size, relative_path, created_at
-          FROM assets WHERE sha256 = ?1",
+          FROM zhixi_assets WHERE sha256 = ?1",
     )?;
     let mut rows = statement.query([sha256])?;
 

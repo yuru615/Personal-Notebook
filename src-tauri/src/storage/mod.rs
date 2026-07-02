@@ -25,8 +25,8 @@ pub use models::{
     WorkspaceSnapshot, WriteAssetInput,
 };
 
-const DATABASE_FILE_NAME: &str = "personal-notebook-v2.db";
-const ASSETS_DIR_NAME: &str = "personal-notebook-assets-v2";
+const DATABASE_FILE_NAME: &str = "zhixi.db";
+const ASSETS_DIR_NAME: &str = "zhixi-assets";
 const SETTINGS_ID: &str = "workspace";
 
 pub struct StorageState {
@@ -85,7 +85,7 @@ impl Storage {
     pub fn schema_version(&self) -> StorageResult<i64> {
         self.connection
             .query_row(
-                "SELECT value FROM meta WHERE key = 'schema_version'",
+                "SELECT value FROM zhixi_meta WHERE key = 'schema_version'",
                 [],
                 |row| row.get::<_, String>(0),
             )?
@@ -109,7 +109,7 @@ impl Storage {
 
     pub fn has_workspace(&self) -> StorageResult<bool> {
         let count: i64 = self.connection.query_row(
-            "SELECT COUNT(*) FROM settings WHERE id = ?1",
+            "SELECT COUNT(*) FROM zhixi_settings WHERE id = ?1",
             [SETTINGS_ID],
             |row| row.get(0),
         )?;
@@ -183,7 +183,7 @@ impl Storage {
         self.with_transaction(|| {
             let position = self
                 .page_position(&page.id)?
-                .unwrap_or_else(|| self.next_position("pages"));
+                .unwrap_or_else(|| self.next_position("zhixi_pages"));
             self.insert_page(&page, position)?;
             self.rebuild_resource_search_documents()?;
             Ok(SaveResult { id: page.id })
@@ -194,7 +194,7 @@ impl Storage {
         self.with_transaction(|| {
             let deleted_ids = self.descendant_page_ids(page_id)?;
             self.connection
-                .execute("DELETE FROM pages WHERE id = ?1", [page_id])?;
+                .execute("DELETE FROM zhixi_pages WHERE id = ?1", [page_id])?;
             for deleted_id in &deleted_ids {
                 search::delete_documents_for_owner(&self.connection, "page", deleted_id)?;
             }
@@ -207,7 +207,7 @@ impl Storage {
         self.with_transaction(|| {
             let position = self
                 .board_position(&board.id)?
-                .unwrap_or_else(|| self.next_position("boards"));
+                .unwrap_or_else(|| self.next_position("zhixi_boards"));
             self.insert_board(&board, position)?;
             self.rebuild_resource_search_documents()?;
             Ok(SaveResult { id: board.id })
@@ -217,7 +217,7 @@ impl Storage {
     pub fn load_board_snapshot(&self, board_id: &str) -> StorageResult<Value> {
         self.connection
             .query_row(
-                "SELECT snapshot_json FROM board_snapshots WHERE board_id = ?1",
+                "SELECT snapshot_json FROM zhixi_board_snapshots WHERE board_id = ?1",
                 [board_id],
                 |row| row.get::<_, String>(0),
             )
@@ -234,7 +234,7 @@ impl Storage {
         self.with_transaction(|| {
             let position = self
                 .mindmap_position(&mindmap.id)?
-                .unwrap_or_else(|| self.next_position("mindmaps"));
+                .unwrap_or_else(|| self.next_position("zhixi_mindmaps"));
             self.insert_mindmap(&mindmap, position)?;
             self.rebuild_resource_search_documents()?;
             Ok(SaveResult { id: mindmap.id })
@@ -244,7 +244,7 @@ impl Storage {
     pub fn load_mindmap_snapshot(&self, mindmap_id: &str) -> StorageResult<Value> {
         self.connection
             .query_row(
-                "SELECT snapshot_json FROM mindmap_snapshots WHERE mindmap_id = ?1",
+                "SELECT snapshot_json FROM zhixi_mindmap_snapshots WHERE mindmap_id = ?1",
                 [mindmap_id],
                 |row| row.get::<_, String>(0),
             )
@@ -265,7 +265,7 @@ impl Storage {
         self.with_transaction(|| {
             let position = self
                 .data_table_position(&data_table.id)?
-                .unwrap_or_else(|| self.next_position("data_tables"));
+                .unwrap_or_else(|| self.next_position("zhixi_data_tables"));
             self.insert_data_table(&data_table, position)?;
             self.rebuild_resource_search_documents()?;
             Ok(SaveResult { id: data_table.id })
@@ -389,7 +389,9 @@ impl Storage {
     #[cfg(test)]
     pub fn block_ref_count(&self) -> StorageResult<i64> {
         self.connection
-            .query_row("SELECT COUNT(*) FROM block_refs", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM zhixi_block_refs", [], |row| {
+                row.get(0)
+            })
             .map_err(Into::into)
     }
 
@@ -409,23 +411,23 @@ impl Storage {
 
     fn clear_workspace(&self) -> StorageResult<()> {
         for table in [
-            "search_documents_fts",
-            "search_documents",
-            "asset_refs",
-            "data_table_blocks",
-            "data_table_record_pages",
-            "data_table_records",
-            "data_table_views",
-            "data_table_properties",
-            "data_tables",
-            "mindmap_snapshots",
-            "mindmaps",
-            "board_snapshots",
-            "boards",
-            "block_refs",
-            "page_contents",
-            "pages",
-            "settings",
+            "zhixi_search_documents_fts",
+            "zhixi_search_documents",
+            "zhixi_asset_refs",
+            "zhixi_data_table_blocks",
+            "zhixi_data_table_record_pages",
+            "zhixi_data_table_records",
+            "zhixi_data_table_views",
+            "zhixi_data_table_properties",
+            "zhixi_data_tables",
+            "zhixi_mindmap_snapshots",
+            "zhixi_mindmaps",
+            "zhixi_board_snapshots",
+            "zhixi_boards",
+            "zhixi_block_refs",
+            "zhixi_page_contents",
+            "zhixi_pages",
+            "zhixi_settings",
         ] {
             self.connection
                 .execute(&format!("DELETE FROM {table}"), [])?;
@@ -435,7 +437,7 @@ impl Storage {
 
     fn save_settings(&self, settings: &WorkspaceSettings) -> StorageResult<()> {
         self.connection.execute(
-            "INSERT INTO settings (id, record_json) VALUES (?1, ?2)
+            "INSERT INTO zhixi_settings (id, record_json) VALUES (?1, ?2)
               ON CONFLICT(id) DO UPDATE SET record_json = excluded.record_json",
             params![SETTINGS_ID, serde_json::to_string(settings)?],
         )?;
@@ -445,7 +447,7 @@ impl Storage {
     fn load_settings(&self) -> StorageResult<Option<WorkspaceSettings>> {
         self.connection
             .query_row(
-                "SELECT record_json FROM settings WHERE id = ?1",
+                "SELECT record_json FROM zhixi_settings WHERE id = ?1",
                 [SETTINGS_ID],
                 |row| row.get::<_, String>(0),
             )
@@ -456,7 +458,7 @@ impl Storage {
 
     fn insert_page(&self, page: &PageRecord, position: usize) -> StorageResult<()> {
         self.connection.execute(
-            "INSERT INTO pages
+            "INSERT INTO zhixi_pages
               (id, parent_id, title, icon, cover, is_full_width, is_small_text, font_family,
                 show_outline, position, created_at, updated_at)
               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
@@ -488,7 +490,7 @@ impl Storage {
             ],
         )?;
         self.connection.execute(
-            "INSERT INTO page_contents (page_id, blocks_json) VALUES (?1, ?2)
+            "INSERT INTO zhixi_page_contents (page_id, blocks_json) VALUES (?1, ?2)
               ON CONFLICT(page_id) DO UPDATE SET blocks_json = excluded.blocks_json",
             params![page.id, serde_json::to_string(&page.blocks)?],
         )?;
@@ -498,10 +500,12 @@ impl Storage {
     }
 
     fn replace_block_refs(&self, page: &PageRecord) -> StorageResult<()> {
-        self.connection
-            .execute("DELETE FROM block_refs WHERE page_id = ?1", [&page.id])?;
         self.connection.execute(
-            "DELETE FROM asset_refs WHERE owner_kind = 'page' AND owner_id = ?1",
+            "DELETE FROM zhixi_block_refs WHERE page_id = ?1",
+            [&page.id],
+        )?;
+        self.connection.execute(
+            "DELETE FROM zhixi_asset_refs WHERE owner_kind = 'page' AND owner_id = ?1",
             [&page.id],
         )?;
 
@@ -530,7 +534,7 @@ impl Storage {
 
             if let Some((ref_kind, ref_id)) = ref_info {
                 self.connection.execute(
-                    "INSERT OR IGNORE INTO block_refs (page_id, block_id, ref_kind, ref_id)
+                    "INSERT OR IGNORE INTO zhixi_block_refs (page_id, block_id, ref_kind, ref_id)
                       VALUES (?1, ?2, ?3, ?4)",
                     params![page.id, block_id, ref_kind, ref_id],
                 )?;
@@ -539,9 +543,9 @@ impl Storage {
             if matches!(block_type, "image" | "video" | "audio") {
                 if let Some(asset_id) = block.get("assetId").and_then(Value::as_str) {
                     self.connection.execute(
-                        "INSERT OR IGNORE INTO asset_refs (asset_id, owner_kind, owner_id)
+                        "INSERT OR IGNORE INTO zhixi_asset_refs (asset_id, owner_kind, owner_id)
                           SELECT ?1, 'page', ?2
-                          WHERE EXISTS (SELECT 1 FROM assets WHERE id = ?1)",
+                          WHERE EXISTS (SELECT 1 FROM zhixi_assets WHERE id = ?1)",
                         params![asset_id, &page.id],
                     )?;
                 }
@@ -553,7 +557,7 @@ impl Storage {
 
     fn insert_board(&self, board: &BoardRecord, position: usize) -> StorageResult<()> {
         self.connection.execute(
-            "INSERT INTO boards (id, title, position, created_at, updated_at)
+            "INSERT INTO zhixi_boards (id, title, position, created_at, updated_at)
               VALUES (?1, ?2, ?3, ?4, ?5)
               ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
@@ -569,7 +573,7 @@ impl Storage {
             ],
         )?;
         self.connection.execute(
-            "INSERT INTO board_snapshots (board_id, snapshot_json) VALUES (?1, ?2)
+            "INSERT INTO zhixi_board_snapshots (board_id, snapshot_json) VALUES (?1, ?2)
               ON CONFLICT(board_id) DO UPDATE SET snapshot_json = excluded.snapshot_json",
             params![board.id, serde_json::to_string(&board.snapshot)?],
         )?;
@@ -578,7 +582,7 @@ impl Storage {
 
     fn insert_mindmap(&self, mindmap: &MindmapRecord, position: usize) -> StorageResult<()> {
         self.connection.execute(
-            "INSERT INTO mindmaps (id, title, position, created_at, updated_at)
+            "INSERT INTO zhixi_mindmaps (id, title, position, created_at, updated_at)
               VALUES (?1, ?2, ?3, ?4, ?5)
               ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
@@ -594,7 +598,7 @@ impl Storage {
             ],
         )?;
         self.connection.execute(
-            "INSERT INTO mindmap_snapshots (mindmap_id, snapshot_json) VALUES (?1, ?2)
+            "INSERT INTO zhixi_mindmap_snapshots (mindmap_id, snapshot_json) VALUES (?1, ?2)
               ON CONFLICT(mindmap_id) DO UPDATE SET snapshot_json = excluded.snapshot_json",
             params![mindmap.id, serde_json::to_string(&mindmap.snapshot)?],
         )?;
@@ -607,7 +611,7 @@ impl Storage {
         position: usize,
     ) -> StorageResult<()> {
         self.connection.execute(
-            "INSERT INTO data_tables
+            "INSERT INTO zhixi_data_tables
               (id, title, icon, cover, position, snapshot_json, created_at, updated_at)
               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
               ON CONFLICT(id) DO UPDATE SET
@@ -635,11 +639,11 @@ impl Storage {
 
     fn replace_data_table_parts(&self, data_table: &DataTableRecord) -> StorageResult<()> {
         for table in [
-            "data_table_blocks",
-            "data_table_record_pages",
-            "data_table_records",
-            "data_table_views",
-            "data_table_properties",
+            "zhixi_data_table_blocks",
+            "zhixi_data_table_record_pages",
+            "zhixi_data_table_records",
+            "zhixi_data_table_views",
+            "zhixi_data_table_properties",
         ] {
             self.connection.execute(
                 &format!("DELETE FROM {table} WHERE data_table_id = ?1"),
@@ -651,14 +655,14 @@ impl Storage {
         let snapshot = &data_table.snapshot;
         insert_ordered_object_rows(
             &self.connection,
-            "data_table_properties",
+            "zhixi_data_table_properties",
             &data_table.id,
             snapshot.pointer("/database/propertyOrder"),
             snapshot.get("properties"),
         )?;
         insert_ordered_object_rows(
             &self.connection,
-            "data_table_views",
+            "zhixi_data_table_views",
             &data_table.id,
             snapshot.pointer("/database/viewOrder"),
             snapshot.pointer("/database/views"),
@@ -672,7 +676,7 @@ impl Storage {
                     .unwrap_or("")
                     .to_string();
                 self.connection.execute(
-                    "INSERT INTO data_table_records
+                    "INSERT INTO zhixi_data_table_records
                       (data_table_id, id, title, record_json, position, created_at, updated_at)
                       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     params![
@@ -691,7 +695,7 @@ impl Storage {
         if let Some(record_pages) = snapshot.get("recordPages").and_then(Value::as_object) {
             for (record_id, record_page) in record_pages {
                 self.connection.execute(
-                    "INSERT INTO data_table_record_pages (data_table_id, record_id, record_json)
+                    "INSERT INTO zhixi_data_table_record_pages (data_table_id, record_id, record_json)
                       VALUES (?1, ?2, ?3)",
                     params![
                         data_table.id,
@@ -705,7 +709,7 @@ impl Storage {
         if let Some(blocks) = snapshot.get("blocks").and_then(Value::as_object) {
             for (position, (block_id, block)) in blocks.iter().enumerate() {
                 self.connection.execute(
-                    "INSERT INTO data_table_blocks
+                    "INSERT INTO zhixi_data_table_blocks
                       (data_table_id, id, record_id, record_json, position)
                       VALUES (?1, ?2, ?3, ?4, ?5)",
                     params![
@@ -727,7 +731,7 @@ impl Storage {
 
     fn replace_data_table_asset_refs(&self, data_table: &DataTableRecord) -> StorageResult<()> {
         self.connection.execute(
-            "DELETE FROM asset_refs WHERE owner_kind = 'data_table' AND owner_id = ?1",
+            "DELETE FROM zhixi_asset_refs WHERE owner_kind = 'data_table' AND owner_id = ?1",
             [&data_table.id],
         )?;
 
@@ -737,9 +741,9 @@ impl Storage {
 
         for asset_id in assets.keys() {
             self.connection.execute(
-                "INSERT OR IGNORE INTO asset_refs (asset_id, owner_kind, owner_id)
+                "INSERT OR IGNORE INTO zhixi_asset_refs (asset_id, owner_kind, owner_id)
                   SELECT ?1, 'data_table', ?2
-                  WHERE EXISTS (SELECT 1 FROM assets WHERE id = ?1)",
+                  WHERE EXISTS (SELECT 1 FROM zhixi_assets WHERE id = ?1)",
                 params![asset_id, &data_table.id],
             )?;
         }
@@ -777,7 +781,7 @@ impl Storage {
     fn page_id_for_ref(&self, ref_kind: &str, ref_id: &str) -> StorageResult<Option<String>> {
         self.connection
             .query_row(
-                "SELECT page_id FROM block_refs WHERE ref_kind = ?1 AND ref_id = ?2
+                "SELECT page_id FROM zhixi_block_refs WHERE ref_kind = ?1 AND ref_id = ?2
                   ORDER BY page_id ASC LIMIT 1",
                 params![ref_kind, ref_id],
                 |row| row.get(0),
@@ -791,8 +795,8 @@ impl Storage {
             "SELECT p.id, p.parent_id, p.title, p.icon, p.cover, p.is_full_width,
               p.is_small_text, p.font_family, p.show_outline, c.blocks_json,
               p.created_at, p.updated_at
-              FROM pages p
-              JOIN page_contents c ON c.page_id = p.id
+              FROM zhixi_pages p
+              JOIN zhixi_page_contents c ON c.page_id = p.id
               ORDER BY p.position ASC",
         )?;
         let rows = statement.query_map([], |row| {
@@ -825,8 +829,8 @@ impl Storage {
     fn load_boards(&self) -> StorageResult<Vec<BoardRecord>> {
         let mut statement = self.connection.prepare(
             "SELECT b.id, b.title, s.snapshot_json, b.created_at, b.updated_at
-              FROM boards b
-              JOIN board_snapshots s ON s.board_id = b.id
+              FROM zhixi_boards b
+              JOIN zhixi_board_snapshots s ON s.board_id = b.id
               ORDER BY b.position ASC",
         )?;
         let rows = statement.query_map([], |row| {
@@ -845,7 +849,7 @@ impl Storage {
     fn load_data_tables(&self) -> StorageResult<Vec<DataTableRecord>> {
         let mut statement = self.connection.prepare(
             "SELECT id, title, icon, cover, snapshot_json, created_at, updated_at
-              FROM data_tables
+              FROM zhixi_data_tables
               ORDER BY position ASC",
         )?;
         let rows = statement.query_map([], |row| {
@@ -875,8 +879,8 @@ impl Storage {
     fn load_mindmaps(&self) -> StorageResult<Vec<MindmapRecord>> {
         let mut statement = self.connection.prepare(
             "SELECT m.id, m.title, s.snapshot_json, m.created_at, m.updated_at
-              FROM mindmaps m
-              JOIN mindmap_snapshots s ON s.mindmap_id = m.id
+              FROM zhixi_mindmaps m
+              JOIN zhixi_mindmap_snapshots s ON s.mindmap_id = m.id
               ORDER BY m.position ASC",
         )?;
         let rows = statement.query_map([], |row| {
@@ -895,9 +899,9 @@ impl Storage {
     fn descendant_page_ids(&self, page_id: &str) -> StorageResult<Vec<String>> {
         let mut statement = self.connection.prepare(
             "WITH RECURSIVE branch(id) AS (
-              SELECT id FROM pages WHERE id = ?1
+              SELECT id FROM zhixi_pages WHERE id = ?1
               UNION ALL
-              SELECT pages.id FROM pages JOIN branch ON pages.parent_id = branch.id
+              SELECT zhixi_pages.id FROM zhixi_pages JOIN branch ON zhixi_pages.parent_id = branch.id
             )
             SELECT id FROM branch",
         )?;
@@ -906,19 +910,19 @@ impl Storage {
     }
 
     fn page_position(&self, page_id: &str) -> StorageResult<Option<usize>> {
-        self.position_for_id("pages", page_id)
+        self.position_for_id("zhixi_pages", page_id)
     }
 
     fn board_position(&self, board_id: &str) -> StorageResult<Option<usize>> {
-        self.position_for_id("boards", board_id)
+        self.position_for_id("zhixi_boards", board_id)
     }
 
     fn data_table_position(&self, data_table_id: &str) -> StorageResult<Option<usize>> {
-        self.position_for_id("data_tables", data_table_id)
+        self.position_for_id("zhixi_data_tables", data_table_id)
     }
 
     fn mindmap_position(&self, mindmap_id: &str) -> StorageResult<Option<usize>> {
-        self.position_for_id("mindmaps", mindmap_id)
+        self.position_for_id("zhixi_mindmaps", mindmap_id)
     }
 
     fn position_for_id(&self, table: &str, id: &str) -> StorageResult<Option<usize>> {
@@ -1019,10 +1023,7 @@ fn unique_test_assets_dir() -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or_default();
-    std::env::temp_dir().join(format!(
-        "zhixi-storage-test-{}-{nanos}",
-        std::process::id()
-    ))
+    std::env::temp_dir().join(format!("zhixi-storage-test-{}-{nanos}", std::process::id()))
 }
 
 #[cfg(test)]
@@ -1030,6 +1031,46 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn uses_zhixi_storage_file_and_asset_names() {
+        assert_eq!(DATABASE_FILE_NAME, "zhixi.db");
+        assert_eq!(ASSETS_DIR_NAME, "zhixi-assets");
+    }
+
+    #[test]
+    fn uses_zhixi_prefix_for_sqlite_schema_names() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let table_names = sqlite_object_names(&storage, "table");
+        let custom_index_names = sqlite_object_names(&storage, "index")
+            .into_iter()
+            .filter(|name| !name.starts_with("sqlite_"))
+            .collect::<Vec<_>>();
+
+        assert!(table_names.iter().all(|name| name.starts_with("zhixi_")));
+        assert!(custom_index_names
+            .iter()
+            .all(|name| name.starts_with("idx_zhixi_")));
+        assert!(table_names.contains(&"zhixi_pages".to_string()));
+        assert!(table_names.contains(&"zhixi_assets".to_string()));
+        assert!(table_names.contains(&"zhixi_search_documents_fts".to_string()));
+    }
+
+    fn sqlite_object_names(storage: &Storage, object_type: &str) -> Vec<String> {
+        let mut statement = storage
+            .connection
+            .prepare(
+                "SELECT name FROM sqlite_schema
+                 WHERE type = ?1 AND name NOT LIKE 'sqlite_%'
+                 ORDER BY name ASC",
+            )
+            .expect("prepare sqlite schema query");
+        statement
+            .query_map([object_type], |row| row.get::<_, String>(0))
+            .expect("query sqlite schema")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect sqlite schema names")
+    }
 
     fn sample_snapshot() -> WorkspaceSnapshot {
         WorkspaceSnapshot {
@@ -1263,7 +1304,7 @@ mod tests {
         let ref_count: i64 = storage
             .connection
             .query_row(
-                "SELECT COUNT(*) FROM asset_refs
+                "SELECT COUNT(*) FROM zhixi_asset_refs
                   WHERE asset_id = ?1 AND owner_kind = 'data_table' AND owner_id = 'database_1'",
                 [&asset.id],
                 |row| row.get(0),
@@ -1302,7 +1343,7 @@ mod tests {
         let ref_count: i64 = storage
             .connection
             .query_row(
-                "SELECT COUNT(*) FROM asset_refs
+                "SELECT COUNT(*) FROM zhixi_asset_refs
                   WHERE asset_id = ?1 AND owner_kind = 'page' AND owner_id = 'page_1'",
                 [&asset.id],
                 |row| row.get(0),
@@ -1375,7 +1416,7 @@ mod tests {
         storage
             .connection
             .execute(
-                "INSERT INTO assets
+                "INSERT INTO zhixi_assets
                   (id, sha256, name, mime_type, byte_size, relative_path, created_at)
                   VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 rusqlite::params![

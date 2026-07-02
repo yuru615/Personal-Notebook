@@ -146,8 +146,8 @@ pub fn search(
     let bounded_limit = limit.clamp(1, MAX_SEARCH_LIMIT) as i64;
     let mut statement = connection.prepare(
         "SELECT kind, page_id, board_id, database_id, record_id, title, icon, excerpt
-          FROM search_documents_fts
-          WHERE search_documents_fts MATCH ?1
+          FROM zhixi_search_documents_fts
+          WHERE zhixi_search_documents_fts MATCH ?1
           ORDER BY rank
           LIMIT ?2",
     )?;
@@ -173,7 +173,7 @@ fn normalize_query(query: &str) -> String {
 
 fn insert_document(connection: &Connection, document: &SearchDocument) -> StorageResult<()> {
     connection.execute(
-        "INSERT INTO search_documents
+        "INSERT INTO zhixi_search_documents
           (document_id, kind, page_id, board_id, database_id, record_id, title, icon, excerpt, body)
           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
@@ -190,7 +190,7 @@ fn insert_document(connection: &Connection, document: &SearchDocument) -> Storag
         ],
     )?;
     connection.execute(
-        "INSERT INTO search_documents_fts
+        "INSERT INTO zhixi_search_documents_fts
           (document_id, kind, page_id, board_id, database_id, record_id, title, icon, excerpt, body)
           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
@@ -222,21 +222,21 @@ pub fn delete_documents_for_owner(
         _ => return Ok(()),
     };
 
-    let mut statement =
-        connection.prepare("SELECT rowid FROM search_documents_fts WHERE document_id LIKE ?1")?;
+    let mut statement = connection
+        .prepare("SELECT rowid FROM zhixi_search_documents_fts WHERE document_id LIKE ?1")?;
     let row_ids = statement
         .query_map([pattern.as_str()], |row| row.get::<_, i64>(0))?
         .collect::<Result<Vec<_>, _>>()?;
 
     for row_id in row_ids {
         connection.execute(
-            "DELETE FROM search_documents_fts WHERE rowid = ?1",
+            "DELETE FROM zhixi_search_documents_fts WHERE rowid = ?1",
             [row_id],
         )?;
     }
 
     connection.execute(
-        "DELETE FROM search_documents WHERE document_id LIKE ?1",
+        "DELETE FROM zhixi_search_documents WHERE document_id LIKE ?1",
         [pattern],
     )?;
     Ok(())

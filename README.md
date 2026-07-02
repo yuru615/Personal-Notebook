@@ -33,7 +33,7 @@ npm run tauri:dev
 npm run dev
 ```
 
-首次启动会创建默认工作区。桌面端数据保存在 Tauri 应用数据目录中的 `personal-notebook-v2.db`；应用管理的文件资产保存在同目录下的 `personal-notebook-assets-v2/`。这两个路径是历史兼容文件名，用于保护已有本地数据。
+首次启动会创建默认工作区。桌面端数据保存在 Tauri 应用数据目录中的 `zhixi.db`；应用管理的文件资产保存在同目录下的 `zhixi-assets/`。
 
 ## 常用命令
 
@@ -68,7 +68,7 @@ npx vitest run src/lib/workspaceRepository.test.ts
 
 ## 数据与导入导出
 
-工作区核心数据保存在本地 SQLite 数据库 `personal-notebook-v2.db` 中。该文件名为历史兼容标识。完整 ZIP 导出会生成工作区备份并包含应用管理的文件资产；完整 ZIP 导入会覆盖当前本地工作区。执行导入或清理前建议先导出备份。
+工作区核心数据保存在本地 SQLite 数据库 `zhixi.db` 中。完整 ZIP 导出会生成工作区备份并包含应用管理的文件资产；完整 ZIP 导入会覆盖当前本地工作区。执行导入或清理前建议先导出备份。
 
 ## 打包
 
