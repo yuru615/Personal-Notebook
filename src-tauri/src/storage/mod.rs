@@ -954,7 +954,12 @@ impl Storage {
         for asset in &manifest.assets {
             let archive_path = format!("assets/{}", asset.relative_path);
             if let Err(error) = archive.by_name(&archive_path) {
-                return Err(zip_error(error));
+                return Err(match error {
+                    zip::result::ZipError::FileNotFound => StorageError::invalid_payload(
+                        format!("page package asset entry is missing: {archive_path}"),
+                    ),
+                    other => zip_error(other),
+                });
             }
         }
 
@@ -1000,13 +1005,18 @@ impl Storage {
             .get(&manifest.root_page_id)
             .cloned()
             .ok_or_else(|| StorageError::invalid_payload("page package root is missing"))?;
+        let ordered_pages =
+            ordered_page_package_pages(&manifest.pages, &manifest.root_page_id)?;
         let mut asset_id_map = std::collections::HashMap::new();
         let mut bytes_processed = 0;
+        let mut imported_asset_paths = Vec::new();
 
-        self.with_transaction(|| {
+        let import_result = self.with_transaction(|| {
             for (index, asset) in manifest.assets.iter().enumerate() {
                 let archive_path = format!("assets/{}", asset.relative_path);
                 let mut asset_file = archive.by_name(&archive_path).map_err(zip_error)?;
+                let asset_was_present =
+                    self.id_exists("zhixi_assets", &format!("asset_{}", asset.sha256))?;
                 let current = index as u64 + 1;
                 let item_name = asset.name.clone();
                 let mut copied_for_asset = 0;
@@ -1045,6 +1055,13 @@ impl Storage {
                     },
                 )?;
                 bytes_processed += copied_for_asset;
+                if !asset_was_present {
+                    imported_asset_paths.push(assets::asset_file_path(
+                        &self.connection,
+                        &self.assets_dir,
+                        &imported.id,
+                    )?);
+                }
                 asset_id_map.insert(asset.id.clone(), imported.id);
             }
 
@@ -1061,6 +1078,7 @@ impl Storage {
                 let mut next_data_table = data_table.clone();
                 next_data_table.id = data_table_id_map[&data_table.id].clone();
                 rewrite_data_table_asset_refs(&mut next_data_table.snapshot, &asset_id_map);
+                rewrite_data_table_block_ids(&mut next_data_table.snapshot, &mut counter);
                 if let Some(database) = next_data_table
                     .snapshot
                     .get_mut("database")
@@ -1081,7 +1099,7 @@ impl Storage {
             }
 
             let mut page_position = self.next_position("zhixi_pages");
-            for page in &manifest.pages {
+            for page in ordered_pages {
                 let mut next_page = page.clone();
                 next_page.id = page_id_map[&page.id].clone();
                 next_page.parent_id = if page.id == manifest.root_page_id {
@@ -1105,7 +1123,13 @@ impl Storage {
             }
             self.rebuild_resource_search_documents()?;
             Ok(())
-        })?;
+        });
+        if import_result.is_err() {
+            for path in imported_asset_paths {
+                let _ = fs::remove_file(path);
+            }
+        }
+        import_result?;
 
         report_archive_progress(
             task_id,
@@ -1901,6 +1925,40 @@ fn validate_page_package_tree_connected(manifest: &PagePackageManifest) -> Stora
     ))
 }
 
+fn ordered_page_package_pages<'a>(
+    pages: &'a [PageRecord],
+    root_page_id: &str,
+) -> StorageResult<Vec<&'a PageRecord>> {
+    let page_by_id = pages
+        .iter()
+        .map(|page| (page.id.as_str(), page))
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut children_by_parent: std::collections::HashMap<&str, Vec<&PageRecord>> =
+        std::collections::HashMap::new();
+    for page in pages {
+        if let Some(parent_id) = page.parent_id.as_deref() {
+            children_by_parent.entry(parent_id).or_default().push(page);
+        }
+    }
+
+    let mut ordered = Vec::with_capacity(pages.len());
+    let mut queue = std::collections::VecDeque::from([root_page_id]);
+    while let Some(page_id) = queue.pop_front() {
+        let page = page_by_id
+            .get(page_id)
+            .copied()
+            .ok_or_else(|| StorageError::invalid_payload("page package root is missing"))?;
+        ordered.push(page);
+        if let Some(children) = children_by_parent.get(page_id) {
+            for child in children {
+                queue.push_back(child.id.as_str());
+            }
+        }
+    }
+
+    Ok(ordered)
+}
+
 fn collect_unique_manifest_ids<'a>(
     ids: impl Iterator<Item = &'a str>,
     expected_len: usize,
@@ -2019,6 +2077,54 @@ fn rewrite_data_table_asset_refs(
                         object.insert("imageAssetId".to_string(), Value::String(next_id.clone()));
                     }
                 }
+            }
+        }
+    }
+}
+
+fn rewrite_data_table_block_ids(snapshot: &mut Value, counter: &mut u64) {
+    let Some(blocks) = snapshot.get("blocks").and_then(Value::as_object) else {
+        return;
+    };
+    let block_id_map = blocks
+        .keys()
+        .map(|block_id| (block_id.clone(), import_id("block", counter)))
+        .collect::<std::collections::HashMap<_, _>>();
+    if block_id_map.is_empty() {
+        return;
+    }
+
+    if let Some(blocks) = snapshot.get_mut("blocks").and_then(Value::as_object_mut) {
+        let old_blocks = std::mem::take(blocks);
+        for (block_id, mut block_value) in old_blocks {
+            let next_block_id = block_id_map.get(&block_id).cloned().unwrap_or(block_id);
+            if let Some(object) = block_value.as_object_mut() {
+                object.insert("id".to_string(), Value::String(next_block_id.clone()));
+            }
+            blocks.insert(next_block_id, block_value);
+        }
+    }
+
+    if let Some(record_pages) = snapshot
+        .get_mut("recordPages")
+        .and_then(Value::as_object_mut)
+    {
+        for record_page in record_pages.values_mut() {
+            let Some(block_ids) = record_page
+                .get_mut("blockIds")
+                .and_then(Value::as_array_mut)
+            else {
+                continue;
+            };
+            for block_id in block_ids {
+                let Some(next_block_id) = block_id
+                    .as_str()
+                    .and_then(|id| block_id_map.get(id))
+                    .cloned()
+                else {
+                    continue;
+                };
+                *block_id = Value::String(next_block_id);
             }
         }
     }
@@ -2971,6 +3077,71 @@ mod tests {
     }
 
     #[test]
+    fn page_package_import_inserts_pages_root_first_even_when_manifest_is_shuffled() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages.push(PageRecord {
+            id: "page_child".to_string(),
+            parent_id: Some("page_1".to_string()),
+            title: "Child".to_string(),
+            icon: None,
+            cover: None,
+            is_full_width: None,
+            is_small_text: None,
+            font_family: None,
+            show_outline: None,
+            blocks: vec![],
+            created_at: "2026-07-02T00:00:00.000Z".to_string(),
+            updated_at: "2026-07-02T00:00:00.000Z".to_string(),
+        });
+        snapshot.pages.push(PageRecord {
+            id: "page_grandchild".to_string(),
+            parent_id: Some("page_child".to_string()),
+            title: "Grandchild".to_string(),
+            icon: None,
+            cover: None,
+            is_full_width: None,
+            is_small_text: None,
+            font_family: None,
+            show_outline: None,
+            blocks: vec![],
+            created_at: "2026-07-02T00:00:00.000Z".to_string(),
+            updated_at: "2026-07-02T00:00:00.000Z".to_string(),
+        });
+        source
+            .replace_workspace_backup(snapshot)
+            .expect("replace snapshot");
+        let archive = source
+            .export_page_package("page_1")
+            .expect("export package");
+        let archive = rewrite_page_package_manifest(archive, |manifest| {
+            manifest.pages.reverse();
+        });
+        let target = Storage::open_in_memory_for_tests().expect("target opens");
+        target
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed target");
+
+        let result = target
+            .import_page_package(archive)
+            .expect("import shuffled page package");
+        let imported = target.export_workspace_backup().expect("export target");
+        let imported_child = imported
+            .pages
+            .iter()
+            .find(|page| page.parent_id.as_deref() == Some(result.root_page_id.as_str()))
+            .expect("imported child");
+        let imported_grandchild = imported
+            .pages
+            .iter()
+            .find(|page| page.parent_id.as_deref() == Some(imported_child.id.as_str()))
+            .expect("imported grandchild");
+
+        assert_eq!(imported_child.title, "Child");
+        assert_eq!(imported_grandchild.title, "Grandchild");
+    }
+
+    #[test]
     fn page_package_import_rejects_workspace_archives() {
         let source = Storage::open_in_memory_for_tests().expect("source opens");
         source
@@ -3035,6 +3206,12 @@ mod tests {
                 "id": "table_block_image",
                 "type": "image",
                 "imageAssetId": table_asset.id
+            }
+        });
+        snapshot.data_tables[0].snapshot["recordPages"] = json!({
+            "record_1": {
+                "recordId": "record_1",
+                "blockIds": ["table_block_image"]
             }
         });
         source
@@ -3145,18 +3322,44 @@ mod tests {
             .keys()
             .next()
             .expect("imported table asset id");
-        let imported_table_block_asset_id = imported_data_table
+        let imported_table_blocks = imported_data_table
             .snapshot
-            .pointer("/blocks/table_block_image/imageAssetId")
+            .get("blocks")
+            .and_then(Value::as_object)
+            .expect("imported table blocks");
+        let (imported_table_block_id, imported_table_block) = imported_table_blocks
+            .iter()
+            .next()
+            .expect("imported table block");
+        let imported_table_block_asset_id = imported_table_block
+            .get("imageAssetId")
             .and_then(Value::as_str)
             .expect("imported table block asset id");
+        let imported_record_page_block_ids = imported_data_table
+            .snapshot
+            .pointer("/recordPages/record_1/blockIds")
+            .and_then(Value::as_array)
+            .expect("imported record page block ids");
 
         assert_ne!(imported_board_id, "board_1");
         assert_ne!(imported_database_id, "database_1");
         assert_ne!(imported_mindmap_id, "mindmap_1");
         assert_ne!(imported_page_asset_id, page_legacy_asset_id);
         assert_ne!(imported_table_asset_id, table_legacy_asset_id);
+        assert_ne!(imported_table_block_id, "table_block_image");
+        assert_eq!(
+            imported_table_block.get("id").and_then(Value::as_str),
+            Some(imported_table_block_id.as_str())
+        );
+        assert!(!imported_table_blocks.contains_key("table_block_image"));
         assert_eq!(imported_table_block_asset_id, imported_table_asset_id);
+        assert_eq!(
+            imported_record_page_block_ids
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>(),
+            vec![imported_table_block_id.as_str()]
+        );
         assert_eq!(
             imported_data_table
                 .snapshot
@@ -3563,6 +3766,67 @@ mod tests {
     }
 
     #[test]
+    fn page_package_import_removes_new_asset_files_when_late_database_write_fails() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        let asset = source
+            .write_asset(WriteAssetInput {
+                name: "cleanup.png".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes: b"cleanup image".to_vec(),
+            })
+            .expect("write asset");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages[0].blocks.push(json!({
+            "id": "block_image",
+            "type": "image",
+            "assetId": asset.id,
+            "name": "cleanup.png",
+            "mimeType": "image/png"
+        }));
+        source
+            .replace_workspace_backup(snapshot)
+            .expect("replace snapshot");
+        let archive = source
+            .export_page_package("page_1")
+            .expect("export package");
+        let target = Storage::open_in_memory_for_tests().expect("target opens");
+        target
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed target");
+        target
+            .connection
+            .execute(
+                "CREATE TRIGGER fail_imported_page_insert
+                 BEFORE INSERT ON zhixi_pages
+                 WHEN NEW.id LIKE 'page_import_%'
+                 BEGIN
+                   SELECT RAISE(FAIL, 'forced page import failure');
+                 END",
+                [],
+            )
+            .expect("install failure trigger");
+        let imported_asset_path = target.assets_dir.join(&asset.relative_path);
+
+        let error = target
+            .import_page_package(archive)
+            .expect_err("late database failure");
+
+        assert_eq!(error.code, "database_error");
+        assert!(!imported_asset_path.exists());
+        assert_eq!(
+            target
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM zhixi_assets WHERE sha256 = ?1",
+                    [asset.sha256.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("query asset rows"),
+            0
+        );
+    }
+
+    #[test]
     fn page_package_importing_same_archive_twice_keeps_both_imported_roots() {
         let source = Storage::open_in_memory_for_tests().expect("source opens");
         source
@@ -3694,7 +3958,10 @@ mod tests {
             .import_page_package(bytes.into_inner())
             .expect_err("missing asset entry rejected");
 
-        assert_eq!(error.code, "not_found");
+        assert_eq!(error.code, "invalid_payload");
+        assert!(error
+            .message
+            .contains("page package asset entry is missing"));
         assert_eq!(
             target.export_workspace_backup().expect("snapshot after"),
             before
