@@ -442,6 +442,8 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
           }
 
           try {
+            showArchiveTask({ label: uiCopy.export.preparingImport, percent: 0 })
+            await store.getState().flushPendingSaves()
             showArchiveTask({ label: uiCopy.export.importingArchive, percent: 0 })
             await importWorkspaceArchiveFromPath(file.path, (progress) => {
               showArchiveProgress(uiCopy.export.importingArchive, progress)
@@ -468,6 +470,8 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
         }
 
         try {
+          showArchiveTask({ label: uiCopy.export.preparingImport, percent: 0 })
+          await store.getState().flushPendingSaves()
           showArchiveTask({ label: uiCopy.export.importingArchive, percent: 20 })
           await importWorkspaceArchive(file.contents)
           showArchiveTask({ label: uiCopy.export.refreshingWorkspace, percent: 95 })

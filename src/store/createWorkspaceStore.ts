@@ -745,10 +745,10 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
     async function flushPendingSaves() {
       if (pendingBlockSaveTimer !== null) {
         await runPendingBlockSave(pendingBlockSaveVersion)
-        return
       }
 
       await pendingBlockSaveTask
+      await nonPageAssetsPersistQueue
     }
 
     async function persistNonPageAssets(

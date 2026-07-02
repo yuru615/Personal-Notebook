@@ -1,9 +1,9 @@
-use tauri::{AppHandle, Emitter, State};
+use tauri::{async_runtime, AppHandle, Emitter, State};
 
 use super::{
     AssetMeta, BoardRecord, BootstrapPayload, DataTableRecord, DeleteResult, ImportAssetFileInput,
-    LoadedPage, MindmapRecord, PageRecord, SaveResult, SearchResult, StorageError, StorageResult,
-    StorageState, WorkspaceArchiveProgress, WorkspaceSnapshot, WriteAssetInput,
+    LoadedPage, MindmapRecord, PageRecord, SaveResult, SearchResult, Storage, StorageError,
+    StorageResult, StorageState, WorkspaceArchiveProgress, WorkspaceSnapshot, WriteAssetInput,
     WORKSPACE_ARCHIVE_PROGRESS_EVENT,
 };
 
@@ -28,60 +28,80 @@ pub fn replace_workspace_backup(
 }
 
 #[tauri::command]
-pub fn export_workspace_archive(state: State<'_, StorageState>) -> StorageResult<Vec<u8>> {
-    state.with_storage(|storage| storage.export_workspace_archive())
+pub async fn export_workspace_archive(state: State<'_, StorageState>) -> StorageResult<Vec<u8>> {
+    with_storage_blocking(state.inner().clone(), |storage| {
+        storage.export_workspace_archive()
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn export_workspace_archive_to_path(
+pub async fn export_workspace_archive_to_path(
     app: AppHandle,
     state: State<'_, StorageState>,
     path: String,
     task_id: Option<String>,
 ) -> StorageResult<()> {
-    state.with_storage(|storage| {
+    with_storage_blocking(state.inner().clone(), move |storage| {
         if task_id.is_none() {
-            return storage.export_workspace_archive_to_path(path);
+            return storage.export_workspace_archive_to_path(&path);
         }
 
         storage.export_workspace_archive_to_path_with_progress(
-            path,
+            &path,
             task_id.as_deref(),
             &mut |progress| emit_archive_progress(&app, progress),
         )
     })
+    .await
 }
 
 #[tauri::command]
-pub fn import_workspace_archive(
+pub async fn import_workspace_archive(
     state: State<'_, StorageState>,
     bytes: Vec<u8>,
 ) -> StorageResult<()> {
-    state.with_storage(|storage| storage.import_workspace_archive(bytes))
+    with_storage_blocking(state.inner().clone(), move |storage| {
+        storage.import_workspace_archive(bytes)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn import_workspace_archive_from_path(
+pub async fn import_workspace_archive_from_path(
     app: AppHandle,
     state: State<'_, StorageState>,
     path: String,
     task_id: Option<String>,
 ) -> StorageResult<()> {
-    state.with_storage(|storage| {
+    with_storage_blocking(state.inner().clone(), move |storage| {
         if task_id.is_none() {
-            return storage.import_workspace_archive_from_path(path);
+            return storage.import_workspace_archive_from_path(&path);
         }
 
         storage.import_workspace_archive_from_path_with_progress(
-            path,
+            &path,
             task_id.as_deref(),
             &mut |progress| emit_archive_progress(&app, progress),
         )
     })
+    .await
 }
 
 fn emit_archive_progress(app: &AppHandle, progress: WorkspaceArchiveProgress) {
     let _ = app.emit(WORKSPACE_ARCHIVE_PROGRESS_EVENT, progress);
+}
+
+async fn with_storage_blocking<T>(
+    state: StorageState,
+    task: impl FnOnce(&Storage) -> StorageResult<T> + Send + 'static,
+) -> StorageResult<T>
+where
+    T: Send + 'static,
+{
+    async_runtime::spawn_blocking(move || state.with_storage(task))
+        .await
+        .map_err(|error| StorageError::new("internal_error", error.to_string()))?
 }
 
 #[tauri::command]

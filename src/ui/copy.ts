@@ -55,6 +55,7 @@ export const uiCopy = {
     archive: '创建完整备份',
     importArchive: '从备份恢复',
     exportingArchive: '正在导出完整备份',
+    preparingImport: '正在准备恢复备份',
     importingArchive: '正在恢复完整备份',
     refreshingWorkspace: '正在刷新工作区',
     exportComplete: '完整备份已导出',

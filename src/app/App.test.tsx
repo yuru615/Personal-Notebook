@@ -683,6 +683,65 @@ describe('App', () => {
     confirm.mockRestore()
   })
 
+  it('flushes pending workspace saves before importing a desktop backup', async () => {
+    Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = userEvent.setup()
+    const pageId = 'page_import_flush'
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: '待恢复页面',
+          icon: null,
+          cover: null,
+          blocks: [{ id: 'block_1', type: 'paragraph', text: 'Unsaved draft' }],
+          createdAt: '2026-07-02T00:00:00.000Z',
+          updatedAt: '2026-07-02T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+    const store = createWorkspaceStore(createMemoryRepository(snapshot))
+    let resolveFlush: () => void
+    const flushDone = new Promise<void>((resolve) => {
+      resolveFlush = resolve
+    })
+    const flushPendingSaves = vi.fn(async () => {
+      await flushDone
+    })
+    store.setState({ flushPendingSaves })
+
+    render(<App store={store} initialEntries={[`/pages/${pageId}`]} />)
+
+    await screen.findByDisplayValue('待恢复页面')
+    await user.click(screen.getByRole('button', { name: '页面菜单' }))
+    await user.click(screen.getByRole('button', { name: '从备份恢复' }))
+
+    await waitFor(() => {
+      expect(flushPendingSaves).toHaveBeenCalledTimes(1)
+    })
+    expect(archiveStorage.importWorkspaceArchiveFromPath).not.toHaveBeenCalled()
+
+    resolveFlush!()
+
+    await waitFor(() => {
+      expect(archiveStorage.importWorkspaceArchiveFromPath).toHaveBeenCalledWith(
+        '/tmp/工作区备份.zip',
+        expect.any(Function),
+      )
+    })
+
+    confirm.mockRestore()
+  })
+
   it('keeps the page directory visible on data table pages', async () => {
     const pageId = 'page_database'
     const databaseId = 'database_project'

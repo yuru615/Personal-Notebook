@@ -9,7 +9,7 @@ use std::{
     fs,
     io::{self, BufReader, BufWriter, Cursor, Read, Seek, Write},
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Arc, Mutex},
 };
 
 #[cfg(test)]
@@ -62,14 +62,15 @@ pub struct WorkspaceArchiveProgress {
     pub item_name: Option<String>,
 }
 
+#[derive(Clone)]
 pub struct StorageState {
-    storage: Mutex<Storage>,
+    storage: Arc<Mutex<Storage>>,
 }
 
 impl StorageState {
     pub fn open(data_dir: impl AsRef<Path>) -> StorageResult<Self> {
         Ok(Self {
-            storage: Mutex::new(Storage::open(data_dir)?),
+            storage: Arc::new(Mutex::new(Storage::open(data_dir)?)),
         })
     }
 
@@ -1294,11 +1295,7 @@ fn report_archive_progress<F>(
     }
 }
 
-fn copy_with_progress<R, W, F>(
-    reader: &mut R,
-    writer: &mut W,
-    mut progress: F,
-) -> io::Result<u64>
+fn copy_with_progress<R, W, F>(reader: &mut R, writer: &mut W, mut progress: F) -> io::Result<u64>
 where
     R: Read,
     W: Write,

@@ -354,6 +354,65 @@ describe('createWorkspaceStore autosave', () => {
       vi.useRealTimers()
     }
   })
+
+  it('waits for in-flight non-page asset saves when flushing pending saves', async () => {
+    const workspace = createWorkspace()
+    workspace.dataTables = [
+      {
+        id: 'database_flush',
+        title: '旧数据表',
+        icon: null,
+        cover: null,
+        snapshot: createDefaultAppState(),
+        createdAt: '2026-07-02T00:00:00.000Z',
+        updatedAt: '2026-07-02T00:00:00.000Z',
+      },
+    ]
+    let snapshot: WorkspaceSnapshot | null = structuredClone(workspace)
+    let resolveSaveStarted: () => void
+    let resolveSave: () => void
+    const saveStarted = new Promise<void>((resolve) => {
+      resolveSaveStarted = resolve
+    })
+    const saveDone = new Promise<void>((resolve) => {
+      resolveSave = resolve
+    })
+    const repository = {
+      async load() {
+        return snapshot ? structuredClone(snapshot) : null
+      },
+      async save(nextSnapshot: WorkspaceSnapshot) {
+        resolveSaveStarted()
+        await saveDone
+        snapshot = structuredClone(nextSnapshot)
+      },
+      async replace(nextSnapshot: WorkspaceSnapshot) {
+        snapshot = structuredClone(nextSnapshot)
+      },
+    }
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const renameTask = store.getState().renameDataTable('database_flush', '新数据表')
+    await saveStarted
+
+    const flushTask = store.getState().flushPendingSaves()
+
+    await expect(
+      Promise.race([
+        flushTask.then(() => 'flushed'),
+        new Promise<'waiting'>((resolve) => {
+          setTimeout(() => resolve('waiting'), 0)
+        }),
+      ]),
+    ).resolves.toBe('waiting')
+
+    resolveSave!()
+    await renameTask
+    await flushTask
+
+    expect(snapshot?.dataTables?.[0]?.title).toBe('新数据表')
+  })
 })
 
 describe('createWorkspaceStore mindmaps', () => {
