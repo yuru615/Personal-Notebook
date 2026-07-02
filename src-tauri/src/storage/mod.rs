@@ -2100,6 +2100,133 @@ mod tests {
     }
 
     #[test]
+    fn page_package_fails_when_page_media_asset_is_missing() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages[0].blocks.push(json!({
+            "id": "block_missing_image",
+            "type": "image",
+            "assetId": "asset_missing",
+            "name": "missing.png",
+            "mimeType": "image/png",
+            "caption": "",
+            "alt": "missing"
+        }));
+        source
+            .replace_workspace_backup(snapshot)
+            .expect("replace snapshot");
+
+        let error = source
+            .export_page_package("page_1")
+            .expect_err("missing asset should fail export");
+
+        assert_eq!(error.code, "not_found");
+        assert_eq!(error.message, "asset not found: asset_missing");
+    }
+
+    #[test]
+    fn page_package_exports_referenced_resources_and_data_table_assets() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        let asset = source
+            .write_asset(WriteAssetInput {
+                name: "table-image.png".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes: b"table image".to_vec(),
+            })
+            .expect("write asset");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages[0].blocks.push(json!({
+            "id": "block_inline_database",
+            "type": "data_table_inline",
+            "databaseId": "database_inline"
+        }));
+        snapshot.data_tables[0].snapshot["assets"] = json!({
+            asset.id.clone(): {
+                "id": asset.id,
+                "name": "table-image.png",
+                "mimeType": "image/png"
+            }
+        });
+        snapshot.data_tables.push(DataTableRecord {
+            id: "database_inline".to_string(),
+            title: "Inline Projects".to_string(),
+            icon: None,
+            cover: None,
+            snapshot: json!({
+                "version": 1,
+                "database": {
+                    "id": "database_inline",
+                    "name": "Inline Projects",
+                    "propertyOrder": [],
+                    "activeViewId": "view_inline",
+                    "viewOrder": ["view_inline"],
+                    "views": {},
+                    "createdAt": "2026-07-02T00:00:00.000Z",
+                    "updatedAt": "2026-07-02T00:00:00.000Z"
+                },
+                "properties": {},
+                "records": {},
+                "recordPages": {},
+                "blocks": {},
+                "assets": {}
+            }),
+            created_at: "2026-07-02T00:00:00.000Z".to_string(),
+            updated_at: "2026-07-02T00:00:00.000Z".to_string(),
+        });
+        source
+            .replace_workspace_backup(snapshot)
+            .expect("replace snapshot");
+
+        let archive = source
+            .export_page_package("page_1")
+            .expect("export page package");
+        let cursor = Cursor::new(archive);
+        let mut archive = zip::ZipArchive::new(cursor).expect("read archive");
+        let manifest: PagePackageManifest = {
+            let mut manifest_entry = archive
+                .by_name(PAGE_PACKAGE_MANIFEST_ENTRY)
+                .expect("page package manifest");
+            serde_json::from_reader(&mut manifest_entry).expect("parse manifest")
+        };
+
+        assert_eq!(
+            manifest
+                .boards
+                .iter()
+                .map(|board| board.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["board_1"]
+        );
+        assert_eq!(
+            manifest
+                .data_tables
+                .iter()
+                .map(|data_table| data_table.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["database_1", "database_inline"]
+        );
+        assert_eq!(
+            manifest
+                .mindmaps
+                .iter()
+                .map(|mindmap| mindmap.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["mindmap_1"]
+        );
+        assert_eq!(
+            manifest
+                .assets
+                .iter()
+                .map(|asset| asset.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![asset.id.as_str()]
+        );
+        archive
+            .by_name(&format!("assets/{}", asset.relative_path))
+            .expect("data table asset entry exists");
+    }
+
+    #[test]
     fn workspace_archive_skips_replaced_media_assets_without_refs() {
         let source = Storage::open_in_memory_for_tests().expect("source opens");
         let old_asset = source

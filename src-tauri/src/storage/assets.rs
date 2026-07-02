@@ -227,9 +227,9 @@ pub fn load_assets_by_ids(
                 },
             )
             .optional()?;
-        if let Some(asset) = asset {
-            assets.push(asset);
-        }
+        let asset =
+            asset.ok_or_else(|| StorageError::not_found(format!("asset not found: {asset_id}")))?;
+        assets.push(asset);
     }
 
     Ok(assets)
