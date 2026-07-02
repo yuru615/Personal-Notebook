@@ -448,16 +448,31 @@ impl Storage {
             .into_iter()
             .filter(|board| board_ids.iter().any(|id| id == &board.id))
             .collect::<Vec<_>>();
+        ensure_resource_ids_exist(
+            &board_ids,
+            boards.iter().map(|board| board.id.as_str()),
+            "board",
+        )?;
         let data_tables = self
             .load_data_tables()?
             .into_iter()
             .filter(|data_table| data_table_ids.iter().any(|id| id == &data_table.id))
             .collect::<Vec<_>>();
+        ensure_resource_ids_exist(
+            &data_table_ids,
+            data_tables.iter().map(|data_table| data_table.id.as_str()),
+            "data table",
+        )?;
         let mindmaps = self
             .load_mindmaps()?
             .into_iter()
             .filter(|mindmap| mindmap_ids.iter().any(|id| id == &mindmap.id))
             .collect::<Vec<_>>();
+        ensure_resource_ids_exist(
+            &mindmap_ids,
+            mindmaps.iter().map(|mindmap| mindmap.id.as_str()),
+            "mindmap",
+        )?;
         let mut asset_ids = collect_asset_ids_from_pages(&pages);
         for asset_id in collect_asset_ids_from_data_tables(&data_tables) {
             if !asset_ids.iter().any(|existing| existing == &asset_id) {
@@ -1511,6 +1526,20 @@ fn total_asset_bytes(assets: &[AssetMeta]) -> u64 {
         .sum()
 }
 
+fn ensure_resource_ids_exist<'a>(
+    requested_ids: &[String],
+    loaded_ids: impl Iterator<Item = &'a str>,
+    label: &str,
+) -> StorageResult<()> {
+    let loaded_ids = loaded_ids.collect::<std::collections::HashSet<_>>();
+    for id in requested_ids {
+        if !loaded_ids.contains(id.as_str()) {
+            return Err(StorageError::not_found(format!("{label} not found: {id}")));
+        }
+    }
+    Ok(())
+}
+
 fn validate_page_package_manifest(manifest: &PagePackageManifest) -> StorageResult<()> {
     let page_ids = collect_unique_manifest_ids(
         manifest.pages.iter().map(|page| page.id.as_str()),
@@ -2536,6 +2565,44 @@ mod tests {
 
         assert_eq!(error.code, "not_found");
         assert_eq!(error.message, "asset not found: asset_missing");
+    }
+
+    #[test]
+    fn page_package_fails_when_referenced_resource_is_missing() {
+        let cases: Vec<(&str, Box<dyn Fn(&mut WorkspaceSnapshot)>, &str)> = vec![
+            (
+                "board",
+                Box::new(|snapshot| snapshot.boards.clear()),
+                "board not found: board_1",
+            ),
+            (
+                "data table",
+                Box::new(|snapshot| snapshot.data_tables.clear()),
+                "data table not found: database_1",
+            ),
+            (
+                "mindmap",
+                Box::new(|snapshot| snapshot.mindmaps.clear()),
+                "mindmap not found: mindmap_1",
+            ),
+        ];
+
+        for (label, remove_resource, expected_message) in cases {
+            let source = Storage::open_in_memory_for_tests().expect("source opens");
+            let mut snapshot = sample_snapshot();
+            remove_resource(&mut snapshot);
+            source
+                .replace_workspace_backup(snapshot)
+                .expect("replace snapshot");
+
+            let error = match source.export_page_package("page_1") {
+                Ok(_) => panic!("missing {label} should fail export"),
+                Err(error) => error,
+            };
+
+            assert_eq!(error.code, "not_found");
+            assert_eq!(error.message, expected_message);
+        }
     }
 
     #[test]
