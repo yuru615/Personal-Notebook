@@ -49,6 +49,7 @@ export function SearchDialog({
     [boards, dataTables, pages, query],
   )
   const results = onSearch ? asyncResults : localResults
+  const resultAriaLabels = useMemo(() => buildResultAriaLabels(results), [results])
   const activeIndex = results.length > 0 ? Math.min(selectedIndex, results.length - 1) : -1
   const closeDialog = useCallback(() => {
     setQuery('')
@@ -206,7 +207,7 @@ export function SearchDialog({
           ) : results.length > 0 ? (
             results.map((result, index) => (
               <button
-                key={getResultKey(result)}
+                key={`${getResultKey(result)}-${index}`}
                 type="button"
                 className={[
                   'search-result',
@@ -214,9 +215,7 @@ export function SearchDialog({
                 ]
                   .filter(Boolean)
                   .join(' ')}
-                aria-label={`${
-                  getResultActionLabel(result)
-                } ${result.title}`}
+                aria-label={resultAriaLabels[index] ?? getResultActionLabel(result)}
                 aria-current={index === activeIndex ? 'true' : undefined}
                 onClick={() => openResult(result)}
                 onMouseEnter={() => setSelectedIndex(index)}
@@ -265,4 +264,30 @@ function getResultActionLabel(result: SearchResult) {
   }
 
   return uiCopy.search.openPage
+}
+
+function buildResultAriaLabels(results: SearchResult[]) {
+  const pageResultCounts = results.reduce<Record<string, number>>((counts, result) => {
+    if (result.kind === 'page') {
+      counts[result.pageId] = (counts[result.pageId] ?? 0) + 1
+    }
+
+    return counts
+  }, {})
+
+  return results.map((result) => {
+    const actionLabel = getResultActionLabel(result)
+    const baseLabel = `${actionLabel} ${result.title}`
+    const excerpt = result.excerpt.trim()
+
+    if (result.kind !== 'page' || (pageResultCounts[result.pageId] ?? 0) < 2) {
+      return baseLabel
+    }
+
+    if (!excerpt || excerpt === result.title) {
+      return baseLabel
+    }
+
+    return `${baseLabel} ${excerpt}`
+  })
 }

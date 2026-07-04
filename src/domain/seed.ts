@@ -42,6 +42,7 @@ export function createSeedWorkspace(): WorkspaceSnapshot {
     pages: [page],
     settings: {
       lastOpenedPageId: page.id,
+      sidebarLayout: 'compact',
     },
   }
 }

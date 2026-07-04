@@ -19,6 +19,19 @@ describe('app shell layout', () => {
     expect(cssRule('html')).toContain('scrollbar-gutter: stable;')
   })
 
+  it('uses a subtle thin scrollbar across scrollable regions', () => {
+    expect(cssRule(':root')).toContain('--app-scrollbar-size: 6px;')
+    expect(cssRule(':root')).toContain('--app-scrollbar-thumb: rgba(55, 53, 47, 0.18);')
+    expect(cssRule('*')).toContain('scrollbar-width: thin;')
+    expect(cssRule('*')).toContain('scrollbar-color: var(--app-scrollbar-thumb) transparent;')
+    expect(cssRule('*::-webkit-scrollbar')).toContain('width: var(--app-scrollbar-size);')
+    expect(cssRule('*::-webkit-scrollbar')).toContain('height: var(--app-scrollbar-size);')
+    expect(cssRule('*::-webkit-scrollbar-track')).toContain('background: transparent;')
+    expect(cssRule('*::-webkit-scrollbar-thumb')).toContain(
+      'background: var(--app-scrollbar-thumb);',
+    )
+  })
+
   it('keeps the sidebar pinned with its own scroll area', () => {
     const sidebar = cssRule('.sidebar')
 
@@ -27,6 +40,54 @@ describe('app shell layout', () => {
     expect(sidebar).toContain('align-self: start;')
     expect(sidebar).toContain('height: 100vh;')
     expect(sidebar).toContain('overflow-y: auto;')
+    expect(sidebar).toContain('overflow-x: hidden;')
     expect(sidebar).toContain('overscroll-behavior: contain;')
+  })
+
+  it('keeps sidebar menus above the page content column', () => {
+    const sidebar = cssRule('.sidebar')
+    const sidebarTreeActions = cssRule('.sidebar-tree-actions')
+    const pageMenuPopover = cssRule('.sidebar-tree-page-menu-popover')
+    const utilityMenuPopover = cssRule('.sidebar-utility-menu-popover')
+
+    expect(sidebar).toContain('z-index: 63;')
+    expect(sidebar).toContain('isolation: isolate;')
+    expect(sidebarTreeActions).not.toContain('transform:')
+    expect(pageMenuPopover).toContain('z-index: 64;')
+    expect(utilityMenuPopover).toContain('z-index: 64;')
+  })
+
+  it('uses the small body text size for sidebar tree links', () => {
+    const sidebarLink = cssRule('.sidebar-link')
+
+    expect(sidebarLink).toContain('font-size: 14px;')
+    expect(sidebarLink).toContain('line-height: 1.45;')
+  })
+
+  it('keeps long sidebar labels on a single truncated line', () => {
+    const sidebarTreeLabel = cssRule('.sidebar-tree-label')
+
+    expect(sidebarTreeLabel).toContain('overflow: hidden;')
+    expect(sidebarTreeLabel).toContain('text-overflow: ellipsis;')
+    expect(sidebarTreeLabel).toContain('white-space: nowrap;')
+  })
+
+  it('lets compact sidebar tree rows shrink inside the sidebar column', () => {
+    const sidebarTree = cssRule('.sidebar-tree')
+    const sidebarTreeEntry = cssRule('.sidebar-tree-entry')
+    const sidebarTreeRow = cssRule('.sidebar-tree-row')
+
+    expect(sidebarTree).toContain('min-width: 0;')
+    expect(sidebarTreeEntry).toContain('min-width: 0;')
+    expect(sidebarTreeRow).toContain('min-width: 0;')
+  })
+
+  it('defines a dedicated drag handle for resizing the sidebar', () => {
+    const appShell = cssRule('.app-shell')
+    const resizer = cssRule('.app-shell-sidebar-resizer')
+
+    expect(appShell).toContain('grid-template-columns: var(--app-sidebar-width, 272px) 1fr;')
+    expect(resizer).toContain('cursor: col-resize;')
+    expect(resizer).toContain('touch-action: none;')
   })
 })

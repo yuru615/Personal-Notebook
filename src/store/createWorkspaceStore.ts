@@ -18,7 +18,7 @@ import type {
   WorkspaceSnapshot,
   WorkspaceSettings,
 } from '../domain/types'
-import { ensureSnapshot, type WorkspaceRepository } from '../lib/workspaceRepository'
+import { type WorkspaceRepository } from '../lib/workspaceRepository'
 import {
   createBlock,
   createBoardRecord,
@@ -47,6 +47,8 @@ export interface WorkspaceState {
   bootstrap: () => Promise<void>
   createPage: (parentId?: PageId) => Promise<PageRecord>
   setCurrentPage: (pageId: PageId) => Promise<void>
+  setSidebarLayout: (layout: NonNullable<WorkspaceSettings['sidebarLayout']>) => Promise<void>
+  setSidebarWidth: (width: number) => Promise<void>
   setPageFullWidth: (pageId: PageId, isFullWidth: boolean) => Promise<void>
   setPageSmallText: (pageId: PageId, isSmallText: boolean) => Promise<void>
   setPageFontFamily: (pageId: PageId, fontFamily: PageFontFamily) => Promise<void>
@@ -69,6 +71,7 @@ export interface WorkspaceState {
   updateMindmapSnapshot: (mindmapId: string, snapshot: unknown) => Promise<void>
   restoreMissingMindmapReference: (pageId: PageId, mindmapId: string) => Promise<MindmapRecord | null>
   renamePage: (pageId: PageId, title: string) => Promise<void>
+  duplicatePage: (pageId: PageId) => Promise<PageRecord | null>
   deletePage: (pageId: PageId) => Promise<void>
   updateBlock: (pageId: PageId, blockId: string, nextBlock: BlockRecord) => Promise<void>
   flushPendingSaves: () => Promise<void>
@@ -106,6 +109,8 @@ function createEmptyState(): WorkspaceState {
     pages: [],
     settings: {
       lastOpenedPageId: null,
+      sidebarLayout: 'compact',
+      sidebarWidth: 272,
     },
     currentPageId: null,
     saveStatus: 'idle',
@@ -114,6 +119,12 @@ function createEmptyState(): WorkspaceState {
       throw new Error('not implemented')
     },
     setCurrentPage: async () => {
+      throw new Error('not implemented')
+    },
+    setSidebarLayout: async () => {
+      throw new Error('not implemented')
+    },
+    setSidebarWidth: async () => {
       throw new Error('not implemented')
     },
     setPageFullWidth: async () => {
@@ -182,6 +193,9 @@ function createEmptyState(): WorkspaceState {
     renamePage: async () => {
       throw new Error('not implemented')
     },
+    duplicatePage: async () => {
+      throw new Error('not implemented')
+    },
     deletePage: async () => {
       throw new Error('not implemented')
     },
@@ -244,10 +258,55 @@ function createPageRecord(parentId?: PageId): PageRecord {
   }
 }
 
-function createSettings(lastOpenedPageId: PageId | null): WorkspaceSettings {
+function createSettings(
+  lastOpenedPageId: PageId | null,
+  sidebarLayout: NonNullable<WorkspaceSettings['sidebarLayout']> = 'compact',
+  sidebarWidth = 272,
+): WorkspaceSettings {
   return {
     lastOpenedPageId,
+    sidebarLayout,
+    sidebarWidth,
   }
+}
+
+function normalizeSettings(settings: WorkspaceSettings): {
+  settings: WorkspaceSettings
+  didChange: boolean
+} {
+  const sidebarLayout = settings.sidebarLayout === 'classic' ? 'classic' : 'compact'
+  const sidebarWidth =
+    typeof settings.sidebarWidth === 'number' && Number.isFinite(settings.sidebarWidth) && settings.sidebarWidth > 0
+      ? Math.round(settings.sidebarWidth)
+      : 272
+  const didChange = settings.sidebarLayout !== sidebarLayout || settings.sidebarWidth !== sidebarWidth
+
+  return {
+    settings: {
+      lastOpenedPageId: settings.lastOpenedPageId,
+      sidebarLayout,
+      sidebarWidth,
+    },
+    didChange,
+  }
+}
+
+function collectPageBranch(pages: PageRecord[], targetId: PageId): PageRecord[] {
+  const ids = new Set<PageId>([targetId])
+  let changed = true
+
+  while (changed) {
+    changed = false
+
+    for (const page of pages) {
+      if (page.parentId && ids.has(page.parentId) && !ids.has(page.id)) {
+        ids.add(page.id)
+        changed = true
+      }
+    }
+  }
+
+  return pages.filter((page) => ids.has(page.id))
 }
 
 function normalizeListBlocks(blocks: BlockRecord[]) {
@@ -444,6 +503,13 @@ function normalizeWorkspaceSnapshot(snapshot: WorkspaceSnapshot) {
     didChange = true
   }
 
+  const normalizedSettings = normalizeSettings(snapshot.settings)
+  const settings = normalizedSettings.settings
+
+  if (normalizedSettings.didChange) {
+    didChange = true
+  }
+
 
   const liveBlockTypes = new Set<BlockRecord['type']>([
     'paragraph',
@@ -483,8 +549,8 @@ function normalizeWorkspaceSnapshot(snapshot: WorkspaceSnapshot) {
 
   return {
     snapshot: didChange
-      ? { boards, dataTables, mindmaps, pages, settings: snapshot.settings }
-      : { ...snapshot, boards, dataTables, mindmaps },
+      ? { boards, dataTables, mindmaps, pages, settings }
+      : { ...snapshot, boards, dataTables, mindmaps, settings },
     didChange,
   }
 }
@@ -696,6 +762,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
   let pendingBlockSaveTimer: ReturnType<typeof setTimeout> | null = null
   let pendingBlockSaveTask: Promise<void> | null = null
   let pendingBlockSaveVersion = 0
+  let bootstrapTask: Promise<void> | null = null
 
   function createSnapshotFromState(
     state: Pick<WorkspaceState, 'boards' | 'dataTables' | 'mindmaps' | 'pages' | 'settings'>,
@@ -824,37 +891,59 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
     ...createEmptyState(),
 
     bootstrap: async () => {
-      const rawSnapshot = await ensureSnapshot(repository, createSeedWorkspace())
-      const normalized = normalizeWorkspaceSnapshot(rawSnapshot)
-      const snapshot = normalized.snapshot
-      const currentPageId = resolveCurrentPageId(snapshot)
-      undoStack.length = 0
-      redoStack.length = 0
-
-      if (normalized.didChange) {
-        await repository.replace(snapshot)
+      if (bootstrapTask) {
+        await bootstrapTask
+        return
       }
 
-      set({
-        boards: snapshot.boards,
-        dataTables: snapshot.dataTables ?? [],
-        mindmaps: snapshot.mindmaps ?? [],
-        pages: snapshot.pages,
-        settings: createSettings(currentPageId),
-        currentPageId,
-        saveStatus: 'saved',
-      })
+      bootstrapTask = (async () => {
+        const persistedSnapshot = await repository.load()
+        const rawSnapshot = persistedSnapshot ?? createSeedWorkspace()
+        const normalized = normalizeWorkspaceSnapshot(rawSnapshot)
+        const snapshot = normalized.snapshot
+        const currentPageId = resolveCurrentPageId(snapshot)
+        undoStack.length = 0
+        redoStack.length = 0
+
+        if (!persistedSnapshot || normalized.didChange) {
+          await repository.replace(snapshot)
+        }
+
+        set({
+          boards: snapshot.boards,
+          dataTables: snapshot.dataTables ?? [],
+          mindmaps: snapshot.mindmaps ?? [],
+          pages: snapshot.pages,
+          settings: createSettings(
+            currentPageId,
+            snapshot.settings.sidebarLayout ?? 'compact',
+            snapshot.settings.sidebarWidth ?? 272,
+          ),
+          currentPageId,
+          saveStatus: 'saved',
+        })
+      })()
+
+      try {
+        await bootstrapTask
+      } finally {
+        bootstrapTask = null
+      }
     },
 
     createPage: async (parentId?: PageId) => {
       const page = createPageRecord(parentId)
       const state = get()
-      const nextSettings = createSettings(page.id)
-      const nextSnapshot = {
-        boards: state.boards,
+      const nextSettings = createSettings(
+        page.id,
+        state.settings.sidebarLayout ?? 'compact',
+        state.settings.sidebarWidth ?? 272,
+      )
+      const nextSnapshot = createSnapshotFromState({
+        ...state,
         pages: [...state.pages, page],
         settings: nextSettings,
-      }
+      })
 
       pushUndoSnapshot(state)
       set({ saveStatus: 'saving' })
@@ -888,12 +977,15 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         return
       }
 
-      const nextSettings = createSettings(pageId)
-      const nextSnapshot = {
-        boards: state.boards,
-        pages: state.pages,
+      const nextSettings = createSettings(
+        pageId,
+        state.settings.sidebarLayout ?? 'compact',
+        state.settings.sidebarWidth ?? 272,
+      )
+      const nextSnapshot = createSnapshotFromState({
+        ...state,
         settings: nextSettings,
-      }
+      })
 
       set({ saveStatus: 'saving' })
 
@@ -908,6 +1000,69 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       } catch {
         set({ saveStatus: 'error' })
         throw new Error('Failed to switch page')
+      }
+    },
+
+    setSidebarLayout: async (layout) => {
+      const state = get()
+
+      if (state.settings.sidebarLayout === layout) {
+        return
+      }
+
+      const nextSettings = createSettings(
+        state.settings.lastOpenedPageId,
+        layout,
+        state.settings.sidebarWidth ?? 272,
+      )
+      const nextSnapshot = createSnapshotFromState({
+        ...state,
+        settings: nextSettings,
+      })
+
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save(nextSnapshot)
+        set({
+          settings: nextSettings,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to update sidebar layout')
+      }
+    },
+
+    setSidebarWidth: async (width) => {
+      const state = get()
+      const nextWidth = Math.max(1, Math.round(width))
+
+      if (state.settings.sidebarWidth === nextWidth) {
+        return
+      }
+
+      const nextSettings = createSettings(
+        state.settings.lastOpenedPageId,
+        state.settings.sidebarLayout ?? 'compact',
+        nextWidth,
+      )
+      const nextSnapshot = createSnapshotFromState({
+        ...state,
+        settings: nextSettings,
+      })
+
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save(nextSnapshot)
+        set({
+          settings: nextSettings,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to update sidebar width')
       }
     },
 
@@ -927,7 +1082,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
+        await repository.save(createSnapshotFromState({ ...state, pages: nextPages }))
         set({
           boards: state.boards,
           pages: nextPages,
@@ -955,7 +1110,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
+        await repository.save(createSnapshotFromState({ ...state, pages: nextPages }))
         set({
           boards: state.boards,
           pages: nextPages,
@@ -983,7 +1138,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
+        await repository.save(createSnapshotFromState({ ...state, pages: nextPages }))
         set({
           boards: state.boards,
           pages: nextPages,
@@ -1011,7 +1166,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
+        await repository.save(createSnapshotFromState({ ...state, pages: nextPages }))
         set({
           boards: state.boards,
           pages: nextPages,
@@ -1039,7 +1194,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
+        await repository.save(createSnapshotFromState({ ...state, pages: nextPages }))
         set({
           boards: state.boards,
           pages: nextPages,
@@ -1067,7 +1222,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
+        await repository.save(createSnapshotFromState({ ...state, pages: nextPages }))
         set({
           boards: state.boards,
           pages: nextPages,
@@ -1204,11 +1359,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({
-          boards: nextBoards,
-          pages: nextPages,
-          settings: state.settings,
-        })
+        await repository.save(
+          createSnapshotFromState({ ...state, boards: nextBoards, pages: nextPages }),
+        )
         set({
           boards: nextBoards,
           pages: nextPages,
@@ -1261,11 +1414,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({
-          boards: nextBoards,
-          pages: nextPages,
-          settings: state.settings,
-        })
+        await repository.save(
+          createSnapshotFromState({ ...state, boards: nextBoards, pages: nextPages }),
+        )
         set({
           boards: nextBoards,
           pages: nextPages,
@@ -1635,7 +1786,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
+        await repository.save(createSnapshotFromState({ ...state, pages: nextPages }))
         set({
           boards: state.boards,
           pages: nextPages,
@@ -1647,6 +1798,164 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       }
     },
 
+    duplicatePage: async (pageId: PageId) => {
+      const state = get()
+      const sourcePage = state.pages.find((page) => page.id === pageId)
+
+      if (!sourcePage) {
+        return null
+      }
+
+      const now = new Date().toISOString()
+      const sourceBranch = collectPageBranch(state.pages, pageId)
+      const nextPageIdBySourceId = new Map(
+        sourceBranch.map((page) => [page.id, createId('page')] as const),
+      )
+      const nextBoardIdBySourceId = new Map<string, string>()
+      const nextDataTableIdBySourceId = new Map<string, string>()
+      const nextMindmapIdBySourceId = new Map<string, string>()
+      let nextBoards = state.boards
+      let nextDataTables = state.dataTables
+      let nextMindmaps = state.mindmaps
+
+      const nextPages = [
+        ...state.pages,
+        ...sourceBranch.map((sourceBranchPage) => {
+          const nextPageId = nextPageIdBySourceId.get(sourceBranchPage.id) ?? createId('page')
+          const nextParentId = sourceBranchPage.parentId
+            ? (nextPageIdBySourceId.get(sourceBranchPage.parentId) ?? sourceBranchPage.parentId)
+            : sourceBranchPage.id === sourcePage.id
+              ? sourceBranchPage.parentId
+              : null
+
+          const blocks = sourceBranchPage.blocks.map((block) => {
+            if (block.type === 'child_page') {
+              return {
+                ...block,
+                id: createId('block'),
+                pageId: nextPageIdBySourceId.get(block.pageId) ?? block.pageId,
+              }
+            }
+
+            if (block.type === 'whiteboard') {
+              let nextBoardId = nextBoardIdBySourceId.get(block.boardId)
+
+              if (!nextBoardId) {
+                const sourceBoard = state.boards.find((board) => board.id === block.boardId)
+
+                if (sourceBoard) {
+                  const nextBoard = {
+                    ...createBoardRecord(now),
+                    title: `${sourceBoard.title}${COPY_SUFFIX}`,
+                    snapshot: structuredClone(sourceBoard.snapshot),
+                  }
+
+                  nextBoards = [...nextBoards, nextBoard]
+                  nextBoardIdBySourceId.set(block.boardId, nextBoard.id)
+                  nextBoardId = nextBoard.id
+                }
+              }
+
+              return createWhiteboardBlock(nextBoardId ?? block.boardId)
+            }
+
+            if (block.type === 'data_table') {
+              let nextDataTableId = nextDataTableIdBySourceId.get(block.databaseId)
+
+              if (!nextDataTableId) {
+                const sourceDataTable = state.dataTables.find(
+                  (dataTable) => dataTable.id === block.databaseId,
+                )
+
+                if (sourceDataTable) {
+                  const nextDataTable = {
+                    ...createDataTableRecord(now),
+                    title: `${sourceDataTable.title}${COPY_SUFFIX}`,
+                    icon: sourceDataTable.icon ?? null,
+                    cover: sourceDataTable.cover ?? null,
+                    snapshot: structuredClone(sourceDataTable.snapshot),
+                  }
+
+                  nextDataTables = [...nextDataTables, nextDataTable]
+                  nextDataTableIdBySourceId.set(block.databaseId, nextDataTable.id)
+                  nextDataTableId = nextDataTable.id
+                }
+              }
+
+              return createDataTableBlock(nextDataTableId ?? block.databaseId, block.displayMode)
+            }
+
+            if (block.type === 'mindmap') {
+              let nextMindmapId = nextMindmapIdBySourceId.get(block.mindmapId)
+
+              if (!nextMindmapId) {
+                const sourceMindmap = state.mindmaps.find((mindmap) => mindmap.id === block.mindmapId)
+
+                if (sourceMindmap) {
+                  const nextMindmap = {
+                    ...createMindmapRecord(now),
+                    title: `${sourceMindmap.title}${COPY_SUFFIX}`,
+                    snapshot: structuredClone(sourceMindmap.snapshot),
+                  }
+
+                  nextMindmaps = [...nextMindmaps, nextMindmap]
+                  nextMindmapIdBySourceId.set(block.mindmapId, nextMindmap.id)
+                  nextMindmapId = nextMindmap.id
+                }
+              }
+
+              return createMindmapBlock(nextMindmapId ?? block.mindmapId)
+            }
+
+            return {
+              ...structuredClone(block),
+              id: createId('block'),
+            }
+          })
+
+          return {
+            ...structuredClone(sourceBranchPage),
+            id: nextPageId,
+            parentId: nextParentId,
+            title:
+              sourceBranchPage.id === sourcePage.id
+                ? `${sourceBranchPage.title}${COPY_SUFFIX}`
+                : sourceBranchPage.title,
+            blocks,
+            createdAt: now,
+            updatedAt: now,
+          }
+        }),
+      ]
+
+      const duplicatedPage = nextPages.find((page) => page.id === nextPageIdBySourceId.get(pageId)) ?? null
+
+      pushUndoSnapshot(state)
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save({
+          boards: nextBoards,
+          dataTables: nextDataTables,
+          mindmaps: nextMindmaps,
+          pages: nextPages,
+          settings: state.settings,
+        })
+        set({
+          boards: nextBoards,
+          dataTables: nextDataTables,
+          mindmaps: nextMindmaps,
+          pages: nextPages,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to duplicate page')
+      }
+
+      return duplicatedPage
+    },
+
     deletePage: async (pageId: PageId) => {
       const state = get()
       const nextPages = deletePageBranch(state.pages, pageId)
@@ -1654,7 +1963,11 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       const currentPageDeleted =
         state.currentPageId !== null && !nextPages.some((page) => page.id === state.currentPageId)
       const nextCurrentPageId = currentPageDeleted ? (nextPages[0]?.id ?? null) : state.currentPageId
-      const nextSettings = createSettings(nextCurrentPageId)
+      const nextSettings = createSettings(
+        nextCurrentPageId,
+        state.settings.sidebarLayout ?? 'compact',
+        state.settings.sidebarWidth ?? 272,
+      )
 
       pushUndoSnapshot(state)
       set({ saveStatus: 'saving' })
@@ -1862,7 +2175,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
+        await repository.save(createSnapshotFromState({ ...state, pages: nextPages }))
         set({
           boards: state.boards,
           pages: nextPages,
@@ -1999,7 +2312,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
+        await repository.save(createSnapshotFromState({ ...state, pages: nextPages }))
         set({ boards: state.boards, pages: nextPages, saveStatus: 'saved' })
       } catch {
         set({ saveStatus: 'error' })
@@ -2028,7 +2341,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
+        await repository.save(createSnapshotFromState({ ...state, pages: nextPages }))
         set({ boards: state.boards, pages: nextPages, saveStatus: 'saved' })
       } catch {
         set({ saveStatus: 'error' })
@@ -2052,7 +2365,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
+        await repository.save(createSnapshotFromState({ ...state, pages: nextPages }))
         set({ boards: state.boards, pages: nextPages, saveStatus: 'saved' })
       } catch {
         set({ saveStatus: 'error' })
@@ -2116,7 +2429,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       set({ saveStatus: 'saving' })
 
       try {
-        await repository.save({ boards: state.boards, pages: nextPages, settings: state.settings })
+        await repository.save(createSnapshotFromState({ ...state, pages: nextPages }))
         set({ boards: state.boards, pages: nextPages, saveStatus: 'saved' })
       } catch {
         set({ saveStatus: 'error' })

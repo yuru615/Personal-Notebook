@@ -1,5 +1,13 @@
 import { ImageIcon, Music, RefreshCw, Upload, Video } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type WheelEvent,
+} from 'react'
+import { createPortal } from 'react-dom'
 import type { AudioBlock, ImageBlock, VideoBlock } from '../../../domain/types'
 import { getAssetUrl, selectAndImportAsset } from '../../../lib/assets'
 
@@ -8,6 +16,18 @@ type MediaBlockRecord = ImageBlock | VideoBlock | AudioBlock
 interface MediaBlockProps {
   block: MediaBlockRecord
   onChange: (block: MediaBlockRecord) => void
+}
+
+interface ImagePreviewView {
+  scale: number
+  offset: {
+    x: number
+    y: number
+  }
+  origin: {
+    x: number
+    y: number
+  }
 }
 
 async function createVideoFirstFramePoster(assetUrl: string): Promise<string | null> {
@@ -101,11 +121,49 @@ const mediaLabels = {
   },
 }
 
+const openImagePreviewLabel = '打开图片预览'
+const closeImagePreviewLabel = '关闭图片预览'
+const imagePreviewDialogLabel = '图片预览'
+
+function clampPreviewScale(scale: number) {
+  return Math.min(4, Math.max(1, Number(scale.toFixed(2))))
+}
+
+function clampPreviewPointerPosition(value: number, size: number) {
+  return Math.min(Math.max(value, 0), size)
+}
+
+function createDefaultImagePreviewView(): ImagePreviewView {
+  return {
+    scale: 1,
+    offset: { x: 0, y: 0 },
+    origin: { x: 0, y: 0 },
+  }
+}
+
+function formatPreviewTransform(scale: number, offset: { x: number; y: number }) {
+  if (offset.x === 0 && offset.y === 0) {
+    return `scale(${scale})`
+  }
+
+  return `translate(${offset.x}px, ${offset.y}px) scale(${scale})`
+}
+
 export function MediaBlock({ block, onChange }: MediaBlockProps) {
   const [assetUrl, setAssetUrl] = useState<string | null>(null)
   const [videoPosterUrl, setVideoPosterUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [hasLoadError, setHasLoadError] = useState(false)
+  const [isImagePreviewOpen, setIsImagePreviewOpen] = useState(false)
+  const [imagePreviewView, setImagePreviewView] = useState<ImagePreviewView>(createDefaultImagePreviewView)
+  const [isImagePreviewDragging, setIsImagePreviewDragging] = useState(false)
+  const previewImageRef = useRef<HTMLImageElement | null>(null)
+  const previewDragRef = useRef<{
+    startX: number
+    startY: number
+    offsetX: number
+    offsetY: number
+  } | null>(null)
   const labels = mediaLabels[block.type]
   const Icon = useMemo(() => {
     switch (block.type) {
@@ -122,6 +180,10 @@ export function MediaBlock({ block, onChange }: MediaBlockProps) {
     let cancelled = false
     setAssetUrl(null)
     setHasLoadError(false)
+    setIsImagePreviewOpen(false)
+    setImagePreviewView(createDefaultImagePreviewView())
+    setIsImagePreviewDragging(false)
+    previewDragRef.current = null
 
     if (!block.assetId) {
       return
@@ -162,6 +224,121 @@ export function MediaBlock({ block, onChange }: MediaBlockProps) {
       cancelled = true
     }
   }, [assetUrl, block.type])
+
+  useEffect(() => {
+    if (!isImagePreviewOpen) {
+      return
+    }
+
+    const previousOverflow = document.body.style.overflow
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsImagePreviewOpen(false)
+      }
+    }
+    const handleMouseMove = (event: MouseEvent) => {
+      const dragState = previewDragRef.current
+
+      if (!dragState) {
+        return
+      }
+
+      setImagePreviewView((currentView) => ({
+        ...currentView,
+        offset: {
+          x: Number((dragState.offsetX + event.clientX - dragState.startX).toFixed(2)),
+          y: Number((dragState.offsetY + event.clientY - dragState.startY).toFixed(2)),
+        },
+      }))
+    }
+    const handleMouseUp = () => {
+      if (!previewDragRef.current) {
+        return
+      }
+
+      previewDragRef.current = null
+      setIsImagePreviewDragging(false)
+    }
+
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+      previewDragRef.current = null
+      setIsImagePreviewDragging(false)
+    }
+  }, [isImagePreviewOpen])
+
+  function handlePreviewWheel(event: WheelEvent<HTMLDivElement>) {
+    event.preventDefault()
+    const previewImage = previewImageRef.current
+    const previewBody = event.currentTarget
+    const delta = event.deltaY < 0 ? 0.1 : -0.1
+
+    setImagePreviewView((currentView) => {
+      const nextScale = clampPreviewScale(currentView.scale + delta)
+
+      if (!previewImage || nextScale === currentView.scale) {
+        return currentView
+      }
+
+      if (nextScale === 1) {
+        return createDefaultImagePreviewView()
+      }
+
+      const bodyRect = previewBody.getBoundingClientRect()
+      const baseLeft = bodyRect.left + (previewBody.clientWidth - previewImage.offsetWidth) / 2
+      const baseTop = bodyRect.top + (previewBody.clientHeight - previewImage.offsetHeight) / 2
+      const nextOrigin = {
+        x: clampPreviewPointerPosition(
+          currentView.origin.x +
+            (event.clientX - baseLeft - currentView.offset.x - currentView.origin.x) / currentView.scale,
+          previewImage.offsetWidth,
+        ),
+        y: clampPreviewPointerPosition(
+          currentView.origin.y +
+            (event.clientY - baseTop - currentView.offset.y - currentView.origin.y) / currentView.scale,
+          previewImage.offsetHeight,
+        ),
+      }
+
+      return {
+        scale: nextScale,
+        origin: nextOrigin,
+        offset: {
+          x: Number((event.clientX - baseLeft - nextOrigin.x).toFixed(2)),
+          y: Number((event.clientY - baseTop - nextOrigin.y).toFixed(2)),
+        },
+      }
+    })
+  }
+
+  function resetImagePreviewView() {
+    setImagePreviewView(createDefaultImagePreviewView())
+    previewDragRef.current = null
+    setIsImagePreviewDragging(false)
+  }
+
+  function handlePreviewMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
+    if (event.button !== 0 || imagePreviewView.scale <= 1) {
+      return
+    }
+
+    event.preventDefault()
+    previewDragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      offsetX: imagePreviewView.offset.x,
+      offsetY: imagePreviewView.offset.y,
+    }
+    setIsImagePreviewDragging(true)
+  }
 
   async function handleSelectAsset() {
     setIsLoading(true)
@@ -224,7 +401,14 @@ export function MediaBlock({ block, onChange }: MediaBlockProps) {
     if (block.type === 'image') {
       return (
         <div className="media-block-surface">
-          <img className="media-block-image" src={assetUrl} alt={block.alt || block.name} />
+          <button
+            type="button"
+            className="media-block-image-trigger"
+            aria-label={openImagePreviewLabel}
+            onClick={() => setIsImagePreviewOpen(true)}
+          >
+            <img className="media-block-image" src={assetUrl} alt={block.alt || block.name} />
+          </button>
         </div>
       )
     }
@@ -268,41 +452,100 @@ export function MediaBlock({ block, onChange }: MediaBlockProps) {
   }
 
   return (
-    <figure className={`media-block media-block-kind-${block.type}`}>
-      <div className="media-block-toolbar">
-        <div className="media-block-label">
-          <Icon size={16} aria-hidden="true" />
-          <span>{block.name || labels.title}</span>
+    <>
+      <figure className={`media-block media-block-kind-${block.type}`}>
+        <div className="media-block-toolbar">
+          <div className="media-block-label">
+            <Icon size={16} aria-hidden="true" />
+            <span>{block.name || labels.title}</span>
+          </div>
+          <button
+            type="button"
+            className="media-block-replace"
+            onClick={() => {
+              void handleSelectAsset()
+            }}
+            disabled={isLoading}
+          >
+            <RefreshCw size={14} aria-hidden="true" />
+            <span>替换</span>
+          </button>
         </div>
-        <button
-          type="button"
-          className="media-block-replace"
-          onClick={() => {
-            void handleSelectAsset()
-          }}
-          disabled={isLoading}
-        >
-          <RefreshCw size={14} aria-hidden="true" />
-          <span>替换</span>
-        </button>
-      </div>
-      <div className="media-block-preview">{renderPreview()}</div>
-      <figcaption>
-        <input
-          className="media-block-caption"
-          value={block.caption}
-          placeholder="添加说明"
-          onChange={(event) => onChange({ ...block, caption: event.currentTarget.value })}
-        />
-        {block.type === 'image' ? (
+        <div className="media-block-preview">{renderPreview()}</div>
+        <figcaption>
           <input
             className="media-block-caption"
-            value={block.alt}
-            placeholder="替代文本"
-            onChange={(event) => onChange({ ...block, alt: event.currentTarget.value })}
+            value={block.caption}
+            placeholder="添加说明"
+            onChange={(event) => onChange({ ...block, caption: event.currentTarget.value })}
           />
-        ) : null}
-      </figcaption>
-    </figure>
+          {block.type === 'image' ? (
+            <input
+              className="media-block-caption"
+              value={block.alt}
+              placeholder="替代文本"
+              onChange={(event) => onChange({ ...block, alt: event.currentTarget.value })}
+            />
+          ) : null}
+        </figcaption>
+      </figure>
+      {block.type === 'image' && assetUrl && isImagePreviewOpen
+        ? createPortal(
+            <div className="media-block-image-preview-overlay" onClick={() => setIsImagePreviewOpen(false)}>
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-label={imagePreviewDialogLabel}
+                className="media-block-image-preview-dialog"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="media-block-image-preview-header">
+                  <span className="media-block-image-preview-name" title={block.alt || block.name}>
+                    {block.alt || block.name || labels.title}
+                  </span>
+                  <div className="media-block-image-preview-actions">
+                    <span className="media-block-image-preview-zoom" aria-live="polite">
+                      {Math.round(imagePreviewView.scale * 100)}%
+                    </span>
+                    <button
+                      type="button"
+                      className="media-block-image-preview-close"
+                      aria-label={closeImagePreviewLabel}
+                      onClick={() => setIsImagePreviewOpen(false)}
+                    >
+                      关闭
+                    </button>
+                  </div>
+                </div>
+                <div
+                  className={[
+                    'media-block-image-preview-body',
+                    imagePreviewView.scale > 1 ? 'media-block-image-preview-body-pan-ready' : '',
+                    isImagePreviewDragging ? 'media-block-image-preview-body-dragging' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  onWheel={handlePreviewWheel}
+                  onMouseDown={handlePreviewMouseDown}
+                  onDoubleClick={resetImagePreviewView}
+                >
+                  <img
+                    ref={previewImageRef}
+                    className="media-block-image-preview-image"
+                    src={assetUrl}
+                    alt={block.alt || block.name}
+                    draggable={false}
+                    style={{
+                      transformOrigin: `${imagePreviewView.origin.x}px ${imagePreviewView.origin.y}px`,
+                      transform: formatPreviewTransform(imagePreviewView.scale, imagePreviewView.offset),
+                    }}
+                  />
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   )
 }

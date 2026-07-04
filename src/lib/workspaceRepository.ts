@@ -1,5 +1,6 @@
 import { createSeedWorkspace } from '../domain/seed'
 import type { WorkspaceSnapshot } from '../domain/types'
+import { isDesktopRuntime } from './fileAccess'
 import { createTauriStorageClient, type WorkspaceStorageClient } from './storageClient'
 
 export interface WorkspaceRepository {
@@ -27,9 +28,16 @@ interface CreateStorageWorkspaceRepositoryOptions {
   client?: WorkspaceStorageClient
 }
 
+const BROWSER_WORKSPACE_STORAGE_KEY = 'zhixi.workspace.snapshot.v1'
+
 export function createStorageWorkspaceRepository({
-  client = createTauriStorageClient(),
+  client,
 }: CreateStorageWorkspaceRepositoryOptions = {}): WorkspaceRepository {
+  if (!client && !isDesktopRuntime()) {
+    return createBrowserWorkspaceRepository()
+  }
+
+  client ??= createTauriStorageClient()
   let writeQueue: Promise<void> = Promise.resolve()
 
   function queueWrite<T>(task: () => Promise<T>) {
@@ -72,6 +80,27 @@ export function createStorageWorkspaceRepository({
 
     async cleanupOrphanAssets() {
       return queueWrite(() => client.cleanupOrphanAssets())
+    },
+  }
+}
+
+function createBrowserWorkspaceRepository(): WorkspaceRepository {
+  return {
+    async load() {
+      const value = window.localStorage.getItem(BROWSER_WORKSPACE_STORAGE_KEY)
+      return value ? (JSON.parse(value) as WorkspaceSnapshot) : null
+    },
+
+    async save(snapshot) {
+      window.localStorage.setItem(BROWSER_WORKSPACE_STORAGE_KEY, JSON.stringify(snapshot))
+    },
+
+    async replace(snapshot) {
+      window.localStorage.setItem(BROWSER_WORKSPACE_STORAGE_KEY, JSON.stringify(snapshot))
+    },
+
+    async cleanupOrphanAssets() {
+      return 0
     },
   }
 }

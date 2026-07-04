@@ -107,7 +107,7 @@ export function BlockEditor({
   onOpenMindmap,
   onRestoreMindmap,
 }: BlockEditorProps) {
-  const childPageTitleMap = Object.fromEntries(allPages.map((item) => [item.id, item.title]))
+  const childPageMap = new Map(allPages.map((item) => [item.id, item]))
   const boardMap = new Map(boards.map((board) => [board.id, board]))
   const dataTableMap = new Map(dataTables.map((dataTable) => [dataTable.id, dataTable]))
   const mindmapMap = new Map(mindmaps.map((mindmap) => [mindmap.id, mindmap]))
@@ -818,14 +818,17 @@ export function BlockEditor({
                 onChange={(nextBlock) => onUpdateBlock(block.id, nextBlock)}
               />,
             )
-          case 'child_page':
+          case 'child_page': {
+            const childPage = childPageMap.get(block.pageId)
             return renderBlockRow(
               block,
               <ChildPageBlock
-                title={childPageTitleMap[block.pageId] ?? uiCopy.page.untitled}
+                title={childPage?.title ?? uiCopy.page.untitled}
+                icon={childPage?.icon ?? null}
                 onOpen={() => onOpenChildPage?.(block.pageId)}
               />,
             )
+          }
           case 'whiteboard': {
             const board = boardMap.get(block.boardId)
 

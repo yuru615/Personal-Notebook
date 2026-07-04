@@ -70,22 +70,27 @@ describe('data table styles', () => {
     expect(embeddedIcon).toContain('display: none')
   })
 
-  it('lets the full data table route header use the available page width', () => {
+  it('keeps the full data table route aligned to the normal page content column', () => {
     expect(getAppRuleBody('.data-table-route-page')).toContain('--page-content-available-width: calc(')
-    expect(getAppRuleBody('.data-table-route-page')).not.toContain('var(--page-outline-width)')
-    expect(getAppRuleBody('.data-table-route-page')).not.toContain('var(--page-outline-gap)')
-    expect(getAppRuleBody('.data-table-route-page .database-page.is-full-width')).toContain('padding-left: 0')
-    expect(getAppRuleBody('.data-table-route-page .database-page.is-full-width')).toContain('padding-right: 0')
-    expect(getAppRuleBody('.data-table-route-page-header')).toContain('width: min(100%, var(--page-content-available-width))')
+    expect(getAppRuleBody('.data-table-route-page .database-page.is-full-width')).toContain(
+      'max-width: min(760px, var(--page-content-available-width))',
+    )
+    expect(getAppRuleBody('.data-table-route-page .database-page.is-full-width')).toContain(
+      'margin: 0 auto',
+    )
+    expect(getAppRuleBody('.data-table-route-page-header')).toContain(
+      'max-width: min(760px, var(--page-content-available-width))',
+    )
     expect(getAppRuleBody('.data-table-route-page-header')).toContain('padding: 0')
     expect(getAppRuleBody('.data-table-route-page-header .page-cover')).toBe('')
     expect(getAppRuleBody('.data-table-route-header-body')).toContain('max-width: none')
+    expect(getAppRuleBody('.data-table-route-header-body')).toContain('padding-left: 0')
   })
 
   it('keeps data table breadcrumbs in the normal page flow without a separate panel', () => {
     const breadcrumbRow = getAppRuleBody('.data-table-route-breadcrumb-row')
 
-    expect(breadcrumbRow).toContain('width: min(100%, var(--page-content-available-width))')
+    expect(breadcrumbRow).toContain('max-width: min(760px, var(--page-content-available-width))')
     expect(breadcrumbRow).not.toContain('background:')
     expect(breadcrumbRow).not.toContain('border:')
     expect(breadcrumbRow).not.toContain('border-radius:')

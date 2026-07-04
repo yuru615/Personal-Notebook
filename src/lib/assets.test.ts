@@ -23,6 +23,7 @@ describe('asset helpers', () => {
   afterEach(() => {
     vi.clearAllMocks()
     vi.restoreAllMocks()
+    window.localStorage.clear()
     Reflect.deleteProperty(globalThis, '__TAURI_INTERNALS__')
   })
 
@@ -62,5 +63,19 @@ describe('asset helpers', () => {
         mimeType: 'video/mp4',
       },
     })
+  })
+
+  it('stores browser preview assets without Tauri', async () => {
+    const { getAssetUrl, readAsset, writeAssetBytes } = await import('./assets')
+
+    const asset = await writeAssetBytes({
+      name: 'photo.png',
+      mimeType: 'image/png',
+      bytes: new Uint8Array([1, 2, 3]),
+    })
+
+    await expect(getAssetUrl(asset.id)).resolves.toBe('data:image/png;base64,AQID')
+    await expect(readAsset(asset.id)).resolves.toEqual(new Uint8Array([1, 2, 3]))
+    expect(invoke).not.toHaveBeenCalled()
   })
 })

@@ -139,6 +139,31 @@ function createSnapshot(): WorkspaceSnapshot {
 }
 
 describe('createStorageWorkspaceRepository', () => {
+  it('uses browser local storage when Tauri is unavailable', async () => {
+    Reflect.deleteProperty(globalThis, '__TAURI_INTERNALS__')
+    window.localStorage.removeItem('zhixi.workspace.snapshot.v1')
+    const repository = createStorageWorkspaceRepository()
+    const seed = createSeedWorkspace()
+
+    await expect(ensureSnapshot(repository, seed)).resolves.toEqual(seed)
+
+    const nextSnapshot: WorkspaceSnapshot = {
+      ...seed,
+      pages: [
+        {
+          ...seed.pages[0],
+          title: 'Browser preview',
+        },
+      ],
+    }
+    await repository.save(nextSnapshot)
+
+    expect(JSON.parse(window.localStorage.getItem('zhixi.workspace.snapshot.v1') ?? 'null')).toEqual(
+      nextSnapshot,
+    )
+    await expect(repository.load()).resolves.toEqual(nextSnapshot)
+  })
+
   it('seeds empty storage through the bootstrap helper', async () => {
     const { repository } = createRepository()
     const seed = createSeedWorkspace()

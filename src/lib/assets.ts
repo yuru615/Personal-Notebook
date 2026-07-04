@@ -7,6 +7,7 @@ import {
 } from './storageClient'
 
 const storageClient = createTauriStorageClient()
+const BROWSER_ASSET_STORAGE_PREFIX = 'zhixi.asset.'
 
 export type MediaAssetKind = 'image' | 'video' | 'audio'
 
@@ -51,6 +52,14 @@ export function guessMimeType(name: string, fallback = 'application/octet-stream
 }
 
 export async function writeFileAsset(file: File): Promise<AssetMeta> {
+  if (!isDesktopRuntime()) {
+    return writeBrowserAsset({
+      name: file.name,
+      mimeType: file.type || guessMimeType(file.name),
+      bytes: new Uint8Array(await file.arrayBuffer()),
+    })
+  }
+
   return storageClient.writeAsset({
     name: file.name,
     mimeType: file.type || guessMimeType(file.name),
@@ -80,7 +89,7 @@ export async function selectAndImportAsset(kind: MediaAssetKind): Promise<AssetM
     return null
   }
 
-  return storageClient.writeAsset({
+  return writeBrowserAsset({
     name: file.name,
     mimeType: file.file?.type || guessMimeType(file.name),
     bytes: file.contents,
@@ -92,14 +101,27 @@ export function writeAssetBytes(input: {
   mimeType: string
   bytes: Uint8Array
 }) {
+  if (!isDesktopRuntime()) {
+    return writeBrowserAsset(input)
+  }
+
   return storageClient.writeAsset(input)
 }
 
 export function readAsset(assetId: string) {
+  if (!isDesktopRuntime()) {
+    return readBrowserAsset(assetId)
+  }
+
   return storageClient.readAsset(assetId)
 }
 
 export async function getAssetUrl(assetId: string): Promise<string> {
+  if (!isDesktopRuntime()) {
+    const asset = readBrowserAssetRecord(assetId)
+    return `data:${asset.mimeType};base64,${asset.base64}`
+  }
+
   return convertFileSrc(await storageClient.getAssetFilePath(assetId))
 }
 
@@ -124,4 +146,73 @@ export function importPagePackageFromPath(
   onProgress?: WorkspaceArchiveProgressHandler,
 ) {
   return storageClient.importPagePackageFromPath(path, onProgress)
+}
+
+interface BrowserAssetRecord {
+  name: string
+  mimeType: string
+  base64: string
+  createdAt: string
+}
+
+async function writeBrowserAsset(input: {
+  name: string
+  mimeType: string
+  bytes: Uint8Array
+}): Promise<AssetMeta> {
+  const id = createBrowserAssetId()
+  const createdAt = new Date().toISOString()
+  const record: BrowserAssetRecord = {
+    name: input.name,
+    mimeType: input.mimeType,
+    base64: bytesToBase64(input.bytes),
+    createdAt,
+  }
+
+  window.localStorage.setItem(`${BROWSER_ASSET_STORAGE_PREFIX}${id}`, JSON.stringify(record))
+
+  return {
+    id,
+    sha256: id,
+    name: input.name,
+    mimeType: input.mimeType,
+    byteSize: input.bytes.byteLength,
+    relativePath: id,
+    createdAt,
+  }
+}
+
+async function readBrowserAsset(assetId: string) {
+  return base64ToBytes(readBrowserAssetRecord(assetId).base64)
+}
+
+function readBrowserAssetRecord(assetId: string): BrowserAssetRecord {
+  const value = window.localStorage.getItem(`${BROWSER_ASSET_STORAGE_PREFIX}${assetId}`)
+
+  if (!value) {
+    throw new Error(`Missing browser asset: ${assetId}`)
+  }
+
+  return JSON.parse(value) as BrowserAssetRecord
+}
+
+function createBrowserAssetId() {
+  return `asset_${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}_${Math.random().toString(36).slice(2)}`}`
+}
+
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = ''
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte)
+  }
+  return btoa(binary)
+}
+
+function base64ToBytes(base64: string) {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  return bytes
 }

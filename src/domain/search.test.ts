@@ -174,6 +174,82 @@ describe('searchPages', () => {
     expect(searchPages(pages, '   ')).toEqual([])
   })
 
+  it('returns multiple matches from the same page when different blocks match the query', () => {
+    const multiMatchPages: PageRecord[] = [
+      {
+        id: 'page-multi',
+        parentId: null,
+        title: 'Meeting Notes',
+        icon: null,
+        cover: null,
+        blocks: [
+          { id: 'block-1', type: 'paragraph', text: 'customer interview summary' },
+          { id: 'block-2', type: 'paragraph', text: 'customer follow-up checklist' },
+        ],
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]
+
+    expect(searchPages(multiMatchPages, 'customer')).toMatchObject([
+      {
+        pageId: 'page-multi',
+        excerpt: 'customer interview summary',
+      },
+      {
+        pageId: 'page-multi',
+        excerpt: 'customer follow-up checklist',
+      },
+    ])
+  })
+
+  it('matches media file names more robustly across punctuation boundaries', () => {
+    const mediaPages: PageRecord[] = [
+      {
+        id: 'page-media',
+        parentId: null,
+        title: 'Media Notes',
+        icon: null,
+        cover: null,
+        blocks: [
+          {
+            id: 'block-image',
+            type: 'image',
+            assetId: 'asset-image',
+            name: 'Capture001.png',
+            mimeType: 'image/png',
+            caption: '',
+            alt: '',
+          },
+          {
+            id: 'block-audio',
+            type: 'audio',
+            assetId: 'asset-audio',
+            name: '20分.mp3',
+            mimeType: 'audio/mpeg',
+            caption: '',
+          },
+        ],
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]
+
+    expect(searchPages(mediaPages, 'capture001 png')).toMatchObject([
+      {
+        pageId: 'page-media',
+        excerpt: 'Capture001.png',
+      },
+    ])
+
+    expect(searchPages(mediaPages, '20分 mp3')).toMatchObject([
+      {
+        pageId: 'page-media',
+        excerpt: '20分.mp3',
+      },
+    ])
+  })
+
   it('returns referenced whiteboards and excludes orphan boards', () => {
     expect(searchBoards(boardPages, boards, 'feedback')).toMatchObject([
       {

@@ -1,4 +1,5 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { MediaBlock } from './MediaBlock'
 
@@ -8,6 +9,64 @@ vi.mock('../../../lib/assets', () => ({
 }))
 
 describe('MediaBlock', () => {
+  it('renders readable Chinese labels for image, video, and audio blocks', () => {
+    const { rerender } = render(
+      <MediaBlock
+        block={{
+          id: 'image-1',
+          type: 'image',
+          assetId: null,
+          name: '',
+          mimeType: '',
+          caption: '',
+          alt: '',
+        }}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('图片')).toBeInTheDocument()
+    expect(screen.getByText('上传图片')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('添加说明')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('替代文本')).toBeInTheDocument()
+
+    rerender(
+      <MediaBlock
+        block={{
+          id: 'video-1',
+          type: 'video',
+          assetId: null,
+          name: '',
+          mimeType: '',
+          caption: '',
+        }}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('视频')).toBeInTheDocument()
+    expect(screen.getByText('上传视频')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('添加说明')).toBeInTheDocument()
+
+    rerender(
+      <MediaBlock
+        block={{
+          id: 'audio-1',
+          type: 'audio',
+          assetId: null,
+          name: '',
+          mimeType: '',
+          caption: '',
+        }}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('音频')).toBeInTheDocument()
+    expect(screen.getByText('上传音频')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('添加说明')).toBeInTheDocument()
+  })
+
   it('does not put the image element class on the outer figure', () => {
     const { container } = render(
       <MediaBlock
@@ -53,6 +112,196 @@ describe('MediaBlock', () => {
     expect(surface).toBeInTheDocument()
     expect(surface).toContainElement(image)
     expect(image).toHaveClass('media-block-image')
+  })
+
+  it('opens an enlarged preview when clicking an uploaded image and closes it on Escape', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <MediaBlock
+        block={{
+          id: 'image-1',
+          type: 'image',
+          assetId: 'asset-image',
+          name: 'garden.png',
+          mimeType: 'image/png',
+          caption: '',
+          alt: 'Garden',
+        }}
+        onChange={vi.fn()}
+      />,
+    )
+
+    const image = await screen.findByRole('img', { name: 'Garden' })
+    await user.click(image)
+
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('img', { name: 'Garden' })).toBeInTheDocument()
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+  })
+
+  it('locks background scrolling and zooms the previewed image on wheel', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <MediaBlock
+        block={{
+          id: 'image-1',
+          type: 'image',
+          assetId: 'asset-image',
+          name: 'garden.png',
+          mimeType: 'image/png',
+          caption: '',
+          alt: 'Garden',
+        }}
+        onChange={vi.fn()}
+      />,
+    )
+
+    await user.click(await screen.findByRole('img', { name: 'Garden' }))
+
+    const dialog = await screen.findByRole('dialog')
+    const previewImage = within(dialog).getByRole('img', { name: 'Garden' })
+    const previewBody = previewImage.closest('.media-block-image-preview-body')
+
+    expect(document.body.style.overflow).toBe('hidden')
+    expect(previewImage).toHaveStyle({ transform: 'scale(1)' })
+
+    fireEvent.wheel(previewBody!, { deltaY: -120 })
+
+    expect(previewImage).toHaveStyle({ transform: 'scale(1.1)' })
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    await waitFor(() => {
+      expect(document.body.style.overflow).toBe('')
+    })
+  })
+
+  it('zooms toward the pointer position and lets the enlarged preview image be dragged', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <MediaBlock
+        block={{
+          id: 'image-1',
+          type: 'image',
+          assetId: 'asset-image',
+          name: 'garden.png',
+          mimeType: 'image/png',
+          caption: '',
+          alt: 'Garden',
+        }}
+        onChange={vi.fn()}
+      />,
+    )
+
+    await user.click(await screen.findByRole('img', { name: 'Garden' }))
+
+    const dialog = await screen.findByRole('dialog')
+    const previewImage = within(dialog).getByRole('img', { name: 'Garden' })
+    const previewBody = previewImage.closest('.media-block-image-preview-body')
+
+    expect(previewBody).toBeInTheDocument()
+    expect(within(dialog).getByText('100%')).toBeInTheDocument()
+
+    Object.defineProperty(previewBody!, 'clientWidth', {
+      configurable: true,
+      value: 200,
+    })
+    Object.defineProperty(previewBody!, 'clientHeight', {
+      configurable: true,
+      value: 100,
+    })
+    Object.defineProperty(previewImage, 'offsetWidth', {
+      configurable: true,
+      value: 200,
+    })
+    Object.defineProperty(previewImage, 'offsetHeight', {
+      configurable: true,
+      value: 100,
+    })
+
+    vi.spyOn(previewBody!, 'getBoundingClientRect').mockReturnValue({
+      x: 100,
+      y: 50,
+      left: 100,
+      top: 50,
+      right: 300,
+      bottom: 150,
+      width: 200,
+      height: 100,
+      toJSON: () => ({}),
+    })
+
+    const imageRectSpy = vi.spyOn(previewImage, 'getBoundingClientRect')
+    let imageRectCallCount = 0
+    imageRectSpy.mockImplementation(() => {
+      imageRectCallCount += 1
+
+      if (imageRectCallCount === 1) {
+        return {
+          x: 100,
+          y: 50,
+          left: 100,
+          top: 50,
+          right: 300,
+          bottom: 150,
+          width: 200,
+          height: 100,
+          toJSON: () => ({}),
+        }
+      }
+
+      return {
+        x: 87,
+        y: 46,
+        left: 87,
+        top: 46,
+        right: 307,
+        bottom: 156,
+        width: 220,
+        height: 110,
+        toJSON: () => ({}),
+      }
+    })
+
+    fireEvent.wheel(previewBody!, { deltaY: -120, clientX: 250, clientY: 100 })
+
+    expect(previewImage).toHaveStyle({
+      transformOrigin: '150px 50px',
+      transform: 'scale(1.1)',
+    })
+    expect(within(dialog).getByText('110%')).toBeInTheDocument()
+
+    fireEvent.wheel(previewBody!, { deltaY: -120, clientX: 250, clientY: 100 })
+
+    expect(previewImage).toHaveStyle({
+      transformOrigin: '150px 50px',
+      transform: 'scale(1.2)',
+    })
+    expect(within(dialog).getByText('120%')).toBeInTheDocument()
+
+    fireEvent.mouseDown(previewBody!, { button: 0, clientX: 120, clientY: 90 })
+    fireEvent.mouseMove(window, { clientX: 150, clientY: 115 })
+    fireEvent.mouseUp(window)
+
+    expect(previewImage).toHaveStyle({
+      transform: 'translate(30px, 25px) scale(1.2)',
+    })
+
+    fireEvent.doubleClick(previewBody!)
+
+    expect(previewImage).toHaveStyle({
+      transformOrigin: '0px 0px',
+      transform: 'scale(1)',
+    })
+    expect(within(dialog).getByText('100%')).toBeInTheDocument()
   })
 
   it('renders audio as a framed card instead of a bare control', async () => {

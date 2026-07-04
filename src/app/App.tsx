@@ -11,7 +11,7 @@ import {
   useParams,
 } from 'react-router-dom'
 import { BlockEditor } from '../components/editor/BlockEditor'
-import { PageHeader } from '../components/editor/PageHeader'
+import { PageHeader, PageHeaderToolbar } from '../components/editor/PageHeader'
 import { PageOutline } from '../components/editor/PageOutline'
 import { MindmapFrame } from '../components/mindmap/MindmapFrame'
 import { MindmapPage } from '../components/mindmap/MindmapPage'
@@ -39,6 +39,7 @@ import type {
   PageFontFamily,
   PageRecord,
   SaveStatus,
+  WorkspaceSettings,
 } from '../domain/types'
 import {
   createStorageWorkspaceRepository,
@@ -60,10 +61,7 @@ import {
   saveBinaryFile,
   saveTextFile,
 } from '../lib/fileAccess'
-import {
-  searchWorkspace,
-  type WorkspaceArchiveProgress,
-} from '../lib/storageClient'
+import { type WorkspaceArchiveProgress } from '../lib/storageClient'
 import { createWorkspaceStore } from '../store/createWorkspaceStore'
 import { uiCopy } from '../ui/copy'
 import { sanitizeFileNameSegment } from '../utils/fileName'
@@ -135,10 +133,27 @@ interface AppProps {
   initialEntries?: string[]
 }
 
+const repositoryStoreCache = new WeakMap<WorkspaceRepository, WorkspaceStore>()
+let defaultWorkspaceStore: WorkspaceStore | null = null
+
+function createAppStore(repository?: WorkspaceRepository) {
+  if (repository) {
+    const cachedStore = repositoryStoreCache.get(repository)
+    if (cachedStore) {
+      return cachedStore
+    }
+
+    const store = createWorkspaceStore(repository)
+    repositoryStoreCache.set(repository, store)
+    return store
+  }
+
+  defaultWorkspaceStore ??= createWorkspaceStore(createStorageWorkspaceRepository())
+  return defaultWorkspaceStore
+}
+
 export function App({ repository, store: injectedStore, initialEntries }: AppProps = {}) {
-  const [store] = useState(
-    () => injectedStore ?? createWorkspaceStore(repository ?? createStorageWorkspaceRepository()),
-  )
+  const [store] = useState(() => injectedStore ?? createAppStore(repository))
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState)
   const [isBootstrapped, setIsBootstrapped] = useState(false)
   const [bootstrapError, setBootstrapError] = useState<unknown>(null)
@@ -306,10 +321,15 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       mindmaps={state.mindmaps}
       pages={state.pages}
       currentPageId={state.currentPageId}
+      sidebarLayout={state.settings.sidebarLayout ?? 'compact'}
+      sidebarWidth={state.settings.sidebarWidth ?? 272}
       archiveTask={archiveTask}
       onCreatePage={() => store.getState().createPage()}
+      onSetSidebarLayout={(layout) => store.getState().setSidebarLayout(layout)}
+      onSetSidebarWidth={(width) => store.getState().setSidebarWidth(width)}
       onRoutePageChange={setCurrentPage}
       onRenamePage={(pageId, title) => store.getState().renamePage(pageId, title)}
+      onDuplicatePage={(pageId) => store.getState().duplicatePage(pageId)}
       onDeletePage={(pageId) => store.getState().deletePage(pageId)}
       onRenameBoard={(boardId, title) => store.getState().renameBoard(boardId, title)}
       onUpdateBoardSnapshot={(boardId, snapshot) =>
@@ -508,10 +528,15 @@ interface AppRoutesProps {
   mindmaps: MindmapRecord[]
   pages: AppState['pages']
   currentPageId: AppState['currentPageId']
+  sidebarLayout: NonNullable<WorkspaceSettings['sidebarLayout']>
+  sidebarWidth: number
   archiveTask: ArchiveTaskStatus | null
   onCreatePage: () => Promise<PageRecord>
+  onSetSidebarLayout: (layout: NonNullable<WorkspaceSettings['sidebarLayout']>) => Promise<void>
+  onSetSidebarWidth: (width: number) => Promise<void>
   onRoutePageChange: (pageId: string) => Promise<void>
   onRenamePage: (pageId: string, title: string) => Promise<void>
+  onDuplicatePage: (pageId: string) => Promise<PageRecord | null>
   onDeletePage: (pageId: string) => Promise<void>
   onRenameBoard: (boardId: string, title: string) => Promise<void>
   onUpdateBoardSnapshot: (boardId: string, snapshot: unknown) => Promise<void>
@@ -578,10 +603,15 @@ function AppRoutes({
   mindmaps,
   pages,
   currentPageId,
+  sidebarLayout,
+  sidebarWidth,
   archiveTask,
   onCreatePage,
+  onSetSidebarLayout,
+  onSetSidebarWidth,
   onRoutePageChange,
   onRenamePage,
+  onDuplicatePage,
   onDeletePage,
   onRenameBoard,
   onUpdateBoardSnapshot,
@@ -638,6 +668,22 @@ function AppRoutes({
     setPendingDeletePageId(pageId)
   }
 
+  async function handleDuplicatePage(pageId: string) {
+    const duplicatedPage = await onDuplicatePage(pageId)
+
+    if (duplicatedPage) {
+      navigate(`/pages/${duplicatedPage.id}`)
+    }
+  }
+
+  async function handleImportArchiveFromSidebar() {
+    const nextPageId = await onImportArchive()
+
+    if (nextPageId) {
+      navigate(`/pages/${nextPageId}`)
+    }
+  }
+
   async function handleConfirmDeletePage() {
     if (!pendingDeletePageId) {
       return
@@ -683,16 +729,37 @@ function AppRoutes({
   return (
     <AppShell
       hideSidebar={isWhiteboardRoute || isMindmapRoute}
+      sidebarClassName={sidebarLayout === 'compact' ? 'sidebar sidebar-compact' : 'sidebar'}
+      sidebarWidth={sidebarWidth}
+      onSidebarWidthChange={(width) => {
+        void onSetSidebarWidth(width)
+      }}
       sidebar={
         <SidebarTree
           pages={pages}
           boards={boards}
           dataTables={dataTables}
           currentPageId={currentPageId}
+          layout={sidebarLayout}
           onCreatePage={() => {
             void handleCreatePage()
           }}
           onSearch={() => setIsSearchOpen(true)}
+          onImportArchive={() => {
+            void handleImportArchiveFromSidebar()
+          }}
+          onSetSidebarLayout={(layout) => {
+            void onSetSidebarLayout(layout)
+          }}
+          onRenamePage={(pageId, title) => {
+            void onRenamePage(pageId, title)
+          }}
+          onDuplicatePage={(pageId) => {
+            void handleDuplicatePage(pageId)
+          }}
+          onDeletePage={(pageId) => {
+            handleRequestDeletePage(pageId)
+          }}
           onReorderPage={(activePageId, overPageId) => {
             void onReorderPage(activePageId, overPageId)
           }}
@@ -704,7 +771,6 @@ function AppRoutes({
         pages={pages}
         boards={boards}
         dataTables={dataTables}
-        onSearch={searchWorkspace}
         onClose={() => setIsSearchOpen(false)}
         onOpenPage={(pageId) => navigate(`/pages/${pageId}`)}
         onOpenBoard={(pageId, boardId) => navigate(`/pages/${pageId}/boards/${boardId}`)}
@@ -965,6 +1031,7 @@ function PageRoute({
   const navigate = useNavigate()
   const page = pages.find((item) => item.id === pageId)
   const outlineVisible = page?.showOutline !== false
+  const [topbarScrolled, setTopbarScrolled] = useState(false)
 
   useEffect(() => {
     if (!page || currentPageId === page.id) {
@@ -973,6 +1040,20 @@ function PageRoute({
 
     void onRoutePageChange(page.id)
   }, [currentPageId, onRoutePageChange, page])
+
+  useEffect(() => {
+    const updateTopbarScrolled = () => {
+      const nextScrolled = window.scrollY > 2
+      setTopbarScrolled((current) => (current === nextScrolled ? current : nextScrolled))
+    }
+
+    updateTopbarScrolled()
+    window.addEventListener('scroll', updateTopbarScrolled, { passive: true })
+
+    return () => {
+      window.removeEventListener('scroll', updateTopbarScrolled)
+    }
+  }, [page?.id])
 
   if (!page) {
     return <div className="page-empty">{uiCopy.app.pageNotFound}</div>
@@ -987,19 +1068,73 @@ function PageRoute({
     .filter(Boolean)
     .join(' ')
   const breadcrumbs = buildPageBreadcrumbs(pages, page)
+  const headerActions = (
+    <ExportImportPanel
+      status={saveStatus}
+      adaptiveWidth={page.isFullWidth === true}
+      smallText={page.isSmallText === true}
+      fontFamily={page.fontFamily ?? 'default'}
+      outlineVisible={outlineVisible}
+      archiveTask={archiveTask}
+      onToggleAdaptiveWidth={(value) => {
+        void onTogglePageFullWidth(page.id, value)
+      }}
+      onToggleSmallText={(value) => {
+        void onTogglePageSmallText(page.id, value)
+      }}
+      onToggleFontFamily={(value) => {
+        void onTogglePageFontFamily(page.id, value)
+      }}
+      onToggleOutlineVisible={(value) => {
+        void onTogglePageOutlineVisible(page.id, value)
+      }}
+      onExportArchive={() => void onExportArchive()}
+      onImportArchive={async () => {
+        const nextPageId = await onImportArchive()
+        navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
+      }}
+      onCleanupOrphanBoards={() => void onCleanupOrphanBoards()}
+      onCleanupOrphanDataTables={() => void onCleanupOrphanDataTables()}
+      onDeletePage={() => void onDeletePage(page.id)}
+    />
+  )
 
   return (
     <div
       className={
-        outlineVisible ? 'page-with-outline' : 'page-with-outline page-with-outline-hidden'
+        outlineVisible
+          ? 'page-with-outline page-with-outline-has-outline'
+          : 'page-with-outline page-with-outline-hidden'
       }
     >
-      {breadcrumbs.length > 1 ? (
-        <PageBreadcrumbs items={breadcrumbs} className={pageContentClassName} />
+      <div className={topbarScrolled ? 'page-route-topbar page-route-topbar-scrolled' : 'page-route-topbar'}>
+        {breadcrumbs.length > 1 ? (
+          <PageBreadcrumbs items={breadcrumbs} />
+        ) : (
+          <div className="page-route-topbar-spacer" aria-hidden="true" />
+        )}
+        <PageHeaderToolbar
+          page={page}
+          onChangeIcon={(icon) => {
+            void onChangePageIcon(page.id, icon)
+          }}
+          onChangeCover={(cover) => {
+            void onChangePageCover(page.id, cover)
+          }}
+          actions={headerActions}
+        />
+      </div>
+      {page.cover ? (
+        <div
+          className={`page-cover page-cover-${page.cover} page-route-cover`}
+          aria-hidden="true"
+        />
       ) : null}
       <PageHeader
         page={page}
         bodyClassName={pageContentClassName}
+        showTopRow={false}
+        showCover={false}
         onRename={(title) => {
           void onRenamePage(page.id, title)
         }}
@@ -1009,101 +1144,78 @@ function PageRoute({
         onChangeCover={(cover) => {
           void onChangePageCover(page.id, cover)
         }}
-        actions={
-          <ExportImportPanel
-            status={saveStatus}
-            adaptiveWidth={page.isFullWidth === true}
-            smallText={page.isSmallText === true}
-            fontFamily={page.fontFamily ?? 'default'}
-            outlineVisible={outlineVisible}
-            archiveTask={archiveTask}
-            onToggleAdaptiveWidth={(value) => {
-              void onTogglePageFullWidth(page.id, value)
-            }}
-            onToggleSmallText={(value) => {
-              void onTogglePageSmallText(page.id, value)
-            }}
-            onToggleFontFamily={(value) => {
-              void onTogglePageFontFamily(page.id, value)
-            }}
-            onToggleOutlineVisible={(value) => {
-              void onTogglePageOutlineVisible(page.id, value)
-            }}
-            onExportArchive={() => void onExportArchive()}
-            onImportArchive={async () => {
-              const nextPageId = await onImportArchive()
-              navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
-            }}
-            onCleanupOrphanBoards={() => void onCleanupOrphanBoards()}
-            onCleanupOrphanDataTables={() => void onCleanupOrphanDataTables()}
-            onDeletePage={() => void onDeletePage(page.id)}
-          />
-        }
+        actions={headerActions}
       />
-      <div className={pageContentClassName}>
-        <BlockEditor
-          page={page}
-          allPages={pages}
-          boards={boards}
-          dataTables={dataTables}
-          mindmaps={mindmaps}
-          onUpdateBlock={(blockId, nextBlock) => {
-            void onUpdateBlock(page.id, blockId, nextBlock)
-          }}
-          onInsert={(type) => {
-            return onInsertBlock(page.id, type)
-          }}
-          onInsertParagraph={(text) => {
-            void onInsertParagraphBlock(page.id, text)
-          }}
-          onInsertBlockAfter={(blockId, type) => onInsertBlockAfter(page.id, blockId, type)}
-          onReorderBlock={(activeBlockId, overBlockId, position) => {
-            void onReorderBlock(page.id, activeBlockId, overBlockId, position)
-          }}
-          onDeleteBlock={(blockId) => {
-            void onDeleteBlock(page.id, blockId)
-          }}
-          onMergeBlockWithPrevious={(blockId) => onMergeBlockWithPrevious(page.id, blockId)}
-          onDuplicateBlock={(blockId) => {
-            void onDuplicateBlock(page.id, blockId)
-          }}
-          onTurnInto={(blockId, type) => onTurnBlockInto(page.id, blockId, type)}
-          onOpenChildPage={(childPageId) => {
-            navigate(`/pages/${childPageId}`)
-          }}
-          onOpenWhiteboard={(boardId) => {
-            navigate(`/pages/${page.id}/boards/${boardId}`)
-          }}
-          onRestoreWhiteboard={async (boardId) => {
-            const board = await onRestoreMissingBoard(page.id, boardId)
-            if (board) {
-              navigate(`/pages/${page.id}/boards/${board.id}`)
-            }
-          }}
-          onOpenDataTable={(databaseId) => {
-            navigate(`/pages/${page.id}/data-tables/${databaseId}`)
-          }}
-          onUpdateDataTableSnapshot={(databaseId, snapshot) => {
-            void onUpdateDataTableSnapshot(databaseId, snapshot)
-          }}
-          onRestoreDataTable={async (databaseId) => {
-            const dataTable = await onRestoreMissingDataTable(page.id, databaseId)
-            if (dataTable) {
-              navigate(`/pages/${page.id}/data-tables/${dataTable.id}`)
-            }
-          }}
-          onOpenMindmap={(mindmapId) => {
-            navigate(`/pages/${page.id}/mindmaps/${mindmapId}`)
-          }}
-          onRestoreMindmap={async (mindmapId) => {
-            const mindmap = await onRestoreMissingMindmap(page.id, mindmapId)
-            if (mindmap) {
-              navigate(`/pages/${page.id}/mindmaps/${mindmap.id}`)
-            }
-          }}
-        />
+      <div
+        className={
+          outlineVisible ? 'page-body-with-outline page-body-with-outline-has-outline' : 'page-body-with-outline'
+        }
+      >
+        {outlineVisible ? <PageOutline blocks={page.blocks} /> : null}
+        <div className={pageContentClassName}>
+          <BlockEditor
+            page={page}
+            allPages={pages}
+            boards={boards}
+            dataTables={dataTables}
+            mindmaps={mindmaps}
+            onUpdateBlock={(blockId, nextBlock) => {
+              void onUpdateBlock(page.id, blockId, nextBlock)
+            }}
+            onInsert={(type) => {
+              return onInsertBlock(page.id, type)
+            }}
+            onInsertParagraph={(text) => {
+              void onInsertParagraphBlock(page.id, text)
+            }}
+            onInsertBlockAfter={(blockId, type) => onInsertBlockAfter(page.id, blockId, type)}
+            onReorderBlock={(activeBlockId, overBlockId, position) => {
+              void onReorderBlock(page.id, activeBlockId, overBlockId, position)
+            }}
+            onDeleteBlock={(blockId) => {
+              void onDeleteBlock(page.id, blockId)
+            }}
+            onMergeBlockWithPrevious={(blockId) => onMergeBlockWithPrevious(page.id, blockId)}
+            onDuplicateBlock={(blockId) => {
+              void onDuplicateBlock(page.id, blockId)
+            }}
+            onTurnInto={(blockId, type) => onTurnBlockInto(page.id, blockId, type)}
+            onOpenChildPage={(childPageId) => {
+              navigate(`/pages/${childPageId}`)
+            }}
+            onOpenWhiteboard={(boardId) => {
+              navigate(`/pages/${page.id}/boards/${boardId}`)
+            }}
+            onRestoreWhiteboard={async (boardId) => {
+              const board = await onRestoreMissingBoard(page.id, boardId)
+              if (board) {
+                navigate(`/pages/${page.id}/boards/${board.id}`)
+              }
+            }}
+            onOpenDataTable={(databaseId) => {
+              navigate(`/pages/${page.id}/data-tables/${databaseId}`)
+            }}
+            onUpdateDataTableSnapshot={(databaseId, snapshot) => {
+              void onUpdateDataTableSnapshot(databaseId, snapshot)
+            }}
+            onRestoreDataTable={async (databaseId) => {
+              const dataTable = await onRestoreMissingDataTable(page.id, databaseId)
+              if (dataTable) {
+                navigate(`/pages/${page.id}/data-tables/${dataTable.id}`)
+              }
+            }}
+            onOpenMindmap={(mindmapId) => {
+              navigate(`/pages/${page.id}/mindmaps/${mindmapId}`)
+            }}
+            onRestoreMindmap={async (mindmapId) => {
+              const mindmap = await onRestoreMissingMindmap(page.id, mindmapId)
+              if (mindmap) {
+                navigate(`/pages/${page.id}/mindmaps/${mindmap.id}`)
+              }
+            }}
+          />
+        </div>
       </div>
-      {outlineVisible ? <PageOutline blocks={page.blocks} /> : null}
     </div>
   )
 }

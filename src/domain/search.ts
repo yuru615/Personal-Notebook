@@ -22,26 +22,34 @@ export function searchPages(pages: PageRecord[], query: string): SearchResult[] 
   const results: SearchResult[] = []
 
   for (const page of pages) {
+    const matchedExcerpts = new Set<string>()
     const entries = [
-      page.title,
-      ...page.blocks.map((block) => getBlockSearchText(block, pageTitleById)),
-    ].filter(Boolean)
+      createSearchEntry(page.title),
+      ...page.blocks.map((block) => getBlockSearchEntry(block, pageTitleById)),
+    ]
 
-    const matchedEntry = entries.find((entry) =>
-      normalizeSearchText(entry).includes(normalizedQuery),
-    )
+    for (const entry of entries) {
+      if (!entry) {
+        continue
+      }
 
-    if (!matchedEntry) {
-      continue
+      if (!normalizeSearchText(entry.searchText).includes(normalizedQuery)) {
+        continue
+      }
+
+      if (matchedExcerpts.has(entry.excerpt)) {
+        continue
+      }
+
+      matchedExcerpts.add(entry.excerpt)
+      results.push({
+        kind: 'page',
+        pageId: page.id,
+        title: page.title,
+        icon: page.icon,
+        excerpt: entry.excerpt,
+      })
     }
-
-    results.push({
-      kind: 'page',
-      pageId: page.id,
-      title: page.title,
-      icon: page.icon,
-      excerpt: matchedEntry,
-    })
   }
 
   return results
@@ -160,7 +168,10 @@ function normalizeSearchText(value: string) {
   return value.trim().toLocaleLowerCase()
 }
 
-function getBlockSearchText(block: BlockRecord, pageTitleById: Map<string, string>): string {
+function getBlockSearchEntry(
+  block: BlockRecord,
+  pageTitleById: Map<string, string>,
+): { excerpt: string; searchText: string } | null {
   switch (block.type) {
     case 'paragraph':
     case 'heading_1':
@@ -168,26 +179,80 @@ function getBlockSearchText(block: BlockRecord, pageTitleById: Map<string, strin
     case 'heading_3':
     case 'todo':
     case 'code':
-      return block.text.trim()
+      return createSearchEntry(block.text)
     case 'bulleted_list':
     case 'numbered_list':
-      return block.items.join(' ').trim()
+      return createSearchEntry(block.items.join(' '))
     case 'table':
-      return block.rows.flat().join(' ').trim()
+      return createSearchEntry(block.rows.flat().join(' '))
     case 'image':
-      return [block.name, block.caption, block.alt].join(' ').trim()
+      return createMediaSearchEntry([block.name, block.caption, block.alt])
     case 'video':
     case 'audio':
-      return [block.name, block.caption].join(' ').trim()
+      return createMediaSearchEntry([block.name, block.caption])
     case 'child_page':
-      return pageTitleById.get(block.pageId)?.trim() ?? ''
+      return createSearchEntry(pageTitleById.get(block.pageId) ?? '')
     case 'whiteboard':
-      return '\u767d\u677f'
+      return createSearchEntry('\u767d\u677f')
     case 'data_table':
-      return '\u6570\u636e\u8868\u683c'
+      return createSearchEntry('\u6570\u636e\u8868\u683c')
     case 'mindmap':
-      return '\u5bfc\u56fe'
+      return createSearchEntry('\u5bfc\u56fe')
   }
+}
+
+function createMediaSearchEntry(parts: string[]) {
+  const trimmedParts = parts.map((part) => part.trim()).filter(Boolean)
+  const excerpt = trimmedParts[0] ?? ''
+
+  if (!excerpt) {
+    return null
+  }
+
+  return {
+    excerpt,
+    searchText: buildSearchText([
+      ...trimmedParts,
+      ...buildFileNameSearchAliases(trimmedParts[0] ?? ''),
+    ]),
+  }
+}
+
+function createSearchEntry(text: string) {
+  const excerpt = text.trim()
+
+  if (!excerpt) {
+    return null
+  }
+
+  return {
+    excerpt,
+    searchText: excerpt,
+  }
+}
+
+function buildSearchText(parts: string[]) {
+  return Array.from(new Set(parts.map((part) => part.trim()).filter(Boolean))).join(' ')
+}
+
+function buildFileNameSearchAliases(value: string) {
+  const normalizedValue = value.trim()
+
+  if (!normalizedValue) {
+    return []
+  }
+
+  const stem = normalizedValue.replace(/\.[^.]+$/u, '').trim()
+  const punctuationNormalized = normalizedValue.replace(/[._-]+/gu, ' ').replace(/\s+/gu, ' ').trim()
+  const stemNormalized = stem.replace(/[._-]+/gu, ' ').replace(/\s+/gu, ' ').trim()
+
+  return Array.from(
+    new Set(
+      [punctuationNormalized, stem, stemNormalized].filter(
+        (entry) => entry && entry !== normalizedValue,
+      ),
+    ),
+  )
 }
 
 function getDataTableRecords(snapshot: unknown): Array<{ id: string; title: string }> {

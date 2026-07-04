@@ -68,7 +68,78 @@ function createWorkspace(): WorkspaceSnapshot {
   }
 }
 
+function createWorkspaceWithLinkedAssets(): WorkspaceSnapshot {
+  const workspace = createWorkspace()
+  const now = '2026-06-22T00:00:00.000Z'
+  workspace.boards = [
+    { id: 'board_1', title: 'Board 1', snapshot: {}, createdAt: now, updatedAt: now },
+  ]
+  workspace.dataTables = [
+    {
+      id: 'database_1',
+      title: 'Database 1',
+      snapshot: { version: 1 },
+      createdAt: now,
+      updatedAt: now,
+    },
+  ]
+  workspace.mindmaps = [
+    { id: 'mindmap_1', title: 'Mindmap 1', snapshot: {}, createdAt: now, updatedAt: now },
+  ]
+  workspace.pages[0].blocks = [
+    { id: 'block_board', type: 'whiteboard', boardId: 'board_1' },
+    { id: 'block_database', type: 'data_table', databaseId: 'database_1' },
+    { id: 'block_mindmap', type: 'mindmap', mindmapId: 'mindmap_1' },
+  ]
+  return workspace
+}
+
 describe('createWorkspaceStore data tables', () => {
+  it('preserves linked resources when saving page-only changes', async () => {
+    const counted = createCountingRepository(createWorkspaceWithLinkedAssets())
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+    await store.getState().setPageIcon('page_1', '🧠')
+
+    expect(counted.getSnapshot()).toMatchObject({
+      boards: [{ id: 'board_1' }],
+      dataTables: [{ id: 'database_1' }],
+      mindmaps: [{ id: 'mindmap_1' }],
+      pages: [{ id: 'page_1', icon: '🧠' }],
+    })
+  })
+
+  it('defaults the sidebar settings and persists layout and width changes', async () => {
+    const workspace = createWorkspace()
+    const counted = createCountingRepository({
+      ...workspace,
+      settings: {
+        lastOpenedPageId: 'page_1',
+      },
+    })
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+
+    expect(store.getState().settings.sidebarLayout).toBe('compact')
+    expect(store.getState().settings.sidebarWidth).toBe(272)
+    expect(counted.getReplaceCalls()).toBe(1)
+
+    await store.getState().setSidebarLayout('classic')
+    await store.getState().setSidebarWidth(320)
+
+    expect(store.getState().settings).toMatchObject({
+      sidebarLayout: 'classic',
+      sidebarWidth: 320,
+    })
+    expect(counted.getSnapshot()?.settings).toMatchObject({
+      lastOpenedPageId: 'page_1',
+      sidebarLayout: 'classic',
+      sidebarWidth: 320,
+    })
+  })
+
   it('deletes a page branch and moves the current page to the next available page', async () => {
     const workspace = createWorkspace()
     workspace.pages = [
@@ -100,6 +171,78 @@ describe('createWorkspaceStore data tables', () => {
     expect(store.getState().currentPageId).toBe('page_next')
     expect(store.getState().settings.lastOpenedPageId).toBe('page_next')
     expect(counted.getSnapshot()?.pages.map((page) => page.id)).toEqual(['page_next'])
+  })
+
+  it('duplicates a page branch and clones linked page resources', async () => {
+    const workspace = createWorkspace()
+    const now = '2026-06-22T00:00:00.000Z'
+    workspace.boards = [
+      { id: 'board_1', title: 'Board 1', snapshot: {}, createdAt: now, updatedAt: now },
+    ]
+    workspace.dataTables = [
+      {
+        id: 'database_1',
+        title: 'Database 1',
+        snapshot: { version: 1 },
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]
+    workspace.mindmaps = [
+      { id: 'mindmap_1', title: 'Mindmap 1', snapshot: {}, createdAt: now, updatedAt: now },
+    ]
+    workspace.pages = [
+      {
+        ...workspace.pages[0],
+        id: 'page_parent',
+        title: 'Parent',
+        blocks: [
+          { id: 'block_child_page', type: 'child_page', pageId: 'page_child' },
+          { id: 'block_board', type: 'whiteboard', boardId: 'board_1' },
+          { id: 'block_database', type: 'data_table', databaseId: 'database_1' },
+          { id: 'block_mindmap', type: 'mindmap', mindmapId: 'mindmap_1' },
+        ],
+      },
+      {
+        ...workspace.pages[0],
+        id: 'page_child',
+        parentId: 'page_parent',
+        title: 'Child',
+      },
+    ]
+    workspace.settings.lastOpenedPageId = 'page_parent'
+    const counted = createCountingRepository(workspace)
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+    const duplicatedRoot = await store.getState().duplicatePage('page_parent')
+    const state = store.getState()
+    const duplicatedChild = state.pages.find((page) => page.parentId === duplicatedRoot?.id)
+
+    expect(duplicatedRoot).toMatchObject({
+      title: 'Parent 副本',
+      parentId: null,
+    })
+    expect(duplicatedChild).toBeTruthy()
+    expect(state.pages).toHaveLength(4)
+    expect(state.boards).toHaveLength(2)
+    expect(state.dataTables).toHaveLength(2)
+    expect(state.mindmaps).toHaveLength(2)
+
+    const duplicatedBlocks = duplicatedRoot?.blocks ?? []
+    expect(duplicatedBlocks.find((block) => block.type === 'child_page')).toMatchObject({
+      pageId: duplicatedChild?.id,
+    })
+    expect(duplicatedBlocks.find((block) => block.type === 'whiteboard')).not.toMatchObject({
+      boardId: 'board_1',
+    })
+    expect(duplicatedBlocks.find((block) => block.type === 'data_table')).not.toMatchObject({
+      databaseId: 'database_1',
+    })
+    expect(duplicatedBlocks.find((block) => block.type === 'mindmap')).not.toMatchObject({
+      mindmapId: 'mindmap_1',
+    })
+    expect(counted.getSnapshot()?.pages).toHaveLength(4)
   })
 
   it('removes orphan page resources on page deletion and keeps resources referenced elsewhere', async () => {

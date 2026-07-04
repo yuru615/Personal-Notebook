@@ -491,6 +491,33 @@ describe('BlockEditor', () => {
     expect(screen.getByRole('button', { name: '打开白板 流程草图' })).toBeInTheDocument()
   })
 
+  it('renders child page blocks with the referenced page icon', () => {
+    const childPage = {
+      id: 'page_child',
+      title: '子页面',
+      parentId: 'page_a',
+      icon: '⭐',
+      cover: null,
+      createdAt: '',
+      updatedAt: '',
+      blocks: [],
+    }
+    const childPageHost = {
+      ...page,
+      blocks: [{ id: 'b5', type: 'child_page' as const, pageId: 'page_child' }],
+    }
+
+    const { container } = render(
+      <BlockEditor
+        page={childPageHost as never}
+        allPages={[childPageHost as never, childPage as never]}
+        onUpdateBlock={vi.fn()}
+      />,
+    )
+
+    expect(container.querySelector('.child-page-icon')).toHaveTextContent('⭐')
+  })
+
   it('renders a whiteboard card with its real updated label', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-18T12:30:00.000Z'))

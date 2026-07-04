@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { BlockRecord } from '../../domain/types'
 import { getBlockAnchorId } from './blockAnchors'
 
@@ -19,6 +19,7 @@ const headingLevel = {
 } as const
 
 export function PageOutline({ blocks }: PageOutlineProps) {
+  const panelRef = useRef<HTMLDivElement | null>(null)
   const items = useMemo(
     () =>
       blocks.flatMap((block): OutlineItem[] => {
@@ -49,6 +50,45 @@ export function PageOutline({ blocks }: PageOutlineProps) {
   const [activeId, setActiveId] = useState<string | null>(null)
   const currentActiveId =
     activeId && items.some((item) => item.id === activeId) ? activeId : (items[0]?.id ?? null)
+
+  useEffect(() => {
+    if (items.length === 0) {
+      return
+    }
+
+    function handleFocusIn(event: FocusEvent) {
+      const target = event.target
+
+      if (!(target instanceof Element)) {
+        return
+      }
+
+      const row = target.closest<HTMLElement>('.editor-row[data-block-id]')
+      const blockId = row?.dataset.blockId
+
+      if (blockId && items.some((item) => item.id === blockId)) {
+        setActiveId(blockId)
+      }
+    }
+
+    document.addEventListener('focusin', handleFocusIn)
+
+    return () => {
+      document.removeEventListener('focusin', handleFocusIn)
+    }
+  }, [items])
+
+  useEffect(() => {
+    if (!activeId) {
+      return
+    }
+
+    const activeItem = Array.from(
+      panelRef.current?.querySelectorAll<HTMLElement>('[data-page-outline-id]') ?? [],
+    ).find((element) => element.dataset.pageOutlineId === activeId)
+
+    activeItem?.scrollIntoView({ block: 'nearest' })
+  }, [activeId, items])
 
   useEffect(() => {
     if (items.length === 0 || !('IntersectionObserver' in window)) {
@@ -87,32 +127,35 @@ export function PageOutline({ blocks }: PageOutlineProps) {
 
   return (
     <aside className="page-outline" aria-label="当前页面目录">
-      <div className="page-outline-title">目录</div>
-      {items.length > 0 ? (
-        <nav className="page-outline-list">
-          {items.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={
-                item.id === currentActiveId
-                  ? `page-outline-item page-outline-item-level-${item.level} page-outline-item-active`
-                  : `page-outline-item page-outline-item-level-${item.level}`
-              }
-              onClick={() => {
-                document
-                  .getElementById(getBlockAnchorId(item.id))
-                  ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                setActiveId(item.id)
-              }}
-            >
-              {item.title}
-            </button>
-          ))}
-        </nav>
-      ) : (
-        <div className="page-outline-empty">暂无标题</div>
-      )}
+      <div className="page-outline-panel" ref={panelRef}>
+        <div className="page-outline-title">目录</div>
+        {items.length > 0 ? (
+          <nav className="page-outline-list">
+            {items.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={
+                  item.id === currentActiveId
+                    ? `page-outline-item page-outline-item-level-${item.level} page-outline-item-active`
+                    : `page-outline-item page-outline-item-level-${item.level}`
+                }
+                data-page-outline-id={item.id}
+                onClick={() => {
+                  document
+                    .getElementById(getBlockAnchorId(item.id))
+                    ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                  setActiveId(item.id)
+                }}
+              >
+                {item.title}
+              </button>
+            ))}
+          </nav>
+        ) : (
+          <div className="page-outline-empty">暂无标题</div>
+        )}
+      </div>
     </aside>
   )
 }

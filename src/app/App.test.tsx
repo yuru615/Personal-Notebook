@@ -215,6 +215,93 @@ describe('App', () => {
     expect(flushPendingSaves).toHaveBeenCalledTimes(1)
   })
 
+  it('falls back to local search results outside the desktop runtime', async () => {
+    const user = userEvent.setup()
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: 'page_search_notes',
+          parentId: null,
+          title: 'Search Notes',
+          icon: null,
+          cover: null,
+          blocks: [{ id: 'block_1', type: 'paragraph', text: 'customer interview summary' }],
+          createdAt: '2026-07-04T00:00:00.000Z',
+          updatedAt: '2026-07-04T00:00:00.000Z',
+        },
+        {
+          id: 'page_other',
+          parentId: null,
+          title: 'Other Page',
+          icon: null,
+          cover: null,
+          blocks: [{ id: 'block_2', type: 'paragraph', text: 'misc notes' }],
+          createdAt: '2026-07-04T00:00:00.000Z',
+          updatedAt: '2026-07-04T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: 'page_search_notes' },
+    }
+
+    render(<App repository={createMemoryRepository(snapshot)} initialEntries={['/pages/page_search_notes']} />)
+
+    await screen.findByDisplayValue('Search Notes')
+
+    await user.click(screen.getByRole('button', { name: '搜索' }))
+    await user.type(screen.getByPlaceholderText('搜索页面或内容'), 'customer')
+
+    expect(
+      await screen.findByRole('button', { name: '打开页面 Search Notes' }),
+    ).toBeInTheDocument()
+  })
+
+  it('uses the local search path inside the desktop runtime and keeps multiple matches from one page', async () => {
+    const user = userEvent.setup()
+    Reflect.set(globalThis, '__TAURI_INTERNALS__', {})
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: 'page_search_notes',
+          parentId: null,
+          title: 'Search Notes',
+          icon: null,
+          cover: null,
+          blocks: [
+            { id: 'block_1', type: 'paragraph', text: 'customer interview summary' },
+            { id: 'block_2', type: 'paragraph', text: 'customer follow-up checklist' },
+          ],
+          createdAt: '2026-07-04T00:00:00.000Z',
+          updatedAt: '2026-07-04T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: 'page_search_notes' },
+    }
+
+    render(<App repository={createMemoryRepository(snapshot)} initialEntries={['/pages/page_search_notes']} />)
+
+    await screen.findByDisplayValue('Search Notes')
+
+    await user.click(screen.getByRole('button', { name: '搜索' }))
+    await user.type(screen.getByPlaceholderText('搜索页面或内容'), 'customer')
+
+    expect(
+      await screen.findByRole('button', {
+        name: '打开页面 Search Notes customer interview summary',
+      }),
+    ).toBeInTheDocument()
+    expect(
+      await screen.findByRole('button', {
+        name: '打开页面 Search Notes customer follow-up checklist',
+      }),
+    ).toBeInTheDocument()
+  })
+
   it('uses workspace undo inside the focused rich text editor after a floating toolbar bold action', async () => {
     const user = userEvent.setup()
     const pageId = 'page_rich_text_undo'
@@ -398,6 +485,85 @@ describe('App', () => {
       'href',
       '/pages/page_parent',
     )
+  })
+
+  it('renders the page cover as a sibling band before the header on normal pages', async () => {
+    const pageId = 'page_cover_band'
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: 'Cover page',
+          icon: null,
+          cover: 'ocean',
+          blocks: [],
+          createdAt: '2026-07-04T00:00:00.000Z',
+          updatedAt: '2026-07-04T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+
+    const { container } = render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={[`/pages/${pageId}`]}
+      />,
+    )
+
+    await screen.findByDisplayValue('Cover page')
+
+    expect(container.querySelector('.page-route-cover')).not.toBeNull()
+    expect(container.querySelector('.page-header .page-cover')).toBeNull()
+  })
+
+  it('only shows the route topbar shadow after scrolling away from the top', async () => {
+    const pageId = 'page_topbar_shadow'
+    const scrollY = vi.spyOn(window, 'scrollY', 'get')
+    scrollY.mockReturnValue(0)
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: 'Shadow page',
+          icon: null,
+          cover: 'ocean',
+          blocks: [{ id: 'block_shadow', type: 'paragraph', text: 'Keep reading' }],
+          createdAt: '2026-07-04T00:00:00.000Z',
+          updatedAt: '2026-07-04T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+
+    const { container } = render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={[`/pages/${pageId}`]}
+      />,
+    )
+
+    await screen.findByDisplayValue('Shadow page')
+    const topbar = container.querySelector('.page-route-topbar')
+    expect(topbar).not.toHaveClass('page-route-topbar-scrolled')
+
+    scrollY.mockReturnValue(80)
+    fireEvent.scroll(window)
+    await waitFor(() => expect(topbar).toHaveClass('page-route-topbar-scrolled'))
+
+    scrollY.mockReturnValue(0)
+    fireEvent.scroll(window)
+    await waitFor(() => expect(topbar).not.toHaveClass('page-route-topbar-scrolled'))
+
+    scrollY.mockRestore()
   })
 
   it('confirms current page deletion with the shared confirm dialog', async () => {

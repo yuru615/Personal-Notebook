@@ -162,4 +162,42 @@ describe('PageHeader', () => {
       'page-content-adaptive',
     )
   })
+
+  it('marks headers with external toolbars so covered icons can keep a safe offset', () => {
+    render(
+      <PageHeader
+        page={{ ...page, cover: 'ocean' }}
+        showTopRow={false}
+        showCover={false}
+        onRename={vi.fn()}
+        onChangeIcon={vi.fn()}
+        onChangeCover={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTestId('page-header-body').closest('header')).toHaveClass(
+      'page-header-external-toolbar',
+      'page-header-external-cover',
+    )
+    expect(document.querySelector('.page-cover')).toBeNull()
+    expect(document.querySelector('.page-header-icon-with-cover')).toBeNull()
+  })
+
+  it('marks external-toolbar headers without covers for the topbar spacing rule', () => {
+    render(
+      <PageHeader
+        page={{ ...page, cover: null }}
+        showTopRow={false}
+        showCover={false}
+        onRename={vi.fn()}
+        onChangeIcon={vi.fn()}
+        onChangeCover={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTestId('page-header-body').closest('header')).toHaveClass(
+      'page-header-external-toolbar',
+      'page-header-no-external-cover',
+    )
+  })
 })

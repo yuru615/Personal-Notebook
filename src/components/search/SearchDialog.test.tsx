@@ -226,4 +226,42 @@ describe('SearchDialog', () => {
     expect(onSearch).toHaveBeenCalledWith('async')
     expect(onOpenPage).toHaveBeenCalledWith('page-async')
   })
+
+  it('renders multiple results from the same page with distinct accessible labels', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    const onOpenPage = vi.fn()
+    const multiMatchPages: PageRecord[] = [
+      {
+        id: 'page-multi',
+        parentId: null,
+        title: 'Search Notes',
+        icon: '📄',
+        cover: null,
+        blocks: [
+          { id: 'block-1', type: 'paragraph', text: 'customer interview summary' },
+          { id: 'block-2', type: 'paragraph', text: 'customer follow-up checklist' },
+        ],
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]
+
+    render(
+      <SearchDialog open pages={multiMatchPages} onClose={onClose} onOpenPage={onOpenPage} />,
+    )
+
+    await user.type(screen.getByPlaceholderText(searchPlaceholder), 'customer')
+
+    expect(
+      screen.getByRole('button', {
+        name: `${openPageLabel} Search Notes customer interview summary`,
+      }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', {
+        name: `${openPageLabel} Search Notes customer follow-up checklist`,
+      }),
+    ).toBeInTheDocument()
+  })
 })

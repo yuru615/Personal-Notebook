@@ -230,6 +230,8 @@ export interface PageRecord {
 
 export interface WorkspaceSettings {
   lastOpenedPageId: PageId | null
+  sidebarLayout?: 'compact' | 'classic'
+  sidebarWidth?: number
 }
 
 export interface WorkspaceSnapshot {
