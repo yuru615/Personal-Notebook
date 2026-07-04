@@ -11,7 +11,7 @@
       "allowDowngrades": false,
       "wix": {
         "upgradeCode": "fb28a0ee-771a-5548-9ebb-b6a657501217",
-        "language": ["en-US", "zh-CN"]
+        "language": ["zh-CN"]
       },
       "nsis": {
         "installerIcon": "icons/icon.ico",
