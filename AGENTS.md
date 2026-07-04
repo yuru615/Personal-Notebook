@@ -162,3 +162,8 @@ npx vitest run -t "restores window"
 - 对本地优先数据保持谨慎：导入、导出、删除、清理孤儿资源等操作要补测试，并保护 JSON 备份契约。
 - 完成代码改动后按风险运行验证：小改动至少运行相关测试；共享逻辑或数据模型改动运行 `npm test`；发布前运行 `npm run lint` 和 `npm run build`；涉及 Tauri、文件访问、路由或打包配置时运行当前平台对应的 Tauri 打包命令。Windows 产物优先用 Windows runner 验证 `npm run tauri:build:windows`。
 - 如果不能运行验证命令，要在最终回复中明确说明原因和剩余风险。
+
+## 更新记录维护
+
+- 每次提交包含功能、体验、数据、打包、架构或用户可感知变化时，提交前必须更新 `docs/updates.md`。
+- 更新记录先写简要描述，再写详细描述，并补充验证情况；小修复可合并进同一天同一主题。
