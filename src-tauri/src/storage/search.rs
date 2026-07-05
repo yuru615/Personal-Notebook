@@ -3,41 +3,43 @@ use serde_json::Value;
 
 use super::{
     error::StorageResult,
-    models::{DataTableRecord, PageRecord, SearchResult},
+    models::{DataTableRecord, PagePropertyDefinition, PageRecord, SearchResult},
 };
 
 const MAX_SEARCH_LIMIT: usize = 100;
 const MAX_SEARCH_QUERY_CHARS: usize = 512;
 
-pub fn replace_page_document(connection: &Connection, page: &PageRecord) -> StorageResult<()> {
+pub fn replace_page_document(
+    connection: &Connection,
+    page: &PageRecord,
+    page_property_definitions: &[PagePropertyDefinition],
+) -> StorageResult<()> {
     delete_documents_for_owner(connection, "page", &page.id)?;
-    let body = page
-        .blocks
-        .iter()
-        .map(block_search_text)
-        .filter(|text| !text.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ");
 
-    insert_document(
-        connection,
-        &SearchDocument {
-            document_id: format!("page:{}", page.id),
-            kind: "page".to_string(),
-            page_id: page.id.clone(),
-            board_id: None,
-            database_id: None,
-            record_id: None,
-            title: page.title.clone(),
-            icon: page.icon.clone(),
-            excerpt: if body.is_empty() {
-                page.title.clone()
-            } else {
-                body.clone()
-            },
-            body,
-        },
-    )
+    let mut documents = vec![SearchDocument {
+        document_id: format!("page:{}:title", page.id),
+        kind: "page".to_string(),
+        page_id: page.id.clone(),
+        board_id: None,
+        database_id: None,
+        record_id: None,
+        title: page.title.clone(),
+        icon: page.icon.clone(),
+        excerpt: page.title.clone(),
+        body: page.title.clone(),
+        match_source: "title".to_string(),
+        match_key: None,
+        source_label: "标题".to_string(),
+    }];
+
+    documents.extend(property_documents(page, page_property_definitions));
+    documents.extend(block_documents(page));
+
+    for document in documents {
+        insert_document(connection, &document)?;
+    }
+
+    Ok(())
 }
 
 pub fn replace_board_document(
@@ -57,9 +59,12 @@ pub fn replace_board_document(
             database_id: None,
             record_id: None,
             title: title.to_string(),
-            icon: Some("□".to_string()),
+            icon: Some("🧩".to_string()),
             excerpt: "白板".to_string(),
             body: title.to_string(),
+            match_source: "whiteboard".to_string(),
+            match_key: None,
+            source_label: "白板".to_string(),
         },
     )
 }
@@ -81,9 +86,12 @@ pub fn replace_mindmap_document(
             database_id: None,
             record_id: None,
             title: title.to_string(),
-            icon: Some("◇".to_string()),
+            icon: Some("🗺".to_string()),
             excerpt: "导图".to_string(),
             body: title.to_string(),
+            match_source: "body".to_string(),
+            match_key: None,
+            source_label: "导图".to_string(),
         },
     )
 }
@@ -105,9 +113,12 @@ pub fn replace_data_table_documents(
             database_id: Some(data_table.id.clone()),
             record_id: None,
             title: data_table.title.clone(),
-            icon: Some("▦".to_string()),
+            icon: Some("🗃".to_string()),
             excerpt: "数据表格".to_string(),
             body: data_table.title.clone(),
+            match_source: "data_table".to_string(),
+            match_key: None,
+            source_label: "数据表格".to_string(),
         },
     )?;
 
@@ -122,9 +133,12 @@ pub fn replace_data_table_documents(
                 database_id: Some(data_table.id.clone()),
                 record_id: Some(record_id),
                 title,
-                icon: Some("▦".to_string()),
+                icon: Some("🗃".to_string()),
                 excerpt: format!("{} · 记录", data_table.title),
                 body: data_table.title.clone(),
+                match_source: "data_table_record".to_string(),
+                match_key: None,
+                source_label: "记录".to_string(),
             },
         )?;
     }
@@ -145,8 +159,10 @@ pub fn search(
     let fts_query = format!("\"{}\"", trimmed.replace('"', "\"\""));
     let bounded_limit = limit.clamp(1, MAX_SEARCH_LIMIT) as i64;
     let mut statement = connection.prepare(
-        "SELECT kind, page_id, board_id, database_id, record_id, title, icon, excerpt
-          FROM zhixi_search_documents_fts
+        "SELECT d.kind, d.page_id, d.board_id, d.database_id, d.record_id, d.title, d.icon,
+          d.excerpt, d.match_source, d.match_key, d.source_label
+          FROM zhixi_search_documents_fts f
+          JOIN zhixi_search_documents d ON d.document_id = f.document_id
           WHERE zhixi_search_documents_fts MATCH ?1
           ORDER BY rank
           LIMIT ?2",
@@ -161,6 +177,9 @@ pub fn search(
             title: row.get(5)?,
             icon: row.get(6)?,
             excerpt: row.get(7)?,
+            match_source: row.get(8)?,
+            match_key: row.get(9)?,
+            source_label: row.get(10)?,
         })
     })?;
 
@@ -174,8 +193,9 @@ fn normalize_query(query: &str) -> String {
 fn insert_document(connection: &Connection, document: &SearchDocument) -> StorageResult<()> {
     connection.execute(
         "INSERT INTO zhixi_search_documents
-          (document_id, kind, page_id, board_id, database_id, record_id, title, icon, excerpt, body)
-          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+          (document_id, kind, page_id, board_id, database_id, record_id, title, icon, excerpt, body,
+            match_source, match_key, source_label)
+          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             document.document_id,
             document.kind,
@@ -186,7 +206,10 @@ fn insert_document(connection: &Connection, document: &SearchDocument) -> Storag
             document.title,
             document.icon,
             document.excerpt,
-            document.body
+            document.body,
+            document.match_source,
+            document.match_key,
+            document.source_label
         ],
     )?;
     connection.execute(
@@ -215,7 +238,7 @@ pub fn delete_documents_for_owner(
     owner_id: &str,
 ) -> StorageResult<()> {
     let pattern = match owner_kind {
-        "page" => format!("page:{owner_id}"),
+        "page" => format!("page:{owner_id}%"),
         "board" => format!("board:{owner_id}"),
         "mindmap" => format!("mindmap:{owner_id}"),
         "database" => format!("database:{owner_id}%"),
@@ -242,49 +265,205 @@ pub fn delete_documents_for_owner(
     Ok(())
 }
 
-fn block_search_text(block: &Value) -> String {
-    match block.get("type").and_then(Value::as_str) {
-        Some("paragraph" | "heading_1" | "heading_2" | "heading_3" | "todo" | "code") => block
-            .get("text")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim()
-            .to_string(),
-        Some("bulleted_list" | "numbered_list") => block
-            .get("items")
-            .and_then(Value::as_array)
-            .map(|items| {
-                items
+fn property_documents(
+    page: &PageRecord,
+    page_property_definitions: &[PagePropertyDefinition],
+) -> Vec<SearchDocument> {
+    page_property_definitions
+        .iter()
+        .filter_map(|definition| {
+            let raw_value = page.properties.as_ref()?.get(&definition.id)?;
+            let excerpt = match raw_value {
+                Value::Array(items) => items
                     .iter()
                     .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .filter(|item| !item.is_empty())
                     .collect::<Vec<_>>()
-                    .join(" ")
+                    .join(" / "),
+                Value::String(value) => value.trim().to_string(),
+                _ => String::new(),
+            };
+
+            if excerpt.is_empty() {
+                return None;
+            }
+
+            Some(SearchDocument {
+                document_id: format!("page:{}:property:{}", page.id, definition.id),
+                kind: "page".to_string(),
+                page_id: page.id.clone(),
+                board_id: None,
+                database_id: None,
+                record_id: None,
+                title: page.title.clone(),
+                icon: page.icon.clone(),
+                excerpt: excerpt.clone(),
+                body: excerpt,
+                match_source: "property".to_string(),
+                match_key: Some(definition.key.clone()),
+                source_label: definition.name.clone(),
             })
-            .unwrap_or_default(),
-        Some("table") => block
-            .get("rows")
-            .and_then(Value::as_array)
-            .map(|rows| {
-                rows.iter()
-                    .filter_map(Value::as_array)
-                    .flat_map(|cells| cells.iter().filter_map(Value::as_str))
-                    .collect::<Vec<_>>()
-                    .join(" ")
+        })
+        .collect()
+}
+
+fn block_documents(page: &PageRecord) -> Vec<SearchDocument> {
+    page.blocks
+        .iter()
+        .enumerate()
+        .filter_map(|(index, block)| {
+            let entry = block_search_entry(block)?;
+            let block_id = block
+                .get("id")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("index_{index}"));
+
+            Some(SearchDocument {
+                document_id: format!("page:{}:block:{}:{}", page.id, block_id, entry.document_suffix),
+                kind: "page".to_string(),
+                page_id: page.id.clone(),
+                board_id: None,
+                database_id: None,
+                record_id: None,
+                title: page.title.clone(),
+                icon: page.icon.clone(),
+                excerpt: entry.excerpt,
+                body: entry.search_text,
+                match_source: entry.match_source,
+                match_key: None,
+                source_label: entry.source_label,
             })
-            .unwrap_or_default(),
-        Some("image" | "video" | "audio") => [
+        })
+        .collect()
+}
+
+fn block_search_entry(block: &Value) -> Option<SearchEntry> {
+    match block.get("type").and_then(Value::as_str) {
+        Some("paragraph" | "heading_1" | "heading_2" | "heading_3" | "todo" | "code") => {
+            create_body_entry(block.get("text").and_then(Value::as_str).unwrap_or(""))
+        }
+        Some("bulleted_list" | "numbered_list") => create_body_entry(
+            &block
+                .get("items")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .unwrap_or_default(),
+        ),
+        Some("table") => create_body_entry(
+            &block
+                .get("rows")
+                .and_then(Value::as_array)
+                .map(|rows| {
+                    rows.iter()
+                        .filter_map(Value::as_array)
+                        .flat_map(|cells| cells.iter().filter_map(Value::as_str))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .unwrap_or_default(),
+        ),
+        Some("image" | "video" | "audio") => create_media_entry([
             block.get("name").and_then(Value::as_str).unwrap_or(""),
             block.get("caption").and_then(Value::as_str).unwrap_or(""),
             block.get("alt").and_then(Value::as_str).unwrap_or(""),
-        ]
+        ]),
+        _ => None,
+    }
+}
+
+fn create_body_entry(text: &str) -> Option<SearchEntry> {
+    let excerpt = text.trim();
+
+    if excerpt.is_empty() {
+        return None;
+    }
+
+    Some(SearchEntry {
+        document_suffix: "body".to_string(),
+        excerpt: excerpt.to_string(),
+        search_text: excerpt.to_string(),
+        match_source: "body".to_string(),
+        source_label: "正文".to_string(),
+    })
+}
+
+fn create_media_entry(parts: [&str; 3]) -> Option<SearchEntry> {
+    let trimmed_parts = parts
         .into_iter()
-        .filter(|text| !text.is_empty())
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let excerpt = trimmed_parts.first()?.to_string();
+
+    Some(SearchEntry {
+        document_suffix: "media".to_string(),
+        excerpt,
+        search_text: build_search_text(trimmed_parts),
+        match_source: "media".to_string(),
+        source_label: "媒体".to_string(),
+    })
+}
+
+fn build_search_text(parts: Vec<String>) -> String {
+    let mut entries = Vec::new();
+
+    for part in parts {
+        if part.is_empty() {
+            continue;
+        }
+
+        push_unique(&mut entries, part.clone());
+        for alias in build_file_name_search_aliases(&part) {
+            push_unique(&mut entries, alias);
+        }
+    }
+
+    entries.join(" ")
+}
+
+fn build_file_name_search_aliases(value: &str) -> Vec<String> {
+    let normalized_value = value.trim();
+
+    if normalized_value.is_empty() {
+        return Vec::new();
+    }
+
+    let stem = normalized_value
+        .rsplit_once('.')
+        .map(|(name, _)| name.trim())
+        .unwrap_or(normalized_value);
+    let punctuation_normalized = normalized_value
+        .replace(['.', '_', '-'], " ")
+        .split_whitespace()
         .collect::<Vec<_>>()
-        .join(" "),
-        Some("whiteboard") => "白板".to_string(),
-        Some("data_table") | Some("data_table_inline") => "数据表格".to_string(),
-        Some("mindmap") => "导图".to_string(),
-        _ => String::new(),
+        .join(" ");
+    let stem_normalized = stem
+        .replace(['.', '_', '-'], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let mut aliases = Vec::new();
+    for alias in [punctuation_normalized, stem.to_string(), stem_normalized] {
+        if !alias.is_empty() && alias != normalized_value {
+            push_unique(&mut aliases, alias);
+        }
+    }
+    aliases
+}
+
+fn push_unique(entries: &mut Vec<String>, value: String) {
+    if !entries.iter().any(|existing| existing == &value) {
+        entries.push(value);
     }
 }
 
@@ -325,4 +504,15 @@ struct SearchDocument {
     icon: Option<String>,
     excerpt: String,
     body: String,
+    match_source: String,
+    match_key: Option<String>,
+    source_label: String,
+}
+
+struct SearchEntry {
+    document_suffix: String,
+    excerpt: String,
+    search_text: String,
+    match_source: String,
+    source_label: String,
 }

@@ -1,8 +1,8 @@
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use super::error::StorageResult;
 
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
     connection.pragma_update(None, "foreign_keys", "ON")?;
@@ -42,7 +42,8 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
 
         CREATE TABLE IF NOT EXISTS zhixi_page_contents (
           page_id TEXT PRIMARY KEY NOT NULL REFERENCES zhixi_pages(id) ON DELETE CASCADE,
-          blocks_json TEXT NOT NULL
+          blocks_json TEXT NOT NULL,
+          properties_json TEXT NOT NULL DEFAULT '{}'
         );
 
         CREATE TABLE IF NOT EXISTS zhixi_block_refs (
@@ -163,7 +164,10 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
           title TEXT NOT NULL,
           icon TEXT,
           excerpt TEXT NOT NULL,
-          body TEXT NOT NULL
+          body TEXT NOT NULL,
+          match_source TEXT NOT NULL DEFAULT 'body',
+          match_key TEXT,
+          source_label TEXT NOT NULL DEFAULT '正文'
         );
 
         CREATE VIRTUAL TABLE IF NOT EXISTS zhixi_search_documents_fts USING fts5(
@@ -181,6 +185,12 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
         ",
     )?;
 
+    let current_version = load_schema_version(connection)?.unwrap_or_default();
+
+    if current_version < 2 {
+        migrate_to_v2(connection)?;
+    }
+
     connection.execute(
         "INSERT INTO zhixi_meta (key, value) VALUES ('schema_version', ?1)
           ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -192,4 +202,70 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
     }
 
     Ok(())
+}
+
+fn load_schema_version(connection: &Connection) -> StorageResult<Option<i64>> {
+    let version = connection
+        .query_row(
+            "SELECT value FROM zhixi_meta WHERE key = 'schema_version'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .map(|value| {
+            value
+                .parse::<i64>()
+                .map_err(|error| super::error::StorageError::invalid_payload(error.to_string()))
+        })
+        .transpose()?;
+
+    Ok(version)
+}
+
+fn migrate_to_v2(connection: &Connection) -> StorageResult<()> {
+    ensure_column(
+        connection,
+        "zhixi_page_contents",
+        "properties_json",
+        "TEXT NOT NULL DEFAULT '{}'",
+    )?;
+    ensure_column(
+        connection,
+        "zhixi_search_documents",
+        "match_source",
+        "TEXT NOT NULL DEFAULT 'body'",
+    )?;
+    ensure_column(connection, "zhixi_search_documents", "match_key", "TEXT")?;
+    ensure_column(
+        connection,
+        "zhixi_search_documents",
+        "source_label",
+        "TEXT NOT NULL DEFAULT '正文'",
+    )?;
+    Ok(())
+}
+
+fn ensure_column(
+    connection: &Connection,
+    table_name: &str,
+    column_name: &str,
+    column_definition: &str,
+) -> StorageResult<()> {
+    if column_exists(connection, table_name, column_name)? {
+        return Ok(());
+    }
+
+    connection.execute_batch(&format!(
+        "ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}"
+    ))?;
+    Ok(())
+}
+
+fn column_exists(connection: &Connection, table_name: &str, column_name: &str) -> StorageResult<bool> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table_name})"))?;
+    let column_names = statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(column_names.iter().any(|existing| existing == column_name))
 }

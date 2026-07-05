@@ -25,13 +25,14 @@ pub use error::{StorageError, StorageResult};
 pub use models::PagePackageImportResult;
 pub use models::{
     AssetMeta, BoardRecord, BootstrapPayload, DataTableRecord, DeleteResult, ImportAssetFileInput,
-    LoadedPage, MindmapRecord, PageMeta, PagePackageManifest, PageRecord, SaveResult, SearchResult,
-    WorkspaceSettings, WorkspaceSnapshot, WriteAssetInput,
+    LoadedPage, MindmapRecord, PageMeta, PagePackageManifest, PagePropertyDefinition, PageRecord,
+    SaveResult, SearchResult, WorkspaceSettings, WorkspaceSnapshot, WriteAssetInput,
 };
 
 const DATABASE_FILE_NAME: &str = "zhixi.db";
 const ASSETS_DIR_NAME: &str = "zhixi-assets";
 const SETTINGS_ID: &str = "workspace";
+const PAGE_PROPERTIES_SETTINGS_ID: &str = "page_properties";
 #[allow(dead_code)]
 pub const PAGE_PACKAGE_KIND: &str = "zhixi.page-package";
 #[allow(dead_code)]
@@ -111,6 +112,9 @@ impl Storage {
             assets_dir: data_dir.join(ASSETS_DIR_NAME),
         };
         schema::initialize_schema(&storage.connection)?;
+        if storage.search_documents_need_rebuild()? {
+            storage.rebuild_search_documents()?;
+        }
         Ok(storage)
     }
 
@@ -184,6 +188,7 @@ impl Storage {
             data_tables: self.load_data_tables()?,
             mindmaps: self.load_mindmaps()?,
             pages: self.load_pages()?,
+            page_properties: self.load_page_properties()?,
             settings,
         })
     }
@@ -199,6 +204,8 @@ impl Storage {
     pub fn replace_workspace_backup(&self, snapshot: WorkspaceSnapshot) -> StorageResult<()> {
         self.with_transaction(|| {
             self.clear_workspace()?;
+            self.save_settings(&snapshot.settings)?;
+            self.save_page_properties(&snapshot.page_properties)?;
 
             for (position, page) in snapshot.pages.iter().enumerate() {
                 self.insert_page(page, position)?;
@@ -212,7 +219,6 @@ impl Storage {
             for (position, mindmap) in snapshot.mindmaps.iter().enumerate() {
                 self.insert_mindmap(mindmap, position)?;
             }
-            self.save_settings(&snapshot.settings)?;
             self.rebuild_resource_search_documents()?;
 
             Ok(())
@@ -925,6 +931,18 @@ impl Storage {
         Ok(())
     }
 
+    fn save_page_properties(&self, definitions: &[PagePropertyDefinition]) -> StorageResult<()> {
+        self.connection.execute(
+            "INSERT INTO zhixi_settings (id, record_json) VALUES (?1, ?2)
+              ON CONFLICT(id) DO UPDATE SET record_json = excluded.record_json",
+            params![
+                PAGE_PROPERTIES_SETTINGS_ID,
+                serde_json::to_string(definitions)?
+            ],
+        )?;
+        Ok(())
+    }
+
     fn load_settings(&self) -> StorageResult<Option<WorkspaceSettings>> {
         self.connection
             .query_row(
@@ -937,7 +955,25 @@ impl Storage {
             .transpose()
     }
 
+    fn load_page_properties(&self) -> StorageResult<Vec<PagePropertyDefinition>> {
+        self.connection
+            .query_row(
+                "SELECT record_json FROM zhixi_settings WHERE id = ?1",
+                [PAGE_PROPERTIES_SETTINGS_ID],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .map(|json| {
+                serde_json::from_str::<Vec<PagePropertyDefinition>>(&json)
+                    .map_err(StorageError::from)
+            })
+            .transpose()?
+            .map(Ok)
+            .unwrap_or_else(|| Ok(Vec::new()))
+    }
+
     fn insert_page(&self, page: &PageRecord, position: usize) -> StorageResult<()> {
+        let page_property_definitions = self.load_page_properties()?;
         self.connection.execute(
             "INSERT INTO zhixi_pages
               (id, parent_id, title, icon, cover, is_full_width, is_small_text, font_family,
@@ -971,12 +1007,18 @@ impl Storage {
             ],
         )?;
         self.connection.execute(
-            "INSERT INTO zhixi_page_contents (page_id, blocks_json) VALUES (?1, ?2)
-              ON CONFLICT(page_id) DO UPDATE SET blocks_json = excluded.blocks_json",
-            params![page.id, serde_json::to_string(&page.blocks)?],
+            "INSERT INTO zhixi_page_contents (page_id, blocks_json, properties_json) VALUES (?1, ?2, ?3)
+              ON CONFLICT(page_id) DO UPDATE SET
+                blocks_json = excluded.blocks_json,
+                properties_json = excluded.properties_json",
+            params![
+                page.id,
+                serde_json::to_string(&page.blocks)?,
+                serialize_page_properties(page.properties.as_ref())?
+            ],
         )?;
         self.replace_block_refs(page)?;
-        search::replace_page_document(&self.connection, page)?;
+        search::replace_page_document(&self.connection, page, &page_property_definitions)?;
         Ok(())
     }
 
@@ -1259,6 +1301,48 @@ impl Storage {
         Ok(())
     }
 
+    fn rebuild_search_documents(&self) -> StorageResult<()> {
+        self.connection.execute("DELETE FROM zhixi_search_documents_fts", [])?;
+        self.connection.execute("DELETE FROM zhixi_search_documents", [])?;
+
+        let page_property_definitions = self.load_page_properties()?;
+        for page in self.load_pages()? {
+            search::replace_page_document(&self.connection, &page, &page_property_definitions)?;
+        }
+        self.rebuild_resource_search_documents()
+    }
+
+    fn search_documents_need_rebuild(&self) -> StorageResult<bool> {
+        let has_pages: bool = self
+            .connection
+            .query_row("SELECT EXISTS(SELECT 1 FROM zhixi_pages LIMIT 1)", [], |row| row.get(0))?;
+        if !has_pages {
+            return Ok(false);
+        }
+
+        let has_any_documents: bool = self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM zhixi_search_documents LIMIT 1)",
+            [],
+            |row| row.get(0),
+        )?;
+        if !has_any_documents {
+            return Ok(true);
+        }
+
+        self.connection
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1
+                    FROM zhixi_search_documents
+                    WHERE kind = 'page' AND document_id NOT LIKE 'page:%:%'
+                    LIMIT 1
+                )",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+    }
+
     fn page_id_for_ref(&self, ref_kind: &str, ref_id: &str) -> StorageResult<Option<String>> {
         self.connection
             .query_row(
@@ -1275,26 +1359,28 @@ impl Storage {
         let mut statement = self.connection.prepare(
             "SELECT p.id, p.parent_id, p.title, p.icon, p.cover, p.is_full_width,
               p.is_small_text, p.font_family, p.show_outline, c.blocks_json,
-              p.created_at, p.updated_at
+              c.properties_json, p.created_at, p.updated_at
               FROM zhixi_pages p
               JOIN zhixi_page_contents c ON c.page_id = p.id
               ORDER BY p.position ASC",
         )?;
         let rows = statement.query_map([], |row| {
             let blocks_json: String = row.get(9)?;
+            let properties_json: String = row.get(10)?;
             Ok(PageRecord {
                 id: row.get(0)?,
                 parent_id: row.get(1)?,
                 title: row.get(2)?,
                 icon: row.get(3)?,
                 cover: row.get(4)?,
+                properties: deserialize_page_properties(&properties_json).unwrap_or(None),
                 is_full_width: option_i64_to_bool(row.get(5)?),
                 is_small_text: option_i64_to_bool(row.get(6)?),
                 font_family: row.get(7)?,
                 show_outline: option_i64_to_bool(row.get(8)?),
                 blocks: serde_json::from_str(&blocks_json).unwrap_or_default(),
-                created_at: row.get(10)?,
-                updated_at: row.get(11)?,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -1996,6 +2082,25 @@ fn option_i64_to_bool(value: Option<i64>) -> Option<bool> {
     value.map(|flag| flag != 0)
 }
 
+fn serialize_page_properties(value: Option<&Value>) -> StorageResult<String> {
+    serde_json::to_string(
+        &value
+            .cloned()
+            .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
+    )
+    .map_err(Into::into)
+}
+
+fn deserialize_page_properties(value: &str) -> StorageResult<Option<Value>> {
+    let properties = serde_json::from_str::<Value>(value)?;
+    let is_empty_object = properties
+        .as_object()
+        .map(|object| object.is_empty())
+        .unwrap_or(false);
+
+    Ok(if is_empty_object { None } else { Some(properties) })
+}
+
 fn now_nanos() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -2114,6 +2219,7 @@ mod tests {
                 title: "Home".to_string(),
                 icon: Some("N".to_string()),
                 cover: None,
+                properties: None,
                 is_full_width: None,
                 is_small_text: None,
                 font_family: None,
@@ -2127,6 +2233,7 @@ mod tests {
                 created_at: "2026-06-30T00:00:00.000Z".to_string(),
                 updated_at: "2026-06-30T00:00:00.000Z".to_string(),
             }],
+            page_properties: Vec::new(),
             settings: WorkspaceSettings {
                 last_opened_page_id: Some("page_1".to_string()),
             },
@@ -2187,7 +2294,7 @@ mod tests {
     fn initializes_schema_with_wal_foreign_keys_and_version() {
         let storage = Storage::open_in_memory_for_tests().expect("storage opens");
 
-        assert_eq!(storage.schema_version().expect("schema version"), 1);
+        assert_eq!(storage.schema_version().expect("schema version"), 2);
         assert_eq!(
             storage.pragma_string("journal_mode").expect("journal mode"),
             "memory"
@@ -2208,6 +2315,32 @@ mod tests {
             storage.export_workspace_backup().expect("export snapshot"),
             snapshot
         );
+    }
+
+    #[test]
+    fn workspace_backup_round_trips_page_properties() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let mut snapshot = sample_snapshot();
+        snapshot.page_properties = vec![PagePropertyDefinition {
+            id: "prop_tags".to_string(),
+            key: "tags".to_string(),
+            name: "标签".to_string(),
+            property_type: "multiSelect".to_string(),
+            config: json!({ "options": [] }),
+            created_at: "2026-07-05T00:00:00.000Z".to_string(),
+            updated_at: "2026-07-05T00:00:00.000Z".to_string(),
+        }];
+        snapshot.pages[0].properties = Some(json!({
+            "prop_tags": ["产品", "搜索"]
+        }));
+
+        storage
+            .replace_workspace_backup(snapshot.clone())
+            .expect("replace snapshot");
+
+        let exported = storage.export_workspace_backup().expect("export snapshot");
+        assert_eq!(exported.page_properties, snapshot.page_properties);
+        assert_eq!(exported.pages[0].properties, snapshot.pages[0].properties);
     }
 
     #[test]
@@ -2254,6 +2387,50 @@ mod tests {
     }
 
     #[test]
+    fn search_returns_property_hit_metadata_and_multiple_page_hits() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let mut snapshot = sample_snapshot();
+        snapshot.page_properties = vec![PagePropertyDefinition {
+            id: "prop_tags".to_string(),
+            key: "tags".to_string(),
+            name: "标签".to_string(),
+            property_type: "multiSelect".to_string(),
+            config: json!({ "options": [] }),
+            created_at: "2026-07-05T00:00:00.000Z".to_string(),
+            updated_at: "2026-07-05T00:00:00.000Z".to_string(),
+        }];
+        snapshot.pages[0].title = "Product Plan".to_string();
+        snapshot.pages[0].properties = Some(json!({
+            "prop_tags": ["product", "search"]
+        }));
+        snapshot.pages[0].blocks = vec![
+            json!({ "id": "block_1", "type": "paragraph", "text": "product launch notes" }),
+            json!({
+                "id": "block_2",
+                "type": "image",
+                "name": "Capture001.png",
+                "mimeType": "image/png",
+                "caption": "",
+                "alt": ""
+            }),
+        ];
+
+        storage
+            .replace_workspace_backup(snapshot)
+            .expect("replace snapshot");
+
+        let results = storage.search_workspace("product", 20).expect("search");
+        assert!(results
+            .iter()
+            .any(|result| result.match_source == "property" && result.source_label == "标签"));
+        assert!(results
+            .iter()
+            .filter(|result| result.page_id == "page_1")
+            .count()
+            >= 2);
+    }
+
+    #[test]
     fn search_clamps_untrusted_limits() {
         let storage = Storage::open_in_memory_for_tests().expect("storage opens");
         let mut snapshot = sample_snapshot();
@@ -2267,6 +2444,7 @@ mod tests {
                 title: format!("Page {index}"),
                 icon: None,
                 cover: None,
+                properties: None,
                 is_full_width: None,
                 is_small_text: None,
                 font_family: None,
@@ -2407,6 +2585,7 @@ mod tests {
             title: "Child".to_string(),
             icon: None,
             cover: None,
+            properties: None,
             is_full_width: None,
             is_small_text: None,
             font_family: None,
@@ -2429,6 +2608,7 @@ mod tests {
             title: "Unrelated".to_string(),
             icon: None,
             cover: None,
+            properties: None,
             is_full_width: None,
             is_small_text: None,
             font_family: None,
@@ -2491,6 +2671,7 @@ mod tests {
             title: "Nested".to_string(),
             icon: None,
             cover: None,
+            properties: None,
             is_full_width: None,
             is_small_text: None,
             font_family: None,
@@ -2505,6 +2686,7 @@ mod tests {
             title: "Nested Child".to_string(),
             icon: None,
             cover: None,
+            properties: None,
             is_full_width: None,
             is_small_text: None,
             font_family: None,
@@ -2739,6 +2921,7 @@ mod tests {
             title: "Child".to_string(),
             icon: None,
             cover: None,
+            properties: None,
             is_full_width: None,
             is_small_text: None,
             font_family: None,
@@ -2813,6 +2996,7 @@ mod tests {
             title: "Child".to_string(),
             icon: None,
             cover: None,
+            properties: None,
             is_full_width: None,
             is_small_text: None,
             font_family: None,
@@ -2827,6 +3011,7 @@ mod tests {
             title: "Grandchild".to_string(),
             icon: None,
             cover: None,
+            properties: None,
             is_full_width: None,
             is_small_text: None,
             font_family: None,
@@ -3186,6 +3371,7 @@ mod tests {
             title: "Child".to_string(),
             icon: None,
             cover: None,
+            properties: None,
             is_full_width: None,
             is_small_text: None,
             font_family: None,
@@ -3270,6 +3456,7 @@ mod tests {
                 title: "Extra root".to_string(),
                 icon: None,
                 cover: None,
+                properties: None,
                 is_full_width: None,
                 is_small_text: None,
                 font_family: None,
@@ -3306,6 +3493,7 @@ mod tests {
             title: "Child".to_string(),
             icon: None,
             cover: None,
+            properties: None,
             is_full_width: None,
             is_small_text: None,
             font_family: None,
@@ -3361,6 +3549,7 @@ mod tests {
                 title: "Cycle A".to_string(),
                 icon: None,
                 cover: None,
+                properties: None,
                 is_full_width: None,
                 is_small_text: None,
                 font_family: None,
@@ -3375,6 +3564,7 @@ mod tests {
                 title: "Cycle B".to_string(),
                 icon: None,
                 cover: None,
+                properties: None,
                 is_full_width: None,
                 is_small_text: None,
                 font_family: None,

@@ -10,7 +10,22 @@ pub struct WorkspaceSnapshot {
     #[serde(default)]
     pub mindmaps: Vec<MindmapRecord>,
     pub pages: Vec<PageRecord>,
+    #[serde(default)]
+    pub page_properties: Vec<PagePropertyDefinition>,
     pub settings: WorkspaceSettings,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PagePropertyDefinition {
+    pub id: String,
+    pub key: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub property_type: String,
+    pub config: Value,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -47,6 +62,8 @@ pub struct PageRecord {
     pub title: String,
     pub icon: Option<String>,
     pub cover: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub properties: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_full_width: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -88,6 +105,8 @@ pub struct LoadedPage {
     pub title: String,
     pub icon: Option<String>,
     pub cover: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub properties: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_full_width: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -109,6 +128,7 @@ impl From<PageRecord> for LoadedPage {
             title: page.title,
             icon: page.icon,
             cover: page.cover,
+            properties: page.properties,
             is_full_width: page.is_full_width,
             is_small_text: page.is_small_text,
             font_family: page.font_family,
@@ -208,6 +228,10 @@ pub struct SearchResult {
     pub title: String,
     pub icon: Option<String>,
     pub excerpt: String,
+    pub match_source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub match_key: Option<String>,
+    pub source_label: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
