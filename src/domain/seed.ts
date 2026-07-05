@@ -1,3 +1,4 @@
+import { createDefaultPagePropertyDefinitions } from './pageProperties'
 import { createId } from '../utils/id'
 import type { PageRecord, WorkspaceSnapshot } from './types'
 
@@ -10,6 +11,7 @@ export function createSeedPage(): PageRecord {
     title: '快速开始',
     icon: '📄',
     cover: null,
+    properties: {},
     isFullWidth: false,
     isSmallText: false,
     fontFamily: 'default',
@@ -33,6 +35,7 @@ export function createSeedPage(): PageRecord {
 }
 
 export function createSeedWorkspace(): WorkspaceSnapshot {
+  const now = new Date().toISOString()
   const page = createSeedPage()
 
   return {
@@ -40,6 +43,7 @@ export function createSeedWorkspace(): WorkspaceSnapshot {
     dataTables: [],
     mindmaps: [],
     pages: [page],
+    pageProperties: createDefaultPagePropertyDefinitions(now),
     settings: {
       lastOpenedPageId: page.id,
       sidebarLayout: 'compact',

@@ -1,3 +1,4 @@
+import { normalizeWorkspaceSnapshot } from '../domain/pageProperties'
 import { createSeedWorkspace } from '../domain/seed'
 import type { WorkspaceSnapshot } from '../domain/types'
 import { isDesktopRuntime } from './fileAccess'
@@ -49,7 +50,8 @@ export function createStorageWorkspaceRepository({
   return {
     async load() {
       await writeQueue
-      return client.exportWorkspaceBackup()
+      const snapshot = await client.exportWorkspaceBackup()
+      return snapshot ? normalizeWorkspaceSnapshot(snapshot) : null
     },
 
     async save(snapshot) {
@@ -88,7 +90,7 @@ function createBrowserWorkspaceRepository(): WorkspaceRepository {
   return {
     async load() {
       const value = window.localStorage.getItem(BROWSER_WORKSPACE_STORAGE_KEY)
-      return value ? (JSON.parse(value) as WorkspaceSnapshot) : null
+      return value ? normalizeWorkspaceSnapshot(JSON.parse(value) as WorkspaceSnapshot) : null
     },
 
     async save(snapshot) {

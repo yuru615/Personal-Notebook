@@ -112,6 +112,7 @@ function createSnapshot(): WorkspaceSnapshot {
         updatedAt: now,
       },
     ],
+    pageProperties: [],
     pages: [
       {
         id: 'page_1',
@@ -119,6 +120,7 @@ function createSnapshot(): WorkspaceSnapshot {
         title: 'Quick note',
         icon: '📝',
         cover: 'cover-1',
+        properties: {},
         blocks: [
           { id: 'block_1', type: 'paragraph', text: 'hello' },
           { id: 'block_2', type: 'todo', text: 'task', checked: true },
@@ -182,6 +184,7 @@ describe('createStorageWorkspaceRepository', () => {
       boards: [],
       dataTables: [],
       mindmaps: [],
+      pageProperties: [],
       pages: [],
       settings: {
         lastOpenedPageId: null,
@@ -202,6 +205,7 @@ describe('createStorageWorkspaceRepository', () => {
       boards: [],
       dataTables: [],
       mindmaps: [],
+      pageProperties: [],
       pages: [
         {
           ...original.pages[0],
@@ -239,6 +243,33 @@ describe('createStorageWorkspaceRepository', () => {
     ])
   })
 
+  it('fills missing pageProperties and page property values for legacy snapshots', async () => {
+    const { repository } = createRepository()
+    const legacySnapshot: WorkspaceSnapshot = {
+      ...createSnapshot(),
+      pageProperties: undefined,
+      pages: [
+        {
+          ...createSnapshot().pages[0],
+          properties: undefined,
+        },
+      ],
+    }
+
+    await repository.replace(legacySnapshot)
+
+    await expect(repository.load()).resolves.toEqual({
+      ...legacySnapshot,
+      pageProperties: [],
+      pages: [
+        {
+          ...legacySnapshot.pages[0],
+          properties: {},
+        },
+      ],
+    })
+  })
+
   it('preserves persisted data tables and mindmaps when saving a legacy snapshot', async () => {
     const { repository } = createRepository()
     const snapshot = createSnapshot()
@@ -251,6 +282,7 @@ describe('createStorageWorkspaceRepository', () => {
       boards: snapshot.boards,
       dataTables: undefined,
       mindmaps: undefined,
+      pageProperties: snapshot.pageProperties,
       pages: snapshot.pages,
       settings: {
         lastOpenedPageId: null,

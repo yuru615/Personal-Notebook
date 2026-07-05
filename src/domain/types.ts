@@ -3,6 +3,28 @@ export type BlockId = string
 export type BoardId = string
 export type DataTableId = string
 export type MindmapId = string
+export type PagePropertyType = 'text' | 'select' | 'multiSelect' | 'date'
+
+export interface PagePropertyOption {
+  id: string
+  label: string
+  color: string
+}
+
+export interface PagePropertyDefinition {
+  id: string
+  key: string
+  name: string
+  type: PagePropertyType
+  config: {
+    options?: PagePropertyOption[]
+  }
+  createdAt: string
+  updatedAt: string
+}
+
+export type PagePropertyValue = string | string[] | null
+export type PagePropertyValueMap = Record<string, PagePropertyValue>
 
 export type SidebarPinnedItem =
   | {
@@ -230,6 +252,7 @@ export interface PageRecord {
   title: string
   icon: string | null
   cover: string | null
+  properties?: PagePropertyValueMap
   isFullWidth?: boolean
   isSmallText?: boolean
   fontFamily?: PageFontFamily
@@ -251,6 +274,7 @@ export interface WorkspaceSnapshot {
   dataTables?: DataTableRecord[]
   mindmaps?: MindmapRecord[]
   pages: PageRecord[]
+  pageProperties?: PagePropertyDefinition[]
   settings: WorkspaceSettings
 }
 
