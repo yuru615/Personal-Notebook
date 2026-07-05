@@ -24,7 +24,7 @@
 
 验证情况：
 
-- 已通过 `npx vitest run src/app/App.test.tsx src/components/editor/PageHeader.test.tsx`
+- Task 5 集成回归按 red -> green 执行：先运行 `npx vitest run src/app/App.test.tsx src/components/editor/PageHeader.test.tsx`，新增用例 `shows page properties below the title and lets search surface property hits on normal pages` 首次失败；修正测试后再次运行同命令通过，结果为 2 个文件、36 个测试全部通过
 - 已通过 focused vitest：`npx vitest run src/domain/pageProperties.test.ts src/store/createWorkspaceStore.test.ts src/domain/search.test.ts src/components/editor/PagePropertiesPanel.test.tsx src/components/search/SearchDialog.test.tsx src/app/App.test.tsx src/components/editor/PageHeader.test.tsx src/lib/workspaceRepository.test.ts src/lib/storageClient.test.ts`
 - 已通过全量测试的本机等价命令：`C:/Program Files/nodejs/npm.cmd run test`（本机 `npm test` 入口解析异常，直接 `npm.cmd` 可正常执行）
 - 已通过构建：`C:/Program Files/nodejs/npm.cmd run build`
