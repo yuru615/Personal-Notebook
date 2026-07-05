@@ -5,18 +5,18 @@ import type { BoardRecord, DataTableRecord, PageRecord } from '../../domain/type
 import { SearchDialog } from './SearchDialog'
 
 const now = '2026-06-15T00:00:00.000Z'
-const searchPlaceholder = '\u641c\u7d22\u9875\u9762\u6216\u5185\u5bb9'
-const openPageLabel = '\u6253\u5f00\u9875\u9762'
-const openWhiteboardLabel = '\u6253\u5f00\u767d\u677f'
-const openDataTableLabel = '\u6253\u5f00\u6570\u636e\u8868\u683c'
-const openDataTableRecordLabel = '\u6253\u5f00\u8bb0\u5f55'
+const searchPlaceholder = '搜索页面或内容'
+const openPageLabel = '打开页面'
+const openWhiteboardLabel = '打开白板'
+const openDataTableLabel = '打开数据表格'
+const openDataTableRecordLabel = '打开记录'
 
 const pages: PageRecord[] = [
   {
     id: 'page-a',
     parentId: null,
     title: 'Customer Feedback',
-    icon: '📑',
+    icon: '📝',
     cover: null,
     blocks: [{ id: 'block-a', type: 'paragraph', text: 'Interview notes' }],
     createdAt: now,
@@ -56,7 +56,7 @@ const whiteboardPages: PageRecord[] = [
     id: 'page-a',
     parentId: null,
     title: 'Customer Feedback',
-    icon: '📑',
+    icon: '📝',
     cover: null,
     blocks: [{ id: 'block-whiteboard', type: 'whiteboard', boardId: 'board-feedback' }],
     createdAt: now,
@@ -69,7 +69,7 @@ const dataTablePages: PageRecord[] = [
     id: 'page-a',
     parentId: null,
     title: 'Customer Feedback',
-    icon: '馃搼',
+    icon: '🗂',
     cover: null,
     blocks: [{ id: 'block-data', type: 'data_table', databaseId: 'database-feedback' }],
     createdAt: now,
@@ -189,7 +189,9 @@ describe('SearchDialog', () => {
     )
 
     await user.type(screen.getByPlaceholderText(searchPlaceholder), 'interview record')
-    await user.click(screen.getByRole('button', { name: `${openDataTableRecordLabel} Interview Record` }))
+    await user.click(
+      screen.getByRole('button', { name: `${openDataTableRecordLabel} Interview Record` }),
+    )
 
     expect(onOpenDataTable).toHaveBeenCalledWith('page-a', 'database-feedback', 'record-a')
   })
@@ -205,6 +207,8 @@ describe('SearchDialog', () => {
         title: 'Async Result',
         icon: '📄',
         excerpt: 'Loaded from storage',
+        matchSource: 'body',
+        sourceLabel: '正文',
       },
     ])
 
@@ -263,5 +267,74 @@ describe('SearchDialog', () => {
         name: `${openPageLabel} Search Notes customer follow-up checklist`,
       }),
     ).toBeInTheDocument()
+  })
+
+  it('renders grouped results and filters tags/status hits with chips', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <SearchDialog
+        open
+        pages={[]}
+        onClose={vi.fn()}
+        onOpenPage={vi.fn()}
+        onSearch={vi.fn().mockResolvedValue([
+          {
+            kind: 'page',
+            pageId: 'page-1',
+            title: '产品规划',
+            icon: '📄',
+            excerpt: '产品 / 搜索',
+            matchSource: 'property',
+            matchKey: 'tags',
+            sourceLabel: '标签',
+          },
+          {
+            kind: 'page',
+            pageId: 'page-1',
+            title: '产品规划',
+            icon: '📄',
+            excerpt: '进行中',
+            matchSource: 'property',
+            matchKey: 'status',
+            sourceLabel: '状态',
+          },
+          {
+            kind: 'whiteboard',
+            pageId: 'page-2',
+            boardId: 'board-1',
+            title: '规划白板',
+            icon: '□',
+            excerpt: '白板 · 产品规划',
+            matchSource: 'whiteboard',
+            sourceLabel: '白板',
+          },
+          {
+            kind: 'data_table',
+            pageId: 'page-3',
+            databaseId: 'database-1',
+            title: '产品数据库',
+            icon: '▦',
+            excerpt: '数据表格 · 产品规划',
+            matchSource: 'data_table',
+            sourceLabel: '数据表格',
+          },
+        ])}
+      />,
+    )
+
+    await user.type(screen.getByPlaceholderText(searchPlaceholder), '产品')
+
+    expect(await screen.findByRole('heading', { name: '页面' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '白板' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '数据表格' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '标签' }))
+    expect(screen.getByText('产品 / 搜索')).toBeInTheDocument()
+    expect(screen.queryByText('进行中')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '状态' }))
+    expect(screen.getByText('进行中')).toBeInTheDocument()
+    expect(screen.queryByText('产品 / 搜索')).not.toBeInTheDocument()
   })
 })

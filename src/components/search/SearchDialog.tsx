@@ -1,6 +1,11 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { BoardRecord, DataTableRecord, PageRecord } from '../../domain/types'
+import type {
+  BoardRecord,
+  DataTableRecord,
+  PagePropertyDefinition,
+  PageRecord,
+} from '../../domain/types'
 import {
   searchBoards,
   searchDataTables,
@@ -12,6 +17,7 @@ import { uiCopy } from '../../ui/copy'
 interface SearchDialogProps {
   open: boolean
   pages: PageRecord[]
+  pageProperties?: PagePropertyDefinition[]
   boards?: BoardRecord[]
   dataTables?: DataTableRecord[]
   onSearch?: (query: string) => Promise<SearchResult[]>
@@ -21,13 +27,16 @@ interface SearchDialogProps {
   onOpenDataTable?: (pageId: string, databaseId: string, recordId?: string) => void
 }
 
-const OPEN_WHITEBOARD_LABEL = '\u6253\u5f00\u767d\u677f'
-const OPEN_DATA_TABLE_LABEL = '\u6253\u5f00\u6570\u636e\u8868\u683c'
-const OPEN_DATA_TABLE_RECORD_LABEL = '\u6253\u5f00\u8bb0\u5f55'
+type SearchFilter = 'all' | 'page' | 'whiteboard' | 'data_table' | 'tags' | 'status'
+
+const OPEN_WHITEBOARD_LABEL = '打开白板'
+const OPEN_DATA_TABLE_LABEL = '打开数据表格'
+const OPEN_DATA_TABLE_RECORD_LABEL = '打开记录'
 
 export function SearchDialog({
   open,
   pages,
+  pageProperties = [],
   boards = [],
   dataTables = [],
   onSearch,
@@ -37,22 +46,59 @@ export function SearchDialog({
   onOpenDataTable,
 }: SearchDialogProps) {
   const [query, setQuery] = useState('')
+  const [activeFilter, setActiveFilter] = useState<SearchFilter>('all')
   const [asyncResults, setAsyncResults] = useState<SearchResult[]>([])
   const [selectedIndex, setSelectedIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const localResults = useMemo(
     () => [
-      ...searchPages(pages, query),
+      ...searchPages(pages, pageProperties, query),
       ...searchBoards(pages, boards, query),
       ...searchDataTables(pages, dataTables, query),
     ],
-    [boards, dataTables, pages, query],
+    [boards, dataTables, pageProperties, pages, query],
   )
   const results = onSearch ? asyncResults : localResults
-  const resultAriaLabels = useMemo(() => buildResultAriaLabels(results), [results])
-  const activeIndex = results.length > 0 ? Math.min(selectedIndex, results.length - 1) : -1
+  const filteredResults = useMemo(() => {
+    if (activeFilter === 'all') {
+      return results
+    }
+
+    if (activeFilter === 'tags' || activeFilter === 'status') {
+      return results.filter((result) => result.matchKey === activeFilter)
+    }
+
+    return results.filter((result) => result.kind === activeFilter)
+  }, [activeFilter, results])
+  const groupedResults = useMemo(
+    () =>
+      [
+        {
+          key: 'page',
+          label: uiCopy.search.groups.page,
+          results: filteredResults.filter((result) => result.kind === 'page'),
+        },
+        {
+          key: 'whiteboard',
+          label: uiCopy.search.groups.whiteboard,
+          results: filteredResults.filter((result) => result.kind === 'whiteboard'),
+        },
+        {
+          key: 'data_table',
+          label: uiCopy.search.groups.dataTable,
+          results: filteredResults.filter(
+            (result) => result.kind === 'data_table' || result.kind === 'data_table_record',
+          ),
+        },
+      ].filter((group) => group.results.length > 0),
+    [filteredResults],
+  )
+  const resultAriaLabels = useMemo(() => buildResultAriaLabels(filteredResults), [filteredResults])
+  const activeIndex =
+    filteredResults.length > 0 ? Math.min(selectedIndex, filteredResults.length - 1) : -1
   const closeDialog = useCallback(() => {
     setQuery('')
+    setActiveFilter('all')
     setSelectedIndex(0)
     onClose()
   }, [onClose])
@@ -80,20 +126,24 @@ export function SearchDialog({
   function handleInputKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
     if (event.key === 'ArrowDown') {
       event.preventDefault()
-      setSelectedIndex((current) => (results.length > 0 ? (current + 1) % results.length : 0))
+      setSelectedIndex((current) =>
+        filteredResults.length > 0 ? (current + 1) % filteredResults.length : 0,
+      )
       return
     }
 
     if (event.key === 'ArrowUp') {
       event.preventDefault()
       setSelectedIndex((current) =>
-        results.length > 0 ? (current - 1 + results.length) % results.length : 0,
+        filteredResults.length > 0
+          ? (current - 1 + filteredResults.length) % filteredResults.length
+          : 0,
       )
       return
     }
 
     if (event.key === 'Enter') {
-      const selectedResult = results[activeIndex]
+      const selectedResult = filteredResults[activeIndex]
 
       if (!selectedResult) {
         return
@@ -193,6 +243,9 @@ export function SearchDialog({
             onChange={(event) => {
               setQuery(event.target.value)
               setSelectedIndex(0)
+              if (!event.target.value.trim()) {
+                setActiveFilter('all')
+              }
             }}
             onKeyDown={handleInputKeyDown}
           />
@@ -201,33 +254,71 @@ export function SearchDialog({
           </button>
         </div>
 
-        <div className="search-results">
-          {!query.trim() ? (
-            <div className="search-empty">{uiCopy.search.emptyQuery}</div>
-          ) : results.length > 0 ? (
-            results.map((result, index) => (
+        {query.trim() ? (
+          <div className="search-filter-row">
+            {getFilterOptions().map((filter) => (
               <button
-                key={`${getResultKey(result)}-${index}`}
+                key={filter.key}
                 type="button"
                 className={[
-                  'search-result',
-                  index === activeIndex ? 'search-result-active' : '',
+                  'search-filter-chip',
+                  activeFilter === filter.key ? 'search-filter-chip-active' : '',
                 ]
                   .filter(Boolean)
                   .join(' ')}
-                aria-label={resultAriaLabels[index] ?? getResultActionLabel(result)}
-                aria-current={index === activeIndex ? 'true' : undefined}
-                onClick={() => openResult(result)}
-                onMouseEnter={() => setSelectedIndex(index)}
+                aria-pressed={activeFilter === filter.key}
+                onClick={() => {
+                  setActiveFilter(filter.key)
+                  setSelectedIndex(0)
+                }}
               >
-                <span className="search-result-icon" aria-hidden="true">
-                  {result.icon ?? '📄'}
-                </span>
-                <span className="search-result-body">
-                  <span className="search-result-title">{result.title}</span>
-                  <span className="search-result-excerpt">{result.excerpt}</span>
-                </span>
+                {filter.label}
               </button>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="search-results">
+          {!query.trim() ? (
+            <div className="search-empty">{uiCopy.search.emptyQuery}</div>
+          ) : filteredResults.length > 0 ? (
+            groupedResults.map((group) => (
+              <section key={group.key} className="search-group" aria-label={group.label}>
+                <h2 className="search-group-title">{group.label}</h2>
+                <div className="search-group-results">
+                  {group.results.map((result) => {
+                    const index = filteredResults.indexOf(result)
+
+                    return (
+                      <button
+                        key={`${getResultKey(result)}-${index}`}
+                        type="button"
+                        className={[
+                          'search-result',
+                          index === activeIndex ? 'search-result-active' : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
+                        aria-label={resultAriaLabels[index] ?? getResultActionLabel(result)}
+                        aria-current={index === activeIndex ? 'true' : undefined}
+                        onClick={() => openResult(result)}
+                        onMouseEnter={() => setSelectedIndex(index)}
+                      >
+                        <span className="search-result-icon" aria-hidden="true">
+                          {result.icon ?? '📄'}
+                        </span>
+                        <span className="search-result-body">
+                          <span className="search-result-title-row">
+                            <span className="search-result-title">{result.title}</span>
+                            <span className="search-result-source">{result.sourceLabel}</span>
+                          </span>
+                          <span className="search-result-excerpt">{result.excerpt}</span>
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </section>
             ))
           ) : (
             <div className="search-empty">{uiCopy.search.noResults}</div>
@@ -236,6 +327,17 @@ export function SearchDialog({
       </section>
     </div>
   )
+}
+
+function getFilterOptions(): Array<{ key: SearchFilter; label: string }> {
+  return [
+    { key: 'all', label: uiCopy.search.filters.all },
+    { key: 'page', label: uiCopy.search.filters.page },
+    { key: 'whiteboard', label: uiCopy.search.filters.whiteboard },
+    { key: 'data_table', label: uiCopy.search.filters.dataTable },
+    { key: 'tags', label: uiCopy.search.filters.tags },
+    { key: 'status', label: uiCopy.search.filters.status },
+  ]
 }
 
 function getResultKey(result: SearchResult) {

@@ -29,6 +29,19 @@ export const uiCopy = {
     noResults: '没有找到匹配内容',
     openPage: '打开页面',
     close: '关闭搜索',
+    filters: {
+      all: '全部',
+      page: '页面',
+      whiteboard: '白板',
+      dataTable: '数据表格',
+      tags: '标签',
+      status: '状态',
+    },
+    groups: {
+      page: '页面',
+      whiteboard: '白板',
+      dataTable: '数据表格',
+    },
   },
   app: {
     loading: '正在加载...',

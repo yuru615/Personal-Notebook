@@ -1,4 +1,10 @@
-import type { BlockRecord, BoardRecord, DataTableRecord, PageRecord } from './types'
+import type {
+  BlockRecord,
+  BoardRecord,
+  DataTableRecord,
+  PagePropertyDefinition,
+  PageRecord,
+} from './types'
 
 export interface SearchResult {
   kind: 'page' | 'whiteboard' | 'data_table' | 'data_table_record'
@@ -9,9 +15,31 @@ export interface SearchResult {
   title: string
   icon: string | null
   excerpt: string
+  matchSource:
+    | 'title'
+    | 'body'
+    | 'property'
+    | 'media'
+    | 'whiteboard'
+    | 'data_table'
+    | 'data_table_record'
+  matchKey?: string
+  sourceLabel: string
 }
 
-export function searchPages(pages: PageRecord[], query: string): SearchResult[] {
+interface SearchEntry {
+  excerpt: string
+  searchText: string
+  matchSource: SearchResult['matchSource']
+  matchKey?: string
+  sourceLabel: string
+}
+
+export function searchPages(
+  pages: PageRecord[],
+  definitions: PagePropertyDefinition[],
+  query: string,
+): SearchResult[] {
   const normalizedQuery = normalizeSearchText(query)
 
   if (!normalizedQuery) {
@@ -22,32 +50,29 @@ export function searchPages(pages: PageRecord[], query: string): SearchResult[] 
   const results: SearchResult[] = []
 
   for (const page of pages) {
-    const matchedExcerpts = new Set<string>()
-    const entries = [
-      createSearchEntry(page.title),
-      ...page.blocks.map((block) => getBlockSearchEntry(block, pageTitleById)),
-    ]
+    const entries: SearchEntry[] = [
+      createSearchEntry(page.title, 'title', '标题'),
+      ...getPropertySearchEntries(page, definitions),
+      ...page.blocks.flatMap((block) => {
+        const entry = getBlockSearchEntry(block, pageTitleById)
+        return entry ? [entry] : []
+      }),
+    ].flatMap((entry) => (entry ? [entry] : []))
 
     for (const entry of entries) {
-      if (!entry) {
-        continue
-      }
-
       if (!normalizeSearchText(entry.searchText).includes(normalizedQuery)) {
         continue
       }
 
-      if (matchedExcerpts.has(entry.excerpt)) {
-        continue
-      }
-
-      matchedExcerpts.add(entry.excerpt)
       results.push({
         kind: 'page',
         pageId: page.id,
         title: page.title,
         icon: page.icon,
         excerpt: entry.excerpt,
+        matchSource: entry.matchSource,
+        matchKey: entry.matchKey,
+        sourceLabel: entry.sourceLabel,
       })
     }
   }
@@ -91,8 +116,10 @@ export function searchBoards(
         pageId,
         boardId: board.id,
         title: board.title,
-        icon: '\u25a1',
-        excerpt: pageTitle ? `\u767d\u677f · ${pageTitle}` : '\u767d\u677f',
+        icon: '□',
+        excerpt: pageTitle ? `白板 · ${pageTitle}` : '白板',
+        matchSource: 'whiteboard' as const,
+        sourceLabel: '白板',
       }
     })
 }
@@ -129,9 +156,7 @@ export function searchDataTables(
     }
 
     const pageTitle = pageTitleById.get(pageId)
-    const excerpt = pageTitle
-      ? `\u6570\u636e\u8868\u683c \u8def ${pageTitle}`
-      : '\u6570\u636e\u8868\u683c'
+    const excerpt = pageTitle ? `数据表格 · ${pageTitle}` : '数据表格'
 
     if (normalizeSearchText(dataTable.title).includes(normalizedQuery)) {
       results.push({
@@ -139,8 +164,10 @@ export function searchDataTables(
         pageId,
         databaseId: dataTable.id,
         title: dataTable.title,
-        icon: '\u25a6',
+        icon: '▦',
         excerpt,
+        matchSource: 'data_table',
+        sourceLabel: '数据表格',
       })
     }
 
@@ -155,8 +182,10 @@ export function searchDataTables(
         databaseId: dataTable.id,
         recordId: record.id,
         title: record.title,
-        icon: '\u25a6',
-        excerpt: `${dataTable.title} \u8def \u8bb0\u5f55`,
+        icon: '▦',
+        excerpt: `${dataTable.title} · 记录`,
+        matchSource: 'data_table_record',
+        sourceLabel: '记录',
       })
     }
   }
@@ -168,10 +197,38 @@ function normalizeSearchText(value: string) {
   return value.trim().toLocaleLowerCase()
 }
 
+function getPropertySearchEntries(
+  page: PageRecord,
+  definitions: PagePropertyDefinition[],
+): SearchEntry[] {
+  return definitions.flatMap((definition) => {
+    const rawValue = page.properties?.[definition.id]
+    const excerpt = Array.isArray(rawValue)
+      ? rawValue.map((item) => item.trim()).filter(Boolean).join(' / ')
+      : typeof rawValue === 'string'
+        ? rawValue.trim()
+        : ''
+
+    if (!excerpt) {
+      return []
+    }
+
+    return [
+      {
+        excerpt,
+        searchText: excerpt,
+        matchSource: 'property' as const,
+        matchKey: definition.key,
+        sourceLabel: definition.name,
+      },
+    ]
+  })
+}
+
 function getBlockSearchEntry(
   block: BlockRecord,
   pageTitleById: Map<string, string>,
-): { excerpt: string; searchText: string } | null {
+): SearchEntry | null {
   switch (block.type) {
     case 'paragraph':
     case 'heading_1':
@@ -179,25 +236,25 @@ function getBlockSearchEntry(
     case 'heading_3':
     case 'todo':
     case 'code':
-      return createSearchEntry(block.text)
+      return createSearchEntry(block.text, 'body', '正文')
     case 'bulleted_list':
     case 'numbered_list':
-      return createSearchEntry(block.items.join(' '))
+      return createSearchEntry(block.items.join(' '), 'body', '正文')
     case 'table':
-      return createSearchEntry(block.rows.flat().join(' '))
+      return createSearchEntry(block.rows.flat().join(' '), 'body', '正文')
     case 'image':
       return createMediaSearchEntry([block.name, block.caption, block.alt])
     case 'video':
     case 'audio':
       return createMediaSearchEntry([block.name, block.caption])
     case 'child_page':
-      return createSearchEntry(pageTitleById.get(block.pageId) ?? '')
+      return createSearchEntry(pageTitleById.get(block.pageId) ?? '', 'body', '正文')
     case 'whiteboard':
-      return createSearchEntry('\u767d\u677f')
+      return createSearchEntry('白板', 'whiteboard', '白板')
     case 'data_table':
-      return createSearchEntry('\u6570\u636e\u8868\u683c')
+      return createSearchEntry('数据表格', 'data_table', '数据表格')
     case 'mindmap':
-      return createSearchEntry('\u5bfc\u56fe')
+      return createSearchEntry('导图', 'body', '导图')
   }
 }
 
@@ -215,10 +272,16 @@ function createMediaSearchEntry(parts: string[]) {
       ...trimmedParts,
       ...buildFileNameSearchAliases(trimmedParts[0] ?? ''),
     ]),
+    matchSource: 'media' as const,
+    sourceLabel: '媒体',
   }
 }
 
-function createSearchEntry(text: string) {
+function createSearchEntry(
+  text: string,
+  matchSource: SearchResult['matchSource'],
+  sourceLabel: string,
+): SearchEntry | null {
   const excerpt = text.trim()
 
   if (!excerpt) {
@@ -228,6 +291,8 @@ function createSearchEntry(text: string) {
   return {
     excerpt,
     searchText: excerpt,
+    matchSource,
+    sourceLabel,
   }
 }
 

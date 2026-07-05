@@ -839,6 +839,7 @@ function AppRoutes({
       <SearchDialog
         open={isSearchOpen}
         pages={pages}
+        pageProperties={pageProperties}
         boards={boards}
         dataTables={dataTables}
         onClose={() => setIsSearchOpen(false)}

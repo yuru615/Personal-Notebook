@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import type { BoardRecord, DataTableRecord, PageRecord } from './types'
+import type { BoardRecord, DataTableRecord, PagePropertyDefinition, PageRecord } from './types'
 import { searchBoards, searchDataTables, searchPages } from './search'
 
 const now = '2026-06-15T00:00:00.000Z'
+const pagePropertyDefinitions: PagePropertyDefinition[] = []
 
 const pages: PageRecord[] = [
   {
@@ -145,25 +146,25 @@ const dataTables: DataTableRecord[] = [
 
 describe('searchPages', () => {
   it('returns pages whose title or block content matches the query', () => {
-    expect(searchPages(pages, 'customer')[0]).toMatchObject({
+    expect(searchPages(pages, pagePropertyDefinitions, 'customer')[0]).toMatchObject({
       pageId: 'page-a',
       title: 'Product Plan',
       excerpt: 'Core customer goals',
     })
 
-    expect(searchPages(pages, 'search')[0]).toMatchObject({
+    expect(searchPages(pages, pagePropertyDefinitions, 'search')[0]).toMatchObject({
       pageId: 'page-b',
       title: 'Tech Notes',
       excerpt: 'Module Status Search Open',
     })
 
-    expect(searchPages(pages, 'layout')[0]).toMatchObject({
+    expect(searchPages(pages, pagePropertyDefinitions, 'layout')[0]).toMatchObject({
       pageId: 'page-c',
       title: 'Canvas Structure',
       excerpt: 'Whiteboard layout notes',
     })
 
-    expect(searchPages(pages, '导图')[0]).toMatchObject({
+    expect(searchPages(pages, pagePropertyDefinitions, '导图')[0]).toMatchObject({
       pageId: 'page-d',
       title: 'Visual Thinking',
       excerpt: '导图',
@@ -171,7 +172,7 @@ describe('searchPages', () => {
   })
 
   it('returns no results for blank queries', () => {
-    expect(searchPages(pages, '   ')).toEqual([])
+    expect(searchPages(pages, pagePropertyDefinitions, '   ')).toEqual([])
   })
 
   it('returns multiple matches from the same page when different blocks match the query', () => {
@@ -191,7 +192,7 @@ describe('searchPages', () => {
       },
     ]
 
-    expect(searchPages(multiMatchPages, 'customer')).toMatchObject([
+    expect(searchPages(multiMatchPages, pagePropertyDefinitions, 'customer')).toMatchObject([
       {
         pageId: 'page-multi',
         excerpt: 'customer interview summary',
@@ -201,6 +202,59 @@ describe('searchPages', () => {
         excerpt: 'customer follow-up checklist',
       },
     ])
+  })
+
+  it('emits property hits with source labels and keeps multiple hits from the same page', () => {
+    const pageWithProperties: PageRecord = {
+      id: 'page-search',
+      parentId: null,
+      title: '搜索笔记',
+      icon: null,
+      cover: null,
+      blocks: [{ id: 'block-search', type: 'paragraph', text: '搜索需求梳理' }],
+      properties: {
+        prop_tags: ['产品', '搜索'],
+        prop_status: '进行中',
+      },
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    const definitions: PagePropertyDefinition[] = [
+      {
+        id: 'prop_tags',
+        key: 'tags',
+        name: '标签',
+        type: 'multiSelect',
+        config: {},
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: 'prop_status',
+        key: 'status',
+        name: '状态',
+        type: 'select',
+        config: {},
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]
+
+    const results = searchPages([pageWithProperties], definitions, '搜索')
+
+    expect(results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          pageId: 'page-search',
+          matchSource: 'property',
+          matchKey: 'tags',
+          sourceLabel: '标签',
+          excerpt: '产品 / 搜索',
+        }),
+      ]),
+    )
+    expect(results.filter((result) => result.pageId === 'page-search')).toHaveLength(3)
   })
 
   it('matches media file names more robustly across punctuation boundaries', () => {
@@ -235,14 +289,14 @@ describe('searchPages', () => {
       },
     ]
 
-    expect(searchPages(mediaPages, 'capture001 png')).toMatchObject([
+    expect(searchPages(mediaPages, pagePropertyDefinitions, 'capture001 png')).toMatchObject([
       {
         pageId: 'page-media',
         excerpt: 'Capture001.png',
       },
     ])
 
-    expect(searchPages(mediaPages, '20分 mp3')).toMatchObject([
+    expect(searchPages(mediaPages, pagePropertyDefinitions, '20分 mp3')).toMatchObject([
       {
         pageId: 'page-media',
         excerpt: '20分.mp3',
