@@ -26,7 +26,7 @@ function formatPropertyValue(value: PagePropertyValue) {
 
 function getNextMissingPropertyKey(definitions: PagePropertyDefinition[]) {
   const usedKeys = new Set(definitions.map((definition) => definition.key))
-  return defaultPropertyOrder.find((key) => !usedKeys.has(key)) ?? 'tags'
+  return defaultPropertyOrder.find((key) => !usedKeys.has(key)) ?? null
 }
 
 function getNextSelectValue(definition: PagePropertyDefinition, currentValue: PagePropertyValue) {
@@ -49,6 +49,8 @@ export function PagePropertiesPanel({
   onSetValue,
   onAddDefaultProperty,
 }: PagePropertiesPanelProps) {
+  const nextMissingPropertyKey = getNextMissingPropertyKey(definitions)
+
   function handleValueClick(definition: PagePropertyDefinition) {
     const currentValue = values[definition.id]
 
@@ -97,13 +99,15 @@ export function PagePropertiesPanel({
           </button>
         </div>
       ))}
-      <button
-        type="button"
-        className="page-property-add"
-        onClick={() => onAddDefaultProperty(getNextMissingPropertyKey(definitions))}
-      >
-        {uiCopy.pageProperties.add}
-      </button>
+      {nextMissingPropertyKey ? (
+        <button
+          type="button"
+          className="page-property-add"
+          onClick={() => onAddDefaultProperty(nextMissingPropertyKey)}
+        >
+          {uiCopy.pageProperties.add}
+        </button>
+      ) : null}
     </section>
   )
 }

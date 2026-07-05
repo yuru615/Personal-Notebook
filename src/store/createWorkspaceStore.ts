@@ -1414,15 +1414,15 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       )
 
       pushUndoSnapshot(state)
-      set({ saveStatus: 'saving' })
+      set({
+        boards: state.boards,
+        pages: nextPages,
+        saveStatus: 'saving',
+      })
 
       try {
-        await repository.save(createSnapshotFromState({ ...state, pages: nextPages }))
-        set({
-          boards: state.boards,
-          pages: nextPages,
-          saveStatus: 'saved',
-        })
+        await repository.save(createSnapshotFromState(get()))
+        set({ saveStatus: 'saved' })
       } catch {
         set({ saveStatus: 'error' })
         throw new Error('Failed to update page property value')

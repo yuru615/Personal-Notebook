@@ -89,4 +89,59 @@ describe('PagePropertiesPanel', () => {
     await user.click(screen.getByRole('button', { name: '添加属性' }))
     expect(onAddDefaultProperty).toHaveBeenCalled()
   })
+
+  it('hides the add button when all default properties already exist', () => {
+    render(
+      <PagePropertiesPanel
+        definitions={[
+          {
+            id: 'prop_tags',
+            key: 'tags',
+            name: '标签',
+            type: 'multiSelect',
+            config: {},
+            createdAt: '',
+            updatedAt: '',
+          },
+          {
+            id: 'prop_status',
+            key: 'status',
+            name: '状态',
+            type: 'select',
+            config: {},
+            createdAt: '',
+            updatedAt: '',
+          },
+          {
+            id: 'prop_date',
+            key: 'date',
+            name: '日期',
+            type: 'date',
+            config: {},
+            createdAt: '',
+            updatedAt: '',
+          },
+          {
+            id: 'prop_notes',
+            key: 'notes',
+            name: '备注',
+            type: 'text',
+            config: {},
+            createdAt: '',
+            updatedAt: '',
+          },
+        ]}
+        values={{
+          prop_tags: [],
+          prop_status: null,
+          prop_date: null,
+          prop_notes: null,
+        }}
+        onSetValue={vi.fn()}
+        onAddDefaultProperty={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: '添加属性' })).not.toBeInTheDocument()
+  })
 })

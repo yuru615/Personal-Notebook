@@ -162,6 +162,36 @@ describe('createWorkspaceStore data tables', () => {
     expect(counted.getSnapshot()?.pages.at(-1)?.properties?.[tagsDefinition!.id]).toEqual(['搜索'])
   })
 
+  it('keeps overlapping page property edits instead of overwriting earlier values', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+    const tagsDefinition = store.getState().pageProperties.find((item) => item.key === 'tags')
+    const statusDefinition = store.getState().pageProperties.find((item) => item.key === 'status')
+
+    expect(tagsDefinition).toBeTruthy()
+    expect(statusDefinition).toBeTruthy()
+
+    const firstUpdate = store
+      .getState()
+      .setPagePropertyValue('page_1', tagsDefinition!.id, ['产品', '搜索'])
+    const secondUpdate = store
+      .getState()
+      .setPagePropertyValue('page_1', statusDefinition!.id, '进行中')
+
+    await Promise.all([firstUpdate, secondUpdate])
+
+    expect(store.getState().pages[0]?.properties).toMatchObject({
+      [tagsDefinition!.id]: ['产品', '搜索'],
+      [statusDefinition!.id]: '进行中',
+    })
+    expect(counted.getSnapshot()?.pages[0]?.properties).toMatchObject({
+      [tagsDefinition!.id]: ['产品', '搜索'],
+      [statusDefinition!.id]: '进行中',
+    })
+  })
+
   it('persists pinned sidebar items for pages and data tables', async () => {
     const workspace = createWorkspace()
     workspace.pages[0].blocks = [
