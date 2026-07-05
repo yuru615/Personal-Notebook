@@ -4,6 +4,32 @@
 
 ## 维护规则
 
+## 2026-07-05 页面属性与搜索升级
+
+提交：未提交
+
+简要描述：
+
+为普通页面增加轻量页面属性，并让搜索支持属性命中、结果分组、标签/状态筛选和同页多命中展示。
+
+详细描述：
+
+- 普通页面新增标签、状态、日期、备注四类共享页面属性。
+- 页面属性显示在标题下方、正文上方，保持紧凑元信息层。
+- 搜索支持标题、正文、媒体文件名和页面属性命中来源展示。
+- 搜索结果支持按页面、白板、数据表分组，并增加标签、状态筛选入口。
+- 同一页面的多个命中片段现在会直接显示出来，不再只保留单条摘要。
+- SQLite 和页面备份结构已兼容页面属性定义与页面属性值。
+- 应用层补充普通页面路径集成回归，明确约束标题下属性展示和属性命中搜索入口保持连通。
+
+验证情况：
+
+- 已通过 `npx vitest run src/app/App.test.tsx src/components/editor/PageHeader.test.tsx`
+- 已通过 focused vitest：`npx vitest run src/domain/pageProperties.test.ts src/store/createWorkspaceStore.test.ts src/domain/search.test.ts src/components/editor/PagePropertiesPanel.test.tsx src/components/search/SearchDialog.test.tsx src/app/App.test.tsx src/components/editor/PageHeader.test.tsx src/lib/workspaceRepository.test.ts src/lib/storageClient.test.ts`
+- 已通过全量测试的本机等价命令：`C:/Program Files/nodejs/npm.cmd run test`（本机 `npm test` 入口解析异常，直接 `npm.cmd` 可正常执行）
+- 已通过构建：`C:/Program Files/nodejs/npm.cmd run build`
+- `cargo test` 本轮未能完成：当前沙箱禁止写入 `src-tauri/target`，运行时在 `src-tauri/target/debug/.cargo-build-lock` 处收到“拒绝访问”
+
 ## 2026-07-05 左侧页面结构区分组折叠
 
 提交：未提交

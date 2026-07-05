@@ -305,6 +305,69 @@ describe('App', () => {
     ).toBeInTheDocument()
   })
 
+  it('shows page properties below the title and lets search surface property hits on normal pages', async () => {
+    const user = userEvent.setup()
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pageProperties: [
+        {
+          id: 'prop_tags',
+          key: 'tags',
+          name: '标签',
+          type: 'multiSelect',
+          config: {},
+          createdAt: '2026-07-05T00:00:00.000Z',
+          updatedAt: '2026-07-05T00:00:00.000Z',
+        },
+      ],
+      pages: [
+        {
+          id: 'page_property_search',
+          parentId: null,
+          title: '产品规划',
+          icon: null,
+          cover: null,
+          properties: { prop_tags: ['产品', '搜索'] },
+          blocks: [{ id: 'block_1', type: 'paragraph', text: '发布节奏' }],
+          createdAt: '2026-07-05T00:00:00.000Z',
+          updatedAt: '2026-07-05T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: 'page_property_search' },
+    }
+
+    render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={['/pages/page_property_search']}
+      />,
+    )
+
+    const titleInput = await screen.findByDisplayValue('产品规划')
+    const propertiesPanel = screen.getByRole('region', { name: '页面属性' })
+
+    expect(titleInput.compareDocumentPosition(propertiesPanel)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    )
+    expect(within(propertiesPanel).getByRole('button', { name: '产品 / 搜索' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '搜索' }))
+
+    const searchInput = await screen.findByPlaceholderText('搜索页面或内容')
+    const searchDialog = screen.getByRole('dialog', { name: '全局搜索' })
+
+    await user.type(searchInput, '搜索')
+
+    const pageGroup = await within(searchDialog).findByRole('region', {
+      name: '页面',
+    })
+
+    expect(within(pageGroup).getByText('产品 / 搜索')).toBeInTheDocument()
+    expect(within(pageGroup).getByText('标签')).toBeInTheDocument()
+  })
+
   it('uses workspace undo inside the focused rich text editor after a floating toolbar bold action', async () => {
     const user = userEvent.setup()
     const pageId = 'page_rich_text_undo'
