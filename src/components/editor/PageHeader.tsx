@@ -7,6 +7,7 @@ import { uiCopy } from '../../ui/copy'
 interface PageHeaderProps {
   page: PageRecord
   bodyClassName?: string
+  meta?: ReactNode
   onRename: (title: string) => void
   onChangeIcon: (icon: string | null) => void
   onChangeCover: (cover: string | null) => void
@@ -210,6 +211,7 @@ export function PageHeaderToolbar({
 export function PageHeader({
   page,
   bodyClassName,
+  meta,
   onRename,
   onChangeIcon,
   onChangeCover,
@@ -268,6 +270,7 @@ export function PageHeader({
           defaultValue={page.title}
           onBlur={handleBlur}
         />
+        {meta ? <div className="page-header-meta">{meta}</div> : null}
       </div>
     </header>
   )

@@ -2,6 +2,11 @@
 import { extractMindmapTitle } from '../components/mindmap/mindmapModel'
 import { normalizeWhiteboardSnapshot } from '../components/whiteboard/whiteboardModel'
 import { getTextBlockStyle, isTextStyleableBlock } from '../domain/blockTextStyle'
+import {
+  createDefaultPagePropertyDefinitions,
+  normalizePagePropertyDefinitions,
+  normalizePagePropertyValues,
+} from '../domain/pageProperties'
 import { normalizeRichText, richTextFromPlainText } from '../domain/richText'
 import { createSeedWorkspace } from '../domain/seed'
 import type {
@@ -12,6 +17,9 @@ import type {
   MindmapRecord,
   PageFontFamily,
   PageId,
+  PagePropertyDefinition,
+  PagePropertyOption,
+  PagePropertyValue,
   PageRecord,
   RichTextSegment,
   SaveStatus,
@@ -42,6 +50,7 @@ export interface WorkspaceState {
   dataTables: DataTableRecord[]
   mindmaps: MindmapRecord[]
   pages: PageRecord[]
+  pageProperties: PagePropertyDefinition[]
   settings: WorkspaceSettings
   currentPageId: PageId | null
   saveStatus: SaveStatus
@@ -57,6 +66,14 @@ export interface WorkspaceState {
   setPageIcon: (pageId: PageId, icon: string | null) => Promise<void>
   setPageCover: (pageId: PageId, cover: string | null) => Promise<void>
   setPageOutlineVisible: (pageId: PageId, showOutline: boolean) => Promise<void>
+  setPagePropertyValue: (
+    pageId: PageId,
+    propertyId: string,
+    value: PagePropertyValue,
+  ) => Promise<void>
+  appendDefaultPageProperty: (key: 'tags' | 'status' | 'date' | 'notes') => Promise<void>
+  renamePageProperty: (propertyId: string, name: string) => Promise<void>
+  setPagePropertyOptions: (propertyId: string, options: PagePropertyOption[]) => Promise<void>
   renameBoard: (boardId: string, title: string) => Promise<void>
   updateBoardSnapshot: (boardId: string, snapshot: unknown) => Promise<void>
   importBoard: (boardId: string, payload: { title: string | null; snapshot: unknown }) => Promise<void>
@@ -109,6 +126,7 @@ function createEmptyState(): WorkspaceState {
     dataTables: [],
     mindmaps: [],
     pages: [],
+    pageProperties: [],
     settings: {
       lastOpenedPageId: null,
       sidebarLayout: 'compact',
@@ -149,6 +167,18 @@ function createEmptyState(): WorkspaceState {
       throw new Error('not implemented')
     },
     setPageOutlineVisible: async () => {
+      throw new Error('not implemented')
+    },
+    setPagePropertyValue: async () => {
+      throw new Error('not implemented')
+    },
+    appendDefaultPageProperty: async () => {
+      throw new Error('not implemented')
+    },
+    renamePageProperty: async () => {
+      throw new Error('not implemented')
+    },
+    setPagePropertyOptions: async () => {
       throw new Error('not implemented')
     },
     renameBoard: async () => {
@@ -254,6 +284,7 @@ function createPageRecord(parentId?: PageId): PageRecord {
     title: UNTITLED_PAGE_TITLE,
     icon: null,
     cover: null,
+    properties: {},
     isFullWidth: false,
     isSmallText: false,
     fontFamily: 'default',
@@ -569,6 +600,17 @@ function normalizeWorkspaceSnapshot(snapshot: WorkspaceSnapshot) {
     didChange = true
   }
 
+  const now = new Date().toISOString()
+  const normalizedPageProperties = normalizePagePropertyDefinitions(snapshot.pageProperties)
+  const pageProperties =
+    normalizedPageProperties.length > 0
+      ? normalizedPageProperties
+      : createDefaultPagePropertyDefinitions(now)
+
+  if (JSON.stringify(snapshot.pageProperties ?? null) !== JSON.stringify(pageProperties)) {
+    didChange = true
+  }
+
 
   const liveBlockTypes = new Set<BlockRecord['type']>([
     'paragraph',
@@ -599,17 +641,31 @@ function normalizeWorkspaceSnapshot(snapshot: WorkspaceSnapshot) {
       didChange = true
       return {
         ...page,
+        properties: normalizePagePropertyValues(pageProperties, page.properties),
         blocks: normalized.blocks,
       }
     }
 
-    return page
+    const normalizedProperties = normalizePagePropertyValues(pageProperties, page.properties)
+
+    if (JSON.stringify(page.properties ?? {}) !== JSON.stringify(normalizedProperties)) {
+      didChange = true
+      return {
+        ...page,
+        properties: normalizedProperties,
+      }
+    }
+
+    return {
+      ...page,
+      properties: page.properties ?? normalizedProperties,
+    }
   })
 
   return {
     snapshot: didChange
-      ? { boards, dataTables, mindmaps, pages, settings }
-      : { ...snapshot, boards, dataTables, mindmaps, settings },
+      ? { boards, dataTables, mindmaps, pages, pageProperties, settings }
+      : { ...snapshot, boards, dataTables, mindmaps, pages, pageProperties, settings },
     didChange,
   }
 }
@@ -824,19 +880,26 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
   let bootstrapTask: Promise<void> | null = null
 
   function createSnapshotFromState(
-    state: Pick<WorkspaceState, 'boards' | 'dataTables' | 'mindmaps' | 'pages' | 'settings'>,
+    state: Pick<
+      WorkspaceState,
+      'boards' | 'dataTables' | 'mindmaps' | 'pages' | 'pageProperties' | 'settings'
+    >,
   ): WorkspaceSnapshot {
     return structuredClone({
       boards: state.boards,
       dataTables: state.dataTables,
       mindmaps: state.mindmaps,
       pages: state.pages,
+      pageProperties: state.pageProperties,
       settings: state.settings,
     })
   }
 
   function pushUndoSnapshot(
-    state: Pick<WorkspaceState, 'boards' | 'dataTables' | 'mindmaps' | 'pages' | 'settings'>,
+    state: Pick<
+      WorkspaceState,
+      'boards' | 'dataTables' | 'mindmaps' | 'pages' | 'pageProperties' | 'settings'
+    >,
   ) {
     undoStack.push(createSnapshotFromState(state))
     redoStack.length = 0
@@ -866,6 +929,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
             dataTables: latestState.dataTables,
             mindmaps: latestState.mindmaps,
             pages: latestState.pages,
+            pageProperties: latestState.pageProperties,
             settings: latestState.settings,
           })
 
@@ -928,6 +992,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           dataTables: nextDataTables,
           mindmaps: nextMindmaps,
           pages: latestState.pages,
+          pageProperties: latestState.pageProperties,
           settings: latestState.settings,
         })
       })
@@ -973,6 +1038,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           dataTables: snapshot.dataTables ?? [],
           mindmaps: snapshot.mindmaps ?? [],
           pages: snapshot.pages,
+          pageProperties: snapshot.pageProperties ?? [],
           settings: createSettings(
             currentPageId,
             snapshot.settings.sidebarLayout ?? 'compact',
@@ -1329,6 +1395,158 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       } catch {
         set({ saveStatus: 'error' })
         throw new Error('Failed to update page outline visibility')
+      }
+    },
+
+    setPagePropertyValue: async (pageId: PageId, propertyId: string, value: PagePropertyValue) => {
+      const state = get()
+      const nextPages = state.pages.map((page) =>
+        page.id === pageId
+          ? {
+              ...page,
+              updatedAt: new Date().toISOString(),
+              properties: {
+                ...(page.properties ?? {}),
+                [propertyId]: value,
+              },
+            }
+          : page,
+      )
+
+      pushUndoSnapshot(state)
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save(createSnapshotFromState({ ...state, pages: nextPages }))
+        set({
+          boards: state.boards,
+          pages: nextPages,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to update page property value')
+      }
+    },
+
+    appendDefaultPageProperty: async (key) => {
+      const state = get()
+
+      if (state.pageProperties.some((item) => item.key === key)) {
+        return
+      }
+
+      const definition = createDefaultPagePropertyDefinitions(new Date().toISOString()).find(
+        (item) => item.key === key,
+      )
+
+      if (!definition) {
+        return
+      }
+
+      const nextPageProperties = [...state.pageProperties, definition]
+      const nextPages = state.pages.map((page) => ({
+        ...page,
+        properties: normalizePagePropertyValues(nextPageProperties, page.properties),
+      }))
+
+      pushUndoSnapshot(state)
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save(
+          createSnapshotFromState({
+            ...state,
+            pageProperties: nextPageProperties,
+            pages: nextPages,
+          }),
+        )
+        set({
+          boards: state.boards,
+          pages: nextPages,
+          pageProperties: nextPageProperties,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to append page property')
+      }
+    },
+
+    renamePageProperty: async (propertyId, name) => {
+      const state = get()
+      const nextName = name.trim()
+
+      if (!nextName) {
+        return
+      }
+
+      const nextPageProperties = state.pageProperties.map((definition) =>
+        definition.id === propertyId
+          ? {
+              ...definition,
+              name: nextName,
+              updatedAt: new Date().toISOString(),
+            }
+          : definition,
+      )
+
+      pushUndoSnapshot(state)
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save(
+          createSnapshotFromState({
+            ...state,
+            pageProperties: nextPageProperties,
+          }),
+        )
+        set({
+          boards: state.boards,
+          pages: state.pages,
+          pageProperties: nextPageProperties,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to rename page property')
+      }
+    },
+
+    setPagePropertyOptions: async (propertyId, options) => {
+      const state = get()
+      const nextPageProperties = state.pageProperties.map((definition) =>
+        definition.id === propertyId
+          ? {
+              ...definition,
+              config: {
+                ...definition.config,
+                options: structuredClone(options),
+              },
+              updatedAt: new Date().toISOString(),
+            }
+          : definition,
+      )
+
+      pushUndoSnapshot(state)
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save(
+          createSnapshotFromState({
+            ...state,
+            pageProperties: nextPageProperties,
+          }),
+        )
+        set({
+          boards: state.boards,
+          pages: state.pages,
+          pageProperties: nextPageProperties,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to update page property options')
       }
     },
 
@@ -2755,6 +2973,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           dataTables: snapshot.dataTables ?? [],
           mindmaps: snapshot.mindmaps ?? [],
           pages: snapshot.pages,
+          pageProperties: snapshot.pageProperties ?? [],
           settings: snapshot.settings,
           currentPageId,
           saveStatus: 'saved',
@@ -2790,6 +3009,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           dataTables: snapshot.dataTables ?? [],
           mindmaps: snapshot.mindmaps ?? [],
           pages: snapshot.pages,
+          pageProperties: snapshot.pageProperties ?? [],
           settings: snapshot.settings,
           currentPageId,
           saveStatus: 'saved',

@@ -12,6 +12,7 @@ import {
 } from 'react-router-dom'
 import { BlockEditor } from '../components/editor/BlockEditor'
 import { PageHeader, PageHeaderToolbar } from '../components/editor/PageHeader'
+import { PagePropertiesPanel } from '../components/editor/PagePropertiesPanel'
 import { PageOutline } from '../components/editor/PageOutline'
 import { MindmapFrame } from '../components/mindmap/MindmapFrame'
 import { MindmapPage } from '../components/mindmap/MindmapPage'
@@ -37,6 +38,8 @@ import type {
   DataTableRecord,
   MindmapRecord,
   PageFontFamily,
+  PagePropertyDefinition,
+  PagePropertyValue,
   PageRecord,
   SaveStatus,
   SidebarPinnedItem,
@@ -390,6 +393,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       dataTables={state.dataTables}
       mindmaps={state.mindmaps}
       pages={state.pages}
+      pageProperties={state.pageProperties}
       currentPageId={state.currentPageId}
       sidebarLayout={state.settings.sidebarLayout ?? 'compact'}
       sidebarWidth={state.settings.sidebarWidth ?? 272}
@@ -451,6 +455,10 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onTogglePageOutlineVisible={(pageId, showOutline) =>
         store.getState().setPageOutlineVisible(pageId, showOutline)
       }
+      onSetPagePropertyValue={(pageId, propertyId, value) =>
+        store.getState().setPagePropertyValue(pageId, propertyId, value)
+      }
+      onAddDefaultPageProperty={(key) => store.getState().appendDefaultPageProperty(key)}
       onUpdateBlock={(pageId, blockId, nextBlock) =>
         store.getState().updateBlock(pageId, blockId, nextBlock)
       }
@@ -562,6 +570,7 @@ interface AppRoutesProps {
   dataTables: DataTableRecord[]
   mindmaps: MindmapRecord[]
   pages: AppState['pages']
+  pageProperties: PagePropertyDefinition[]
   currentPageId: AppState['currentPageId']
   sidebarLayout: NonNullable<WorkspaceSettings['sidebarLayout']>
   sidebarWidth: number
@@ -597,6 +606,12 @@ interface AppRoutesProps {
   onChangePageIcon: (pageId: string, icon: string | null) => Promise<void>
   onChangePageCover: (pageId: string, cover: string | null) => Promise<void>
   onTogglePageOutlineVisible: (pageId: string, showOutline: boolean) => Promise<void>
+  onSetPagePropertyValue: (
+    pageId: string,
+    propertyId: string,
+    value: PagePropertyValue,
+  ) => Promise<void>
+  onAddDefaultPageProperty: (key: 'tags' | 'status' | 'date' | 'notes') => Promise<void>
   onUpdateBlock: (
     pageId: string,
     blockId: string,
@@ -641,6 +656,7 @@ function AppRoutes({
   dataTables,
   mindmaps,
   pages,
+  pageProperties,
   currentPageId,
   sidebarLayout,
   sidebarWidth,
@@ -673,6 +689,8 @@ function AppRoutes({
   onChangePageIcon,
   onChangePageCover,
   onTogglePageOutlineVisible,
+  onSetPagePropertyValue,
+  onAddDefaultPageProperty,
   onUpdateBlock,
   onInsertBlock,
   onInsertParagraphBlock,
@@ -854,6 +872,7 @@ function AppRoutes({
                 dataTables={dataTables}
                 mindmaps={mindmaps}
                 pages={pages}
+                pageProperties={pageProperties}
                 currentPageId={currentPageId}
                 archiveTask={archiveTask}
                 onRoutePageChange={onRoutePageChange}
@@ -865,6 +884,8 @@ function AppRoutes({
                 onChangePageIcon={onChangePageIcon}
                 onChangePageCover={onChangePageCover}
                 onTogglePageOutlineVisible={onTogglePageOutlineVisible}
+                onSetPagePropertyValue={onSetPagePropertyValue}
+                onAddDefaultPageProperty={onAddDefaultPageProperty}
                 onUpdateBlock={onUpdateBlock}
                 onInsertBlock={onInsertBlock}
                 onInsertParagraphBlock={onInsertParagraphBlock}
@@ -996,6 +1017,7 @@ interface PageRouteProps {
   dataTables: DataTableRecord[]
   mindmaps: MindmapRecord[]
   pages: PageRecord[]
+  pageProperties: PagePropertyDefinition[]
   currentPageId: string | null
   archiveTask: ArchiveTaskStatus | null
   onRoutePageChange: (pageId: string) => Promise<void>
@@ -1007,6 +1029,12 @@ interface PageRouteProps {
   onChangePageIcon: (pageId: string, icon: string | null) => Promise<void>
   onChangePageCover: (pageId: string, cover: string | null) => Promise<void>
   onTogglePageOutlineVisible: (pageId: string, showOutline: boolean) => Promise<void>
+  onSetPagePropertyValue: (
+    pageId: string,
+    propertyId: string,
+    value: PagePropertyValue,
+  ) => Promise<void>
+  onAddDefaultPageProperty: (key: 'tags' | 'status' | 'date' | 'notes') => Promise<void>
   onUpdateBlock: (
     pageId: string,
     blockId: string,
@@ -1053,6 +1081,7 @@ function PageRoute({
   dataTables,
   mindmaps,
   pages,
+  pageProperties,
   currentPageId,
   archiveTask,
   onRoutePageChange,
@@ -1064,6 +1093,8 @@ function PageRoute({
   onChangePageIcon,
   onChangePageCover,
   onTogglePageOutlineVisible,
+  onSetPagePropertyValue,
+  onAddDefaultPageProperty,
   onUpdateBlock,
   onInsertBlock,
   onInsertParagraphBlock,
@@ -1191,6 +1222,18 @@ function PageRoute({
       <PageHeader
         page={page}
         bodyClassName={pageContentClassName}
+        meta={
+          <PagePropertiesPanel
+            definitions={pageProperties}
+            values={page.properties ?? {}}
+            onSetValue={(propertyId, value) => {
+              void onSetPagePropertyValue(page.id, propertyId, value)
+            }}
+            onAddDefaultProperty={(key) => {
+              void onAddDefaultPageProperty(key)
+            }}
+          />
+        }
         showTopRow={false}
         showCover={false}
         onRename={(title) => {
@@ -1832,6 +1875,7 @@ function createWorkspaceBackupSnapshot(state: AppState): WorkspaceSnapshot {
     dataTables: structuredClone(state.dataTables),
     mindmaps: structuredClone(state.mindmaps),
     pages: structuredClone(state.pages),
+    pageProperties: structuredClone(state.pageProperties),
     settings: structuredClone(state.settings),
   }
 }

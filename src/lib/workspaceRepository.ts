@@ -61,6 +61,7 @@ export function createStorageWorkspaceRepository({
           ...snapshot,
           dataTables: snapshot.dataTables ?? persistedSnapshot?.dataTables ?? [],
           mindmaps: snapshot.mindmaps ?? persistedSnapshot?.mindmaps ?? [],
+          pageProperties: snapshot.pageProperties ?? persistedSnapshot?.pageProperties ?? [],
         }
 
         if (persistedSnapshot && canSaveIncrementally(persistedSnapshot, nextSnapshot)) {

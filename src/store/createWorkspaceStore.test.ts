@@ -140,6 +140,28 @@ describe('createWorkspaceStore data tables', () => {
     })
   })
 
+  it('reuses workspace property definitions across pages and persists page values', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+    const tagsDefinition = store.getState().pageProperties.find((item) => item.key === 'tags')
+    expect(tagsDefinition).toBeTruthy()
+
+    await store.getState().setPagePropertyValue('page_1', tagsDefinition!.id, ['产品', '搜索'])
+    await store.getState().createPage()
+
+    const nextPageId = store.getState().pages.at(-1)?.id
+    await store.getState().setPagePropertyValue(nextPageId!, tagsDefinition!.id, ['搜索'])
+
+    expect(store.getState().pageProperties.filter((item) => item.key === 'tags')).toHaveLength(1)
+    expect(counted.getSnapshot()?.pages[0].properties?.[tagsDefinition!.id]).toEqual([
+      '产品',
+      '搜索',
+    ])
+    expect(counted.getSnapshot()?.pages.at(-1)?.properties?.[tagsDefinition!.id]).toEqual(['搜索'])
+  })
+
   it('persists pinned sidebar items for pages and data tables', async () => {
     const workspace = createWorkspace()
     workspace.pages[0].blocks = [

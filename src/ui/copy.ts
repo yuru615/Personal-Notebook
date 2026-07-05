@@ -54,6 +54,13 @@ export const uiCopy = {
     adaptiveWidth: '自适应正文宽度',
     typeSlash: '输入 / 打开命令菜单',
   },
+  pageProperties: {
+    title: '页面属性',
+    add: '添加属性',
+    emptyValue: '空',
+    editValue: '编辑属性',
+    editMultiSelect: '编辑标签，使用逗号分隔',
+  },
   editor: {
     addBlock: '添加块',
     childPage: '子页面',

@@ -1163,6 +1163,55 @@ a {
   outline: 0;
 }
 
+.page-header-meta {
+  margin-top: 12px;
+}
+
+.page-properties-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.page-property-row {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.page-property-name {
+  color: #9b9a97;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.page-property-value,
+.page-property-add {
+  border: 0;
+  background: #f7f6f3;
+  color: #37352f;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 32px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.page-property-value:hover,
+.page-property-add:hover {
+  background: #f1f0ed;
+}
+
+.page-property-add {
+  color: #5f5e59;
+}
+
 .page-header-actions {
   display: flex;
   gap: 4px;
