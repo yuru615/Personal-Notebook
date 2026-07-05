@@ -26,6 +26,7 @@ interface ExportImportPanelProps {
   onToggleFontFamily: (value: PageFontFamily) => void
   onToggleOutlineVisible: (value: boolean) => void
   onExportArchive: () => void | Promise<void>
+  onExportWorkspace: () => void | Promise<void>
   onImportArchive: () => void | Promise<void>
   onCleanupOrphanBoards: () => void | Promise<void>
   onCleanupOrphanDataTables: () => void | Promise<void>
@@ -44,6 +45,7 @@ export function ExportImportPanel({
   onToggleFontFamily,
   onToggleOutlineVisible,
   onExportArchive,
+  onExportWorkspace,
   onImportArchive,
   onCleanupOrphanBoards,
   onCleanupOrphanDataTables,
@@ -87,6 +89,15 @@ export function ExportImportPanel({
 
     closeMenu()
     void onImportArchive()
+  }
+
+  function handleExportWorkspace() {
+    if (isArchiveBusy) {
+      return
+    }
+
+    closeMenu()
+    void onExportWorkspace()
   }
 
   function handleCleanupOrphanBoards() {
@@ -205,6 +216,14 @@ export function ExportImportPanel({
               onClick={handleExportArchive}
             >
               <span className="page-menu-item-label">{uiCopy.export.archive}</span>
+            </button>
+            <button
+              type="button"
+              className="page-menu-action"
+              disabled={isArchiveBusy}
+              onClick={handleExportWorkspace}
+            >
+              <span className="page-menu-item-label">{uiCopy.export.workspace}</span>
             </button>
             <button
               type="button"

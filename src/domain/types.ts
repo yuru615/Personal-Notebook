@@ -4,6 +4,17 @@ export type BoardId = string
 export type DataTableId = string
 export type MindmapId = string
 
+export type SidebarPinnedItem =
+  | {
+      kind: 'page'
+      pageId: PageId
+    }
+  | {
+      kind: 'data_table'
+      pageId: PageId
+      dataTableId: DataTableId
+    }
+
 export type BlockType =
   | 'paragraph'
   | 'heading_1'
@@ -232,6 +243,7 @@ export interface WorkspaceSettings {
   lastOpenedPageId: PageId | null
   sidebarLayout?: 'compact' | 'classic'
   sidebarWidth?: number
+  pinnedSidebarItems?: SidebarPinnedItem[]
 }
 
 export interface WorkspaceSnapshot {

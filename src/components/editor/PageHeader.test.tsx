@@ -1,3 +1,4 @@
+import { useState, type ReactNode } from 'react'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
@@ -12,6 +13,20 @@ const page = {
   createdAt: '',
   updatedAt: '',
   blocks: [],
+}
+
+function ExternalMenuHarness({ children }: { children?: ReactNode }) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <>
+      <button type="button" onClick={() => setOpen((value) => !value)}>
+        更多
+      </button>
+      {open ? <div role="dialog" aria-label="更多菜单">导出页面</div> : null}
+      {children}
+    </>
+  )
 }
 
 describe('PageHeader', () => {
@@ -132,6 +147,28 @@ describe('PageHeader', () => {
     await user.click(screen.getByRole('button', { name: '移除封面' }))
 
     expect(onChangeCover).toHaveBeenCalledWith(null)
+  })
+
+  it('closes the cover picker before opening external actions', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <PageHeader
+        page={page}
+        onRename={vi.fn()}
+        onChangeIcon={vi.fn()}
+        onChangeCover={vi.fn()}
+        actions={<ExternalMenuHarness />}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '添加封面' }))
+    expect(screen.getByRole('dialog', { name: '添加封面' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '更多' }))
+
+    expect(screen.queryByRole('dialog', { name: '添加封面' })).not.toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '更多菜单' })).toBeInTheDocument()
   })
 
   it('does not render the removed comment entry in the page header', () => {

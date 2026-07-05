@@ -32,16 +32,43 @@ describe('app shell layout', () => {
     )
   })
 
-  it('keeps the sidebar pinned with its own scroll area', () => {
+  it('keeps the sidebar pinned while the tree content owns the scroll area', () => {
     const sidebar = cssRule('.sidebar')
+    const sidebarLayout = cssRule('.sidebar-layout')
+    const sidebarFixedTop = cssRule('.sidebar-fixed-top')
+    const sidebarFixedTopScrolled = cssRule('.sidebar-fixed-top-scrolled::after')
+    const sidebarScrollContent = cssRule('.sidebar-scroll-content')
 
     expect(sidebar).toContain('position: sticky;')
     expect(sidebar).toContain('top: 0;')
     expect(sidebar).toContain('align-self: start;')
     expect(sidebar).toContain('height: 100vh;')
-    expect(sidebar).toContain('overflow-y: auto;')
+    expect(sidebar).toContain('overflow: hidden;')
     expect(sidebar).toContain('overflow-x: hidden;')
-    expect(sidebar).toContain('overscroll-behavior: contain;')
+    expect(sidebarLayout).toContain('grid-template-rows: auto minmax(0, 1fr);')
+    expect(sidebarLayout).toContain('height: 100%;')
+    expect(sidebarScrollContent).toContain('min-height: 0;')
+    expect(sidebarScrollContent).toContain('margin-right: calc(-1 * var(--sidebar-inline-padding));')
+    expect(sidebarScrollContent).toContain('padding-right: calc(var(--sidebar-inline-padding) - 2px);')
+    expect(sidebarScrollContent).toContain('overflow-y: auto;')
+    expect(sidebarScrollContent).toContain('overflow-x: hidden;')
+    expect(sidebarScrollContent).toContain('overscroll-behavior: contain;')
+    expect(sidebarFixedTop).toContain('position: relative;')
+    expect(cssRule('.sidebar-fixed-top::after')).toContain('background: #fbfbfa;')
+    expect(cssRule('.sidebar-fixed-top::after')).toContain('box-shadow: none;')
+    expect(sidebarFixedTopScrolled).toContain('box-shadow:')
+  })
+
+  it('keeps sidebar grid tracks packed at the top instead of stretching them into blank space', () => {
+    const sidebarScrollContent = cssRule('.sidebar-scroll-content')
+    const sidebarGroup = cssRule('.sidebar-group')
+    const sidebarSectionBody = cssRule('.sidebar-section-body')
+    const sidebarTree = cssRule('.sidebar-tree')
+
+    expect(sidebarScrollContent).toContain('align-content: start;')
+    expect(sidebarGroup).toContain('align-content: start;')
+    expect(sidebarSectionBody).toContain('align-content: start;')
+    expect(sidebarTree).toContain('align-content: start;')
   })
 
   it('keeps sidebar menus above the page content column', () => {
@@ -80,6 +107,12 @@ describe('app shell layout', () => {
     expect(sidebarTree).toContain('min-width: 0;')
     expect(sidebarTreeEntry).toContain('min-width: 0;')
     expect(sidebarTreeRow).toContain('min-width: 0;')
+  })
+
+  it('avoids keeping extra section spacing after a sidebar group is collapsed', () => {
+    const sidebarSectionGroup = cssRule('.sidebar-section-group')
+
+    expect(sidebarSectionGroup).toContain('margin-bottom: 0;')
   })
 
   it('defines a dedicated drag handle for resizing the sidebar', () => {

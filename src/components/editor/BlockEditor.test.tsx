@@ -92,6 +92,62 @@ describe('BlockEditor', () => {
     expect(screen.getByDisplayValue('A')).toBeInTheDocument()
   })
 
+  it('marks heading rows and feature card rows for spacing rules', () => {
+    const spacingPage = {
+      ...page,
+      blocks: [
+        { id: 'heading-block', type: 'heading_2' as const, text: 'Section title' },
+        { id: 'child-page-block', type: 'child_page' as const, pageId: 'child-page-1' },
+      ],
+    }
+    const childPage = {
+      ...page,
+      id: 'child-page-1',
+      title: 'Nested page',
+      blocks: [],
+    }
+    const { container } = render(
+      <BlockEditor
+        page={spacingPage as never}
+        allPages={[spacingPage as never, childPage as never]}
+        onUpdateBlock={vi.fn()}
+      />,
+    )
+
+    const rows = Array.from(container.querySelectorAll('.editor-row'))
+
+    expect(rows[0]).toHaveClass('editor-row-kind-heading')
+    expect(rows[1]).toHaveClass('editor-row-kind-feature-card')
+  })
+
+  it('marks feature card rows followed by heading rows for spacing rules', () => {
+    const spacingPage = {
+      ...page,
+      blocks: [
+        { id: 'child-page-block', type: 'child_page' as const, pageId: 'child-page-1' },
+        { id: 'heading-block', type: 'heading_2' as const, text: 'Section title' },
+      ],
+    }
+    const childPage = {
+      ...page,
+      id: 'child-page-1',
+      title: 'Nested page',
+      blocks: [],
+    }
+    const { container } = render(
+      <BlockEditor
+        page={spacingPage as never}
+        allPages={[spacingPage as never, childPage as never]}
+        onUpdateBlock={vi.fn()}
+      />,
+    )
+
+    const rows = Array.from(container.querySelectorAll('.editor-row'))
+
+    expect(rows[0]).toHaveClass('editor-row-kind-feature-card')
+    expect(rows[1]).toHaveClass('editor-row-kind-heading')
+  })
+
   it('renders saved text styles on text blocks', () => {
     const styledPage = {
       ...page,

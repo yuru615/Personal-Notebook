@@ -14,6 +14,8 @@ const PAGE_PACKAGE_SECTION_LABEL = '页面导入导出'
 const EXPORT_PAGE_LABEL = '导出当前页面'
 const IMPORT_PAGE_PACKAGE_LABEL = '导入页面包'
 
+const EXPORT_WORKSPACE_LABEL = '全部导出'
+
 function renderPanel(overrides: Partial<ComponentProps<typeof ExportImportPanel>> = {}) {
   return render(
     <ExportImportPanel
@@ -27,6 +29,7 @@ function renderPanel(overrides: Partial<ComponentProps<typeof ExportImportPanel>
       onToggleFontFamily={vi.fn()}
       onToggleOutlineVisible={vi.fn()}
       onExportArchive={vi.fn()}
+      onExportWorkspace={vi.fn()}
       onImportArchive={vi.fn()}
       onCleanupOrphanBoards={vi.fn()}
       onCleanupOrphanDataTables={vi.fn()}
@@ -56,6 +59,7 @@ describe('ExportImportPanel', () => {
     expect(screen.getByLabelText(uiCopy.page.outlineVisible)).toBeInTheDocument()
     expect(screen.getByText(PAGE_PACKAGE_SECTION_LABEL)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: EXPORT_PAGE_LABEL })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: EXPORT_WORKSPACE_LABEL })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: IMPORT_PAGE_PACKAGE_LABEL })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: OLD_EXPORT_JSON_LABEL })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: OLD_EXPORT_MARKDOWN_LABEL })).not.toBeInTheDocument()
@@ -72,6 +76,19 @@ describe('ExportImportPanel', () => {
     await user.click(screen.getByRole('button', { name: EXPORT_PAGE_LABEL }))
 
     expect(onExportArchive).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: IMPORT_PAGE_PACKAGE_LABEL })).not.toBeInTheDocument()
+  })
+
+  it('closes the menu after triggering a workspace export action', async () => {
+    const user = userEvent.setup()
+    const onExportWorkspace = vi.fn()
+
+    renderPanel({ onExportWorkspace })
+
+    await user.click(screen.getByRole('button', { name: uiCopy.page.menu }))
+    await user.click(screen.getByRole('button', { name: EXPORT_WORKSPACE_LABEL }))
+
+    expect(onExportWorkspace).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole('button', { name: IMPORT_PAGE_PACKAGE_LABEL })).not.toBeInTheDocument()
   })
 

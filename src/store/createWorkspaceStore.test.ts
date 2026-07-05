@@ -140,6 +140,49 @@ describe('createWorkspaceStore data tables', () => {
     })
   })
 
+  it('persists pinned sidebar items for pages and data tables', async () => {
+    const workspace = createWorkspace()
+    workspace.pages[0].blocks = [
+      {
+        id: 'block_database',
+        type: 'data_table',
+        databaseId: 'database_1',
+      },
+    ]
+    workspace.dataTables = [
+      {
+        id: 'database_1',
+        title: '数据库',
+        snapshot: { version: 1 },
+        createdAt: '2026-06-22T00:00:00.000Z',
+        updatedAt: '2026-06-22T00:00:00.000Z',
+      },
+    ]
+
+    const counted = createCountingRepository(workspace)
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+    await store.getState().togglePinnedSidebarItem({
+      kind: 'page',
+      pageId: 'page_1',
+    })
+    await store.getState().togglePinnedSidebarItem({
+      kind: 'data_table',
+      pageId: 'page_1',
+      dataTableId: 'database_1',
+    })
+
+    expect(store.getState().settings.pinnedSidebarItems).toEqual([
+      { kind: 'page', pageId: 'page_1' },
+      { kind: 'data_table', pageId: 'page_1', dataTableId: 'database_1' },
+    ])
+    expect(counted.getSnapshot()?.settings.pinnedSidebarItems).toEqual([
+      { kind: 'page', pageId: 'page_1' },
+      { kind: 'data_table', pageId: 'page_1', dataTableId: 'database_1' },
+    ])
+  })
+
   it('deletes a page branch and moves the current page to the next available page', async () => {
     const workspace = createWorkspace()
     workspace.pages = [

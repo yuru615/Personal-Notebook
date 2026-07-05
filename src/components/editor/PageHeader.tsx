@@ -82,11 +82,15 @@ export function PageHeaderToolbar({
   const [coverMenuOpen, setCoverMenuOpen] = useState(false)
   const headerMenusRef = useRef<HTMLDivElement | null>(null)
 
+  function closeInlineMenus() {
+    setIconMenuOpen(false)
+    setCoverMenuOpen(false)
+  }
+
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
       if (!headerMenusRef.current?.contains(event.target as Node)) {
-        setIconMenuOpen(false)
-        setCoverMenuOpen(false)
+        closeInlineMenus()
       }
     }
 
@@ -194,7 +198,11 @@ export function PageHeaderToolbar({
           </div>
         ) : null}
       </div>
-      {actions}
+      {actions ? (
+        <div className="page-header-external-actions" onMouseDownCapture={closeInlineMenus}>
+          {actions}
+        </div>
+      ) : null}
     </div>
   )
 }

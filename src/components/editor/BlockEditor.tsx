@@ -223,8 +223,18 @@ export function BlockEditor({
     )
     const isDragging = draggingVisualBlockId === blockId
     const dropPosition = dropTarget?.blockId === blockId ? dropTarget.position : null
+    const rowKindClassName =
+      block.type === 'heading_1' || block.type === 'heading_2' || block.type === 'heading_3'
+        ? 'editor-row-kind-heading'
+        : block.type === 'child_page' ||
+            block.type === 'whiteboard' ||
+            block.type === 'mindmap' ||
+            block.type === 'data_table'
+          ? 'editor-row-kind-feature-card'
+          : ''
     const rowClassName = [
       'editor-row',
+      rowKindClassName,
       isDragging ? 'editor-row-dragging' : '',
       dropPosition === 'before' ? 'editor-row-drop-target-before' : '',
       dropPosition === 'after' ? 'editor-row-drop-target-after' : '',

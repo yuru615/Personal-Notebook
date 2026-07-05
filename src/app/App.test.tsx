@@ -23,6 +23,7 @@ const fileAccess = vi.hoisted(() => ({
   })),
   pickSaveFilePath: vi.fn(async () => '/tmp/产品规划.zip'),
   saveBinaryFile: vi.fn(async () => undefined),
+  saveTextFile: vi.fn(async () => undefined),
 }))
 const pagePackageStorage = vi.hoisted(() => ({
   exportPagePackageToPath: vi.fn(async () => undefined),
@@ -47,6 +48,7 @@ vi.mock('../lib/fileAccess', async (importOriginal) => {
     openLocalFilePath: fileAccess.openLocalFilePath,
     pickSaveFilePath: fileAccess.pickSaveFilePath,
     saveBinaryFile: fileAccess.saveBinaryFile,
+    saveTextFile: fileAccess.saveTextFile,
   }
 })
 
@@ -105,6 +107,7 @@ describe('App', () => {
     fileAccess.pickSaveFilePath.mockClear()
     fileAccess.pickSaveFilePath.mockResolvedValue('/tmp/产品规划.zip')
     fileAccess.saveBinaryFile.mockClear()
+    fileAccess.saveTextFile.mockClear()
     pagePackageStorage.exportPagePackageToPath.mockClear()
     pagePackageStorage.exportPagePackage.mockClear()
     pagePackageStorage.importPagePackageFromPath.mockClear()
@@ -660,6 +663,58 @@ describe('App', () => {
     })
   })
 
+  it('exports a sidebar page from that page row menu', async () => {
+    const user = userEvent.setup()
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: 'page_parent',
+          parentId: null,
+          title: '产品规划',
+          icon: null,
+          cover: null,
+          blocks: [],
+          createdAt: '2026-07-05T00:00:00.000Z',
+          updatedAt: '2026-07-05T00:00:00.000Z',
+        },
+        {
+          id: 'page_child',
+          parentId: 'page_parent',
+          title: '当前页面',
+          icon: null,
+          cover: null,
+          blocks: [],
+          createdAt: '2026-07-05T00:00:00.000Z',
+          updatedAt: '2026-07-05T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: 'page_child' },
+    }
+
+    render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={['/pages/page_child']}
+      />,
+    )
+
+    await screen.findByDisplayValue('当前页面')
+    await user.click(screen.getAllByRole('button', { name: '页面更多操作' })[0])
+    await user.click(screen.getByRole('button', { name: '导出页面' }))
+
+    await waitFor(() => {
+      expect(pagePackageStorage.exportPagePackage).toHaveBeenCalledWith('page_parent')
+    })
+    expect(fileAccess.saveBinaryFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultPath: '产品规划.zip',
+      }),
+    )
+  })
+
   it('exports the current page package directly to the selected desktop path', async () => {
     Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
       configurable: true,
@@ -775,6 +830,55 @@ describe('App', () => {
     resolveExport!()
     await waitFor(() => {
       expect(screen.getByText('当前页面已导出')).toBeInTheDocument()
+    })
+  })
+
+  it('exports the whole workspace from the top page menu', async () => {
+    const user = userEvent.setup()
+    const pageId = 'page_workspace_export'
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: '工作区首页',
+          icon: null,
+          cover: null,
+          blocks: [],
+          createdAt: '2026-07-05T00:00:00.000Z',
+          updatedAt: '2026-07-05T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+
+    render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={[`/pages/${pageId}`]}
+      />,
+    )
+
+    await screen.findByDisplayValue('工作区首页')
+    await user.click(screen.getByRole('button', { name: '页面菜单' }))
+    await user.click(screen.getByRole('button', { name: '全部导出' }))
+
+    await waitFor(() => {
+      expect(fileAccess.saveTextFile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          defaultPath: '知栖工作区备份.json',
+          filters: [{ name: 'JSON', extensions: ['json'] }],
+        }),
+      )
+    })
+
+    const exportPayload = fileAccess.saveTextFile.mock.calls[0]?.[0]
+    expect(exportPayload).toBeDefined()
+    expect(JSON.parse(String(exportPayload.contents))).toMatchObject({
+      pages: [expect.objectContaining({ id: pageId, title: '工作区首页' })],
     })
   })
 
@@ -979,6 +1083,60 @@ describe('App', () => {
     expect(screen.queryByRole('complementary', { name: '侧边栏' })).not.toBeInTheDocument()
     expect(container.querySelector('.page-panel-focus')).not.toBeNull()
   })
+  it('opens a rename prompt from the whiteboard menu and applies the new title', async () => {
+    const user = userEvent.setup()
+    const pageId = 'page_whiteboard'
+    const boardId = 'board_strategy'
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('新白板名称')
+    const snapshot: WorkspaceSnapshot = {
+      boards: [
+        {
+          id: boardId,
+          title: '流程白板',
+          snapshot: {
+            version: 1,
+            elements: [],
+            viewport: { x: 0, y: 0, zoom: 1 },
+          },
+          createdAt: '2026-07-05T00:00:00.000Z',
+          updatedAt: '2026-07-05T00:00:00.000Z',
+        },
+      ],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: '产品规划',
+          icon: null,
+          cover: null,
+          blocks: [{ id: 'block_whiteboard', type: 'whiteboard', boardId }],
+          createdAt: '2026-07-05T00:00:00.000Z',
+          updatedAt: '2026-07-05T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+
+    render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={[`/pages/${pageId}/boards/${boardId}`]}
+      />,
+    )
+
+    await user.click(await screen.findByRole('button', { name: '白板菜单' }))
+    await user.click(screen.getByRole('button', { name: '重命名' }))
+
+    expect(promptSpy).toHaveBeenCalledWith('重命名白板', '流程白板')
+    await waitFor(() =>
+      expect(screen.getByRole('textbox', { name: '白板标题' })).toHaveValue('新白板名称'),
+    )
+
+    promptSpy.mockRestore()
+  })
+
   it('opens the mindmap route when clicking a mindmap card from the page editor', async () => {
     const user = userEvent.setup()
     const pageId = 'page_product'

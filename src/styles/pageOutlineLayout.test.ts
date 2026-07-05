@@ -90,7 +90,7 @@ describe('page outline layout', () => {
 
   it('supports a small text page mode', () => {
     expect(cssRule('.page-content-small-text')).toContain('--editor-font-size: 14px;')
-    expect(cssRule('.page-content-small-text')).toContain('--editor-line-height: 1.45;')
+    expect(cssRule('.page-content-small-text')).toContain('--editor-line-height: 1.6;')
     expect(cssRule('.page-content-small-text')).toContain('--editor-line-box: 24px;')
   })
 
@@ -98,10 +98,24 @@ describe('page outline layout', () => {
     expect(cssRule('.editor-surface')).toContain('padding-bottom: 300px;')
   })
 
+  it('adds extra spacing when a heading is followed by a feature card block', () => {
+    expect(cssRule('.editor-row-kind-heading + .editor-row-kind-feature-card')).toContain('margin-top: 14px;')
+    expect(cssRule('.editor-row-kind-feature-card + .editor-row-kind-heading')).toContain('margin-top: 14px;')
+  })
+
   it('supports page font modes', () => {
     expect(cssRule('.page-content-font-default')).toContain('font-family:')
     expect(cssRule('.page-content-font-serif')).toContain('font-family:')
     expect(cssRule('.page-content-font-mono')).toContain('font-family:')
+  })
+
+  it('vertically centers heading text when the heading block has a visible background surface', () => {
+    expect(cssRule('.heading_1-block')).toContain('display: flex;')
+    expect(cssRule('.heading_1-block')).toContain('align-items: center;')
+    expect(cssRule('.heading_2-block')).toContain('display: flex;')
+    expect(cssRule('.heading_2-block')).toContain('align-items: center;')
+    expect(cssRule('.heading_3-block')).toContain('display: flex;')
+    expect(cssRule('.heading_3-block')).toContain('align-items: center;')
   })
 
   it('supports hiding the outline without keeping the reserved outline width', () => {

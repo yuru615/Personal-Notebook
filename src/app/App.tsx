@@ -39,7 +39,9 @@ import type {
   PageFontFamily,
   PageRecord,
   SaveStatus,
+  SidebarPinnedItem,
   WorkspaceSettings,
+  WorkspaceSnapshot,
 } from '../domain/types'
 import {
   createStorageWorkspaceRepository,
@@ -73,6 +75,7 @@ type AppState = ReturnType<WorkspaceStore['getState']>
 
 const DUPLICATE_BOARD_LABEL = '创建副本'
 const WHITEBOARD_MENU_LABEL = '白板菜单'
+const WHITEBOARD_RENAME_PROMPT = '重命名白板'
 const DELETE_CURRENT_PAGE_LABEL = '\u5220\u9664\u5f53\u524d\u9875\u9762'
 const DELETE_PAGE_CONFIRM_LABEL = '\u786e\u8ba4\u5220\u9664'
 const CANCEL_DELETE_PAGE_LABEL = '\u53d6\u6d88'
@@ -306,6 +309,73 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
     })
   }
 
+  async function exportPageArchive(pageId: string) {
+    const latestState = store.getState()
+    const page = latestState.pages.find((item) => item.id === pageId)
+
+    if (!page) {
+      return
+    }
+
+    const defaultPath = `${sanitizeFileName(page.title ?? '')}.zip`
+
+    if (isDesktopRuntime()) {
+      const path = await pickSaveFilePath({
+        defaultPath,
+        filters: ZIP_FILE_FILTER,
+      })
+
+      if (!path) {
+        return
+      }
+
+      showArchiveTask({ label: uiCopy.export.exportingArchive, percent: 0 })
+      try {
+        await exportPagePackageToPath(pageId, path, (progress) => {
+          showArchiveProgress(uiCopy.export.exportingArchive, progress)
+        })
+        finishArchiveTask(uiCopy.export.exportComplete)
+      } catch {
+        failArchiveTask(uiCopy.export.exportError)
+        window.alert(uiCopy.export.exportError)
+      }
+      return
+    }
+
+    showArchiveTask({ label: uiCopy.export.exportingArchive, percent: 5 })
+    try {
+      const contents = await exportPagePackage(pageId)
+      showArchiveTask({ label: uiCopy.export.exportingArchive, percent: 85 })
+      await saveBinaryFile({
+        defaultPath,
+        contents,
+        filters: ZIP_FILE_FILTER,
+      })
+      finishArchiveTask(uiCopy.export.exportComplete)
+    } catch {
+      failArchiveTask(uiCopy.export.exportError)
+      window.alert(uiCopy.export.exportError)
+    }
+  }
+
+  async function exportWorkspaceSnapshot() {
+    showArchiveTask({ label: uiCopy.export.exportingWorkspace, percent: 12 })
+
+    try {
+      const snapshot = createWorkspaceBackupSnapshot(store.getState())
+      showArchiveTask({ label: uiCopy.export.exportingWorkspace, percent: 72 })
+      await saveTextFile({
+        defaultPath: '知栖工作区备份.json',
+        contents: JSON.stringify(snapshot, null, 2),
+        filters: JSON_FILE_FILTER,
+      })
+      finishArchiveTask(uiCopy.export.workspaceExportComplete)
+    } catch {
+      failArchiveTask(uiCopy.export.exportError)
+      window.alert(uiCopy.export.exportError)
+    }
+  }
+
   if (!isBootstrapped) {
     return <div className="page-empty">{uiCopy.app.loading}</div>
   }
@@ -323,10 +393,12 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       currentPageId={state.currentPageId}
       sidebarLayout={state.settings.sidebarLayout ?? 'compact'}
       sidebarWidth={state.settings.sidebarWidth ?? 272}
+      pinnedSidebarItems={state.settings.pinnedSidebarItems ?? []}
       archiveTask={archiveTask}
       onCreatePage={() => store.getState().createPage()}
       onSetSidebarLayout={(layout) => store.getState().setSidebarLayout(layout)}
       onSetSidebarWidth={(width) => store.getState().setSidebarWidth(width)}
+      onTogglePinnedSidebarItem={(item) => store.getState().togglePinnedSidebarItem(item)}
       onRoutePageChange={setCurrentPage}
       onRenamePage={(pageId, title) => store.getState().renamePage(pageId, title)}
       onDuplicatePage={(pageId) => store.getState().duplicatePage(pageId)}
@@ -409,52 +481,15 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onExportArchive={async () => {
         const latestState = store.getState()
         const currentPageId = latestState.currentPageId
-        const currentPage = latestState.pages.find((page) => page.id === currentPageId)
 
         if (!currentPageId) {
           return
         }
 
-        const defaultPath = `${sanitizeFileName(currentPage?.title ?? '')}.zip`
-
-        if (isDesktopRuntime()) {
-          const path = await pickSaveFilePath({
-            defaultPath,
-            filters: ZIP_FILE_FILTER,
-          })
-
-          if (!path) {
-            return
-          }
-
-          showArchiveTask({ label: uiCopy.export.exportingArchive, percent: 0 })
-          try {
-            await exportPagePackageToPath(currentPageId, path, (progress) => {
-              showArchiveProgress(uiCopy.export.exportingArchive, progress)
-            })
-            finishArchiveTask(uiCopy.export.exportComplete)
-          } catch {
-            failArchiveTask(uiCopy.export.exportError)
-            window.alert(uiCopy.export.exportError)
-          }
-          return
-        }
-
-        showArchiveTask({ label: uiCopy.export.exportingArchive, percent: 5 })
-        try {
-          const contents = await exportPagePackage(currentPageId)
-          showArchiveTask({ label: uiCopy.export.exportingArchive, percent: 85 })
-          await saveBinaryFile({
-            defaultPath,
-            contents,
-            filters: ZIP_FILE_FILTER,
-          })
-          finishArchiveTask(uiCopy.export.exportComplete)
-        } catch {
-          failArchiveTask(uiCopy.export.exportError)
-          window.alert(uiCopy.export.exportError)
-        }
+        await exportPageArchive(currentPageId)
       }}
+      onExportPage={(pageId) => exportPageArchive(pageId)}
+      onExportWorkspace={exportWorkspaceSnapshot}
       onImportArchive={async () => {
         if (isDesktopRuntime()) {
           const file = await openLocalFilePath({ filters: ZIP_FILE_FILTER })
@@ -530,10 +565,12 @@ interface AppRoutesProps {
   currentPageId: AppState['currentPageId']
   sidebarLayout: NonNullable<WorkspaceSettings['sidebarLayout']>
   sidebarWidth: number
+  pinnedSidebarItems: SidebarPinnedItem[]
   archiveTask: ArchiveTaskStatus | null
   onCreatePage: () => Promise<PageRecord>
   onSetSidebarLayout: (layout: NonNullable<WorkspaceSettings['sidebarLayout']>) => Promise<void>
   onSetSidebarWidth: (width: number) => Promise<void>
+  onTogglePinnedSidebarItem: (item: SidebarPinnedItem) => Promise<void>
   onRoutePageChange: (pageId: string) => Promise<void>
   onRenamePage: (pageId: string, title: string) => Promise<void>
   onDuplicatePage: (pageId: string) => Promise<PageRecord | null>
@@ -592,6 +629,8 @@ interface AppRoutesProps {
   ) => Promise<void>
   saveStatus: SaveStatus
   onExportArchive: () => Promise<void>
+  onExportPage: (pageId: string) => Promise<void>
+  onExportWorkspace: () => Promise<void>
   onImportArchive: () => Promise<string | null>
   onCleanupOrphanBoards: () => Promise<void>
   onCleanupOrphanDataTables: () => Promise<void>
@@ -605,10 +644,12 @@ function AppRoutes({
   currentPageId,
   sidebarLayout,
   sidebarWidth,
+  pinnedSidebarItems,
   archiveTask,
   onCreatePage,
   onSetSidebarLayout,
   onSetSidebarWidth,
+  onTogglePinnedSidebarItem,
   onRoutePageChange,
   onRenamePage,
   onDuplicatePage,
@@ -644,6 +685,8 @@ function AppRoutes({
   onTurnBlockInto,
   saveStatus,
   onExportArchive,
+  onExportPage,
+  onExportWorkspace,
   onImportArchive,
   onCleanupOrphanBoards,
   onCleanupOrphanDataTables,
@@ -737,10 +780,10 @@ function AppRoutes({
       sidebar={
         <SidebarTree
           pages={pages}
-          boards={boards}
           dataTables={dataTables}
           currentPageId={currentPageId}
           layout={sidebarLayout}
+          pinnedSidebarItems={pinnedSidebarItems}
           onCreatePage={() => {
             void handleCreatePage()
           }}
@@ -748,11 +791,20 @@ function AppRoutes({
           onImportArchive={() => {
             void handleImportArchiveFromSidebar()
           }}
+          onExportWorkspace={() => {
+            void onExportWorkspace()
+          }}
           onSetSidebarLayout={(layout) => {
             void onSetSidebarLayout(layout)
           }}
+          onTogglePinnedSidebarItem={(item) => {
+            void onTogglePinnedSidebarItem(item)
+          }}
           onRenamePage={(pageId, title) => {
             void onRenamePage(pageId, title)
+          }}
+          onExportPage={(pageId) => {
+            void onExportPage(pageId)
           }}
           onDuplicatePage={(pageId) => {
             void handleDuplicatePage(pageId)
@@ -824,6 +876,7 @@ function AppRoutes({
                 onTurnBlockInto={onTurnBlockInto}
                 saveStatus={saveStatus}
                 onExportArchive={onExportArchive}
+                onExportWorkspace={onExportWorkspace}
                 onImportArchive={onImportArchive}
                 onCleanupOrphanBoards={onCleanupOrphanBoards}
                 onCleanupOrphanDataTables={onCleanupOrphanDataTables}
@@ -871,6 +924,7 @@ function AppRoutes({
                 onTogglePageFontFamily={onTogglePageFontFamily}
                 onTogglePageOutlineVisible={onTogglePageOutlineVisible}
                 onExportArchive={onExportArchive}
+                onExportWorkspace={onExportWorkspace}
                 onImportArchive={onImportArchive}
                 onCleanupOrphanBoards={onCleanupOrphanBoards}
                 onCleanupOrphanDataTables={onCleanupOrphanDataTables}
@@ -898,6 +952,7 @@ function AppRoutes({
                 onTogglePageFontFamily={onTogglePageFontFamily}
                 onTogglePageOutlineVisible={onTogglePageOutlineVisible}
                 onExportArchive={onExportArchive}
+                onExportWorkspace={onExportWorkspace}
                 onImportArchive={onImportArchive}
                 onCleanupOrphanBoards={onCleanupOrphanBoards}
                 onCleanupOrphanDataTables={onCleanupOrphanDataTables}
@@ -983,6 +1038,7 @@ interface PageRouteProps {
   ) => Promise<void>
   saveStatus: SaveStatus
   onExportArchive: () => Promise<void>
+  onExportWorkspace: () => Promise<void>
   onImportArchive: () => Promise<string | null>
   onCleanupOrphanBoards: () => Promise<void>
   onCleanupOrphanDataTables: () => Promise<void>
@@ -1019,6 +1075,7 @@ function PageRoute({
   onTurnBlockInto,
   saveStatus,
   onExportArchive,
+  onExportWorkspace,
   onImportArchive,
   onCleanupOrphanBoards,
   onCleanupOrphanDataTables,
@@ -1089,6 +1146,7 @@ function PageRoute({
         void onTogglePageOutlineVisible(page.id, value)
       }}
       onExportArchive={() => void onExportArchive()}
+      onExportWorkspace={() => void onExportWorkspace()}
       onImportArchive={async () => {
         const nextPageId = await onImportArchive()
         navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
@@ -1304,6 +1362,7 @@ interface DataTableRouteProps {
   onTogglePageFontFamily: (pageId: string, fontFamily: PageFontFamily) => Promise<void>
   onTogglePageOutlineVisible: (pageId: string, showOutline: boolean) => Promise<void>
   onExportArchive: () => Promise<void>
+  onExportWorkspace: () => Promise<void>
   onImportArchive: () => Promise<string | null>
   onCleanupOrphanBoards: () => Promise<void>
   onCleanupOrphanDataTables: () => Promise<void>
@@ -1327,6 +1386,7 @@ function DataTableRoute({
   onTogglePageFontFamily,
   onTogglePageOutlineVisible,
   onExportArchive,
+  onExportWorkspace,
   onImportArchive,
   onCleanupOrphanBoards,
   onCleanupOrphanDataTables,
@@ -1406,6 +1466,7 @@ function DataTableRoute({
               void onTogglePageOutlineVisible(page.id, value)
             }}
             onExportArchive={() => void onExportArchive()}
+            onExportWorkspace={() => void onExportWorkspace()}
             onImportArchive={async () => {
               const nextPageId = await onImportArchive()
               navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
@@ -1452,12 +1513,13 @@ interface BoardRouteProps {
 }
 
 interface WhiteboardRouteMenuProps {
+  onRename: () => void
   onDuplicate: () => void
   onExport: () => void
   onImport: () => void
 }
 
-function WhiteboardRouteMenu({ onDuplicate, onExport, onImport }: WhiteboardRouteMenuProps) {
+function WhiteboardRouteMenu({ onRename, onDuplicate, onExport, onImport }: WhiteboardRouteMenuProps) {
   const [open, setOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
 
@@ -1490,6 +1552,16 @@ function WhiteboardRouteMenu({ onDuplicate, onExport, onImport }: WhiteboardRout
         {open ? (
           <div className="page-menu-popover whiteboard-route-menu-popover">
             <div className="page-menu-section">
+              <button
+                type="button"
+                className="page-menu-action"
+                onClick={() => {
+                  setOpen(false)
+                  onRename()
+                }}
+              >
+                <span className="page-menu-item-label">重命名</span>
+              </button>
               <button
                 type="button"
                 className="page-menu-action"
@@ -1601,6 +1673,18 @@ function BoardRoute({
     }
   }
 
+  function handleRenameBoardFromMenu() {
+    if (!board) {
+      return
+    }
+
+    const nextTitle = window.prompt(WHITEBOARD_RENAME_PROMPT, board.title)
+
+    if (nextTitle !== null && nextTitle !== board.title) {
+      void onRenameBoard(board.id, nextTitle)
+    }
+  }
+
   return (
     <WhiteboardPage
       page={page}
@@ -1614,6 +1698,7 @@ function BoardRoute({
       actions={
         board ? (
           <WhiteboardRouteMenu
+            onRename={handleRenameBoardFromMenu}
             onDuplicate={() => {
               void handleDuplicateBoard()
             }}
@@ -1740,6 +1825,16 @@ function MindmapRoute({
 }
 
 
+
+function createWorkspaceBackupSnapshot(state: AppState): WorkspaceSnapshot {
+  return {
+    boards: structuredClone(state.boards),
+    dataTables: structuredClone(state.dataTables),
+    mindmaps: structuredClone(state.mindmaps),
+    pages: structuredClone(state.pages),
+    settings: structuredClone(state.settings),
+  }
+}
 
 export default App
 

@@ -15,6 +15,7 @@ import type {
   PageRecord,
   RichTextSegment,
   SaveStatus,
+  SidebarPinnedItem,
   WorkspaceSnapshot,
   WorkspaceSettings,
 } from '../domain/types'
@@ -49,6 +50,7 @@ export interface WorkspaceState {
   setCurrentPage: (pageId: PageId) => Promise<void>
   setSidebarLayout: (layout: NonNullable<WorkspaceSettings['sidebarLayout']>) => Promise<void>
   setSidebarWidth: (width: number) => Promise<void>
+  togglePinnedSidebarItem: (item: SidebarPinnedItem) => Promise<void>
   setPageFullWidth: (pageId: PageId, isFullWidth: boolean) => Promise<void>
   setPageSmallText: (pageId: PageId, isSmallText: boolean) => Promise<void>
   setPageFontFamily: (pageId: PageId, fontFamily: PageFontFamily) => Promise<void>
@@ -111,6 +113,7 @@ function createEmptyState(): WorkspaceState {
       lastOpenedPageId: null,
       sidebarLayout: 'compact',
       sidebarWidth: 272,
+      pinnedSidebarItems: [],
     },
     currentPageId: null,
     saveStatus: 'idle',
@@ -125,6 +128,9 @@ function createEmptyState(): WorkspaceState {
       throw new Error('not implemented')
     },
     setSidebarWidth: async () => {
+      throw new Error('not implemented')
+    },
+    togglePinnedSidebarItem: async () => {
       throw new Error('not implemented')
     },
     setPageFullWidth: async () => {
@@ -262,11 +268,13 @@ function createSettings(
   lastOpenedPageId: PageId | null,
   sidebarLayout: NonNullable<WorkspaceSettings['sidebarLayout']> = 'compact',
   sidebarWidth = 272,
+  pinnedSidebarItems: SidebarPinnedItem[] = [],
 ): WorkspaceSettings {
   return {
     lastOpenedPageId,
     sidebarLayout,
     sidebarWidth,
+    pinnedSidebarItems,
   }
 }
 
@@ -279,16 +287,67 @@ function normalizeSettings(settings: WorkspaceSettings): {
     typeof settings.sidebarWidth === 'number' && Number.isFinite(settings.sidebarWidth) && settings.sidebarWidth > 0
       ? Math.round(settings.sidebarWidth)
       : 272
-  const didChange = settings.sidebarLayout !== sidebarLayout || settings.sidebarWidth !== sidebarWidth
+  const pinnedSidebarItems = normalizePinnedSidebarItems(settings.pinnedSidebarItems)
+  const didChange =
+    settings.sidebarLayout !== sidebarLayout ||
+    settings.sidebarWidth !== sidebarWidth ||
+    JSON.stringify(settings.pinnedSidebarItems ?? []) !== JSON.stringify(pinnedSidebarItems)
 
   return {
     settings: {
       lastOpenedPageId: settings.lastOpenedPageId,
       sidebarLayout,
       sidebarWidth,
+      pinnedSidebarItems,
     },
     didChange,
   }
+}
+
+function normalizePinnedSidebarItems(items: WorkspaceSettings['pinnedSidebarItems']): SidebarPinnedItem[] {
+  if (!Array.isArray(items)) {
+    return []
+  }
+
+  const seen = new Set<string>()
+  const normalized: SidebarPinnedItem[] = []
+
+  for (const item of items) {
+    if (!item || typeof item !== 'object') {
+      continue
+    }
+
+    if (item.kind === 'page' && typeof item.pageId === 'string') {
+      const key = `page:${item.pageId}`
+      if (!seen.has(key)) {
+        seen.add(key)
+        normalized.push({ kind: 'page', pageId: item.pageId })
+      }
+      continue
+    }
+
+    if (
+      item.kind === 'data_table' &&
+      typeof item.pageId === 'string' &&
+      typeof item.dataTableId === 'string'
+    ) {
+      const key = `data_table:${item.pageId}:${item.dataTableId}`
+      if (!seen.has(key)) {
+        seen.add(key)
+        normalized.push({
+          kind: 'data_table',
+          pageId: item.pageId,
+          dataTableId: item.dataTableId,
+        })
+      }
+    }
+  }
+
+  return normalized
+}
+
+function isSamePinnedSidebarItem(left: SidebarPinnedItem, right: SidebarPinnedItem) {
+  return JSON.stringify(left) === JSON.stringify(right)
 }
 
 function collectPageBranch(pages: PageRecord[], targetId: PageId): PageRecord[] {
@@ -918,6 +977,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
             currentPageId,
             snapshot.settings.sidebarLayout ?? 'compact',
             snapshot.settings.sidebarWidth ?? 272,
+            snapshot.settings.pinnedSidebarItems ?? [],
           ),
           currentPageId,
           saveStatus: 'saved',
@@ -938,6 +998,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         page.id,
         state.settings.sidebarLayout ?? 'compact',
         state.settings.sidebarWidth ?? 272,
+        state.settings.pinnedSidebarItems ?? [],
       )
       const nextSnapshot = createSnapshotFromState({
         ...state,
@@ -981,6 +1042,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         pageId,
         state.settings.sidebarLayout ?? 'compact',
         state.settings.sidebarWidth ?? 272,
+        state.settings.pinnedSidebarItems ?? [],
       )
       const nextSnapshot = createSnapshotFromState({
         ...state,
@@ -1014,6 +1076,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         state.settings.lastOpenedPageId,
         layout,
         state.settings.sidebarWidth ?? 272,
+        state.settings.pinnedSidebarItems ?? [],
       )
       const nextSnapshot = createSnapshotFromState({
         ...state,
@@ -1046,6 +1109,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         state.settings.lastOpenedPageId,
         state.settings.sidebarLayout ?? 'compact',
         nextWidth,
+        state.settings.pinnedSidebarItems ?? [],
       )
       const nextSnapshot = createSnapshotFromState({
         ...state,
@@ -1063,6 +1127,40 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       } catch {
         set({ saveStatus: 'error' })
         throw new Error('Failed to update sidebar width')
+      }
+    },
+
+    togglePinnedSidebarItem: async (item) => {
+      const state = get()
+      const currentItems = state.settings.pinnedSidebarItems ?? []
+      const nextPinnedSidebarItems = currentItems.some((currentItem) =>
+        isSamePinnedSidebarItem(currentItem, item),
+      )
+        ? currentItems.filter((currentItem) => !isSamePinnedSidebarItem(currentItem, item))
+        : [...currentItems, item]
+
+      const nextSettings = createSettings(
+        state.settings.lastOpenedPageId,
+        state.settings.sidebarLayout ?? 'compact',
+        state.settings.sidebarWidth ?? 272,
+        nextPinnedSidebarItems,
+      )
+      const nextSnapshot = createSnapshotFromState({
+        ...state,
+        settings: nextSettings,
+      })
+
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save(nextSnapshot)
+        set({
+          settings: nextSettings,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to update pinned sidebar items')
       }
     },
 
@@ -1963,10 +2061,15 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       const currentPageDeleted =
         state.currentPageId !== null && !nextPages.some((page) => page.id === state.currentPageId)
       const nextCurrentPageId = currentPageDeleted ? (nextPages[0]?.id ?? null) : state.currentPageId
+      const nextPageIds = new Set(nextPages.map((page) => page.id))
+      const nextPinnedSidebarItems = (state.settings.pinnedSidebarItems ?? []).filter((item) =>
+        nextPageIds.has(item.pageId),
+      )
       const nextSettings = createSettings(
         nextCurrentPageId,
         state.settings.sidebarLayout ?? 'compact',
         state.settings.sidebarWidth ?? 272,
+        nextPinnedSidebarItems,
       )
 
       pushUndoSnapshot(state)
