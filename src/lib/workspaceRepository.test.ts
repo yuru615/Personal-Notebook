@@ -298,6 +298,32 @@ describe('createStorageWorkspaceRepository', () => {
     })
   })
 
+  it('persists page property definition changes instead of skipping incremental save', async () => {
+    const { calls, repository } = createRepository()
+    const original = createSnapshot()
+    const next: WorkspaceSnapshot = {
+      ...original,
+      pageProperties: [
+        {
+          id: 'prop_status',
+          key: 'status',
+          name: '状态',
+          type: 'select',
+          config: {},
+          createdAt: '2026-06-15T00:00:00.000Z',
+          updatedAt: '2026-06-15T00:00:00.000Z',
+        },
+      ],
+    }
+
+    await repository.replace(original)
+    calls.length = 0
+    await repository.save(next)
+
+    expect(calls).toEqual(['replaceWorkspaceBackup'])
+    await expect(repository.load()).resolves.toEqual(next)
+  })
+
   it('saves a changed page without replacing the whole workspace when ids and settings are stable', async () => {
     const { calls, repository } = createRepository()
     const original = createSnapshot()

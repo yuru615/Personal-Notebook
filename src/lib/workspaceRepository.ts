@@ -112,11 +112,14 @@ async function saveChangedRecords(
   previous: RequiredWorkspaceSnapshot,
   next: RequiredWorkspaceSnapshot,
 ): Promise<boolean> {
+  const pagePropertiesChanged =
+    JSON.stringify(previous.pageProperties) !== JSON.stringify(next.pageProperties)
   const changedPages = changedRecords(previous.pages, next.pages)
   const changedBoards = changedRecords(previous.boards, next.boards)
   const changedDataTables = changedRecords(previous.dataTables, next.dataTables)
   const changedMindmaps = changedRecords(previous.mindmaps, next.mindmaps)
   const changeCount =
+    (pagePropertiesChanged ? 1 : 0) +
     changedPages.length +
     changedBoards.length +
     changedDataTables.length +
@@ -127,6 +130,10 @@ async function saveChangedRecords(
   }
 
   if (changeCount > 1) {
+    return false
+  }
+
+  if (pagePropertiesChanged) {
     return false
   }
 
@@ -159,6 +166,7 @@ function canSaveIncrementally(
   return (
     Array.isArray(previous.dataTables) &&
     Array.isArray(previous.mindmaps) &&
+    Array.isArray(previous.pageProperties) &&
     sameRecordOrder(previous.pages, next.pages) &&
     sameRecordOrder(previous.boards, next.boards) &&
     sameRecordOrder(previous.dataTables, next.dataTables) &&
