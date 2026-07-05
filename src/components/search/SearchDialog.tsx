@@ -20,7 +20,7 @@ interface SearchDialogProps {
   pageProperties?: PagePropertyDefinition[]
   boards?: BoardRecord[]
   dataTables?: DataTableRecord[]
-  onSearch?: (query: string) => Promise<SearchResult[]>
+  onSearch?: (query: string) => Promise<AsyncSearchResult[]>
   onClose: () => void
   onOpenPage: (pageId: string) => void
   onOpenBoard?: (pageId: string, boardId: string) => void
@@ -28,6 +28,11 @@ interface SearchDialogProps {
 }
 
 type SearchFilter = 'all' | 'page' | 'whiteboard' | 'data_table' | 'tags' | 'status'
+type AsyncSearchResult = Omit<SearchResult, 'matchSource' | 'sourceLabel'> & {
+  matchSource?: SearchResult['matchSource']
+  matchKey?: string
+  sourceLabel?: string
+}
 
 const OPEN_WHITEBOARD_LABEL = '打开白板'
 const OPEN_DATA_TABLE_LABEL = '打开数据表格'
@@ -66,6 +71,12 @@ export function SearchDialog({
 
     if (activeFilter === 'tags' || activeFilter === 'status') {
       return results.filter((result) => result.matchKey === activeFilter)
+    }
+
+    if (activeFilter === 'data_table') {
+      return results.filter(
+        (result) => result.kind === 'data_table' || result.kind === 'data_table_record',
+      )
     }
 
     return results.filter((result) => result.kind === activeFilter)
@@ -202,7 +213,7 @@ export function SearchDialog({
       void onSearch(trimmedQuery)
         .then((nextResults) => {
           if (isCurrent) {
-            setAsyncResults(nextResults)
+            setAsyncResults(nextResults.map(normalizeAsyncSearchResult))
           }
         })
         .catch(() => {
@@ -327,6 +338,63 @@ export function SearchDialog({
       </section>
     </div>
   )
+}
+
+function normalizeAsyncSearchResult(result: AsyncSearchResult): SearchResult {
+  const matchSource = result.matchSource ?? inferMatchSource(result.kind)
+
+  return {
+    ...result,
+    matchSource,
+    sourceLabel: result.sourceLabel ?? getSourceLabel(matchSource, result.kind),
+  }
+}
+
+function inferMatchSource(kind: SearchResult['kind']): SearchResult['matchSource'] {
+  if (kind === 'whiteboard') {
+    return 'whiteboard'
+  }
+
+  if (kind === 'data_table') {
+    return 'data_table'
+  }
+
+  if (kind === 'data_table_record') {
+    return 'data_table_record'
+  }
+
+  return 'body'
+}
+
+function getSourceLabel(
+  matchSource: SearchResult['matchSource'],
+  kind: SearchResult['kind'],
+): string {
+  if (matchSource === 'title') {
+    return '标题'
+  }
+
+  if (matchSource === 'property') {
+    return '属性'
+  }
+
+  if (matchSource === 'media') {
+    return '媒体'
+  }
+
+  if (matchSource === 'whiteboard' || kind === 'whiteboard') {
+    return '白板'
+  }
+
+  if (matchSource === 'data_table' || kind === 'data_table') {
+    return '数据表格'
+  }
+
+  if (matchSource === 'data_table_record' || kind === 'data_table_record') {
+    return '记录'
+  }
+
+  return '正文'
 }
 
 function getFilterOptions(): Array<{ key: SearchFilter; label: string }> {

@@ -196,9 +196,8 @@ describe('SearchDialog', () => {
     expect(onOpenDataTable).toHaveBeenCalledWith('page-a', 'database-feedback', 'record-a')
   })
 
-  it('can render asynchronous backend search results', async () => {
+  it('renders legacy asynchronous backend search results without metadata', async () => {
     const user = userEvent.setup()
-    const onClose = vi.fn()
     const onOpenPage = vi.fn()
     const onSearch = vi.fn().mockResolvedValue([
       {
@@ -207,8 +206,6 @@ describe('SearchDialog', () => {
         title: 'Async Result',
         icon: '📄',
         excerpt: 'Loaded from storage',
-        matchSource: 'body',
-        sourceLabel: '正文',
       },
     ])
 
@@ -216,7 +213,7 @@ describe('SearchDialog', () => {
       <SearchDialog
         open
         pages={[]}
-        onClose={onClose}
+        onClose={vi.fn()}
         onOpenPage={onOpenPage}
         onSearch={onSearch}
       />,
@@ -224,10 +221,10 @@ describe('SearchDialog', () => {
 
     await user.type(screen.getByPlaceholderText(searchPlaceholder), 'async')
 
-    const result = await screen.findByRole('button', { name: `${openPageLabel} Async Result` })
-    await user.click(result)
+    expect(await screen.findByText('Loaded from storage')).toBeInTheDocument()
+    expect(screen.getByText('正文')).toBeInTheDocument()
 
-    expect(onSearch).toHaveBeenCalledWith('async')
+    await user.click(screen.getByRole('button', { name: `${openPageLabel} Async Result` }))
     expect(onOpenPage).toHaveBeenCalledWith('page-async')
   })
 
@@ -336,5 +333,46 @@ describe('SearchDialog', () => {
     await user.click(screen.getByRole('button', { name: '状态' }))
     expect(screen.getByText('进行中')).toBeInTheDocument()
     expect(screen.queryByText('产品 / 搜索')).not.toBeInTheDocument()
+  })
+
+  it('includes data table records in the data table filter chip', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <SearchDialog
+        open
+        pages={[]}
+        onClose={vi.fn()}
+        onOpenPage={vi.fn()}
+        onSearch={vi.fn().mockResolvedValue([
+          {
+            kind: 'data_table',
+            pageId: 'page-3',
+            databaseId: 'database-1',
+            title: '产品数据库',
+            icon: '▦',
+            excerpt: '数据表格 · 产品规划',
+            matchSource: 'data_table',
+            sourceLabel: '数据表格',
+          },
+          {
+            kind: 'data_table_record',
+            pageId: 'page-3',
+            databaseId: 'database-1',
+            recordId: 'record-1',
+            title: '路线图记录',
+            icon: '▦',
+            excerpt: '产品数据库 · 记录',
+          },
+        ])}
+      />,
+    )
+
+    await user.type(screen.getByPlaceholderText(searchPlaceholder), '产品')
+    expect(await screen.findByText('路线图记录')).toBeInTheDocument()
+    await user.click(await screen.findByRole('button', { name: '数据表格' }))
+
+    expect(screen.getByText('产品数据库')).toBeInTheDocument()
+    expect(screen.getByText('路线图记录')).toBeInTheDocument()
   })
 })
