@@ -1365,25 +1365,59 @@ impl Storage {
               ORDER BY p.position ASC",
         )?;
         let rows = statement.query_map([], |row| {
-            let blocks_json: String = row.get(9)?;
-            let properties_json: String = row.get(10)?;
-            Ok(PageRecord {
-                id: row.get(0)?,
-                parent_id: row.get(1)?,
-                title: row.get(2)?,
-                icon: row.get(3)?,
-                cover: row.get(4)?,
-                properties: deserialize_page_properties(&properties_json).unwrap_or(None),
-                is_full_width: option_i64_to_bool(row.get(5)?),
-                is_small_text: option_i64_to_bool(row.get(6)?),
-                font_family: row.get(7)?,
-                show_outline: option_i64_to_bool(row.get(8)?),
-                blocks: serde_json::from_str(&blocks_json).unwrap_or_default(),
-                created_at: row.get(11)?,
-                updated_at: row.get(12)?,
-            })
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<i64>>(5)?,
+                row.get::<_, Option<i64>>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<i64>>(8)?,
+                row.get::<_, String>(9)?,
+                row.get::<_, String>(10)?,
+                row.get::<_, String>(11)?,
+                row.get::<_, String>(12)?,
+            ))
         })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+        let mut pages = Vec::new();
+
+        for row in rows {
+            let (
+                id,
+                parent_id,
+                title,
+                icon,
+                cover,
+                is_full_width,
+                is_small_text,
+                font_family,
+                show_outline,
+                blocks_json,
+                properties_json,
+                created_at,
+                updated_at,
+            ) = row?;
+
+            pages.push(PageRecord {
+                id,
+                parent_id,
+                title,
+                icon,
+                cover,
+                properties: deserialize_page_properties(&properties_json)?,
+                is_full_width: option_i64_to_bool(is_full_width),
+                is_small_text: option_i64_to_bool(is_small_text),
+                font_family,
+                show_outline: option_i64_to_bool(show_outline),
+                blocks: serde_json::from_str(&blocks_json).unwrap_or_default(),
+                created_at,
+                updated_at,
+            });
+        }
+
+        Ok(pages)
     }
 
     fn load_page_record(&self, page_id: &str) -> StorageResult<PageRecord> {
@@ -2118,6 +2152,18 @@ fn unique_test_assets_dir() -> PathBuf {
 }
 
 #[cfg(test)]
+fn unique_test_data_dir(label: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    std::env::temp_dir().join(format!(
+        "zhixi-storage-test-{label}-{}-{nanos}",
+        std::process::id()
+    ))
+}
+
+#[cfg(test)]
 mod tests {
     use serde_json::json;
 
@@ -2428,6 +2474,270 @@ mod tests {
             .filter(|result| result.page_id == "page_1")
             .count()
             >= 2);
+    }
+
+    #[test]
+    fn deleting_page_search_documents_does_not_touch_prefix_collisions() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages = vec![
+            PageRecord {
+                id: "page_1".to_string(),
+                parent_id: None,
+                title: "Alpha".to_string(),
+                icon: None,
+                cover: None,
+                properties: None,
+                is_full_width: None,
+                is_small_text: None,
+                font_family: None,
+                show_outline: None,
+                blocks: vec![json!({
+                    "id": "block_alpha",
+                    "type": "paragraph",
+                    "text": "alpha body"
+                })],
+                created_at: "2026-07-05T00:00:00.000Z".to_string(),
+                updated_at: "2026-07-05T00:00:00.000Z".to_string(),
+            },
+            PageRecord {
+                id: "page_10".to_string(),
+                parent_id: None,
+                title: "Beta".to_string(),
+                icon: None,
+                cover: None,
+                properties: None,
+                is_full_width: None,
+                is_small_text: None,
+                font_family: None,
+                show_outline: None,
+                blocks: vec![json!({
+                    "id": "block_beta",
+                    "type": "paragraph",
+                    "text": "beta body"
+                })],
+                created_at: "2026-07-05T00:00:00.000Z".to_string(),
+                updated_at: "2026-07-05T00:00:00.000Z".to_string(),
+            },
+        ];
+        snapshot.boards = Vec::new();
+        snapshot.data_tables = Vec::new();
+        snapshot.mindmaps = Vec::new();
+        snapshot.settings.last_opened_page_id = Some("page_1".to_string());
+
+        storage
+            .replace_workspace_backup(snapshot)
+            .expect("replace snapshot");
+
+        search::delete_documents_for_owner(&storage.connection, "page", "page_1")
+            .expect("delete page_1 docs");
+
+        let page_1_count: i64 = storage
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM zhixi_search_documents WHERE document_id LIKE 'page:page_1:%'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count page_1 docs");
+        let page_10_count: i64 = storage
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM zhixi_search_documents WHERE document_id LIKE 'page:page_10:%'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count page_10 docs");
+
+        assert_eq!(page_1_count, 0);
+        assert!(page_10_count > 0);
+        assert!(storage
+            .search_workspace("beta", 10)
+            .expect("search surviving page")
+            .iter()
+            .any(|result| result.page_id == "page_10"));
+    }
+
+    #[test]
+    fn malformed_properties_json_fails_on_export_instead_of_disappearing() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        storage
+            .replace_workspace_backup(sample_snapshot())
+            .expect("replace snapshot");
+        storage
+            .connection
+            .execute(
+                "UPDATE zhixi_page_contents SET properties_json = 'not-json' WHERE page_id = 'page_1'",
+                [],
+            )
+            .expect("corrupt properties json");
+
+        let error = storage
+            .export_workspace_backup()
+            .expect_err("invalid properties json should fail");
+
+        assert_eq!(error.code, "invalid_payload");
+    }
+
+    #[test]
+    fn opening_v1_database_migrates_columns_and_rebuilds_search_documents() {
+        let data_dir = unique_test_data_dir("v1-open");
+        fs::create_dir_all(&data_dir).expect("create test data dir");
+        let database_path = data_dir.join(DATABASE_FILE_NAME);
+        let connection = Connection::open(&database_path).expect("open v1 database");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE zhixi_meta (
+                  key TEXT PRIMARY KEY NOT NULL,
+                  value TEXT NOT NULL
+                );
+                CREATE TABLE zhixi_settings (
+                  id TEXT PRIMARY KEY NOT NULL,
+                  record_json TEXT NOT NULL
+                );
+                CREATE TABLE zhixi_pages (
+                  id TEXT PRIMARY KEY NOT NULL,
+                  parent_id TEXT,
+                  title TEXT NOT NULL,
+                  icon TEXT,
+                  cover TEXT,
+                  is_full_width INTEGER,
+                  is_small_text INTEGER,
+                  font_family TEXT,
+                  show_outline INTEGER,
+                  position INTEGER NOT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                );
+                CREATE TABLE zhixi_page_contents (
+                  page_id TEXT PRIMARY KEY NOT NULL,
+                  blocks_json TEXT NOT NULL
+                );
+                CREATE TABLE zhixi_search_documents (
+                  document_id TEXT PRIMARY KEY NOT NULL,
+                  kind TEXT NOT NULL,
+                  page_id TEXT NOT NULL,
+                  board_id TEXT,
+                  database_id TEXT,
+                  record_id TEXT,
+                  title TEXT NOT NULL,
+                  icon TEXT,
+                  excerpt TEXT NOT NULL,
+                  body TEXT NOT NULL
+                );
+                CREATE VIRTUAL TABLE zhixi_search_documents_fts USING fts5(
+                  document_id UNINDEXED,
+                  kind UNINDEXED,
+                  page_id UNINDEXED,
+                  board_id UNINDEXED,
+                  database_id UNINDEXED,
+                  record_id UNINDEXED,
+                  title,
+                  icon UNINDEXED,
+                  excerpt UNINDEXED,
+                  body
+                );
+                ",
+            )
+            .expect("create v1 schema");
+        connection
+            .execute(
+                "INSERT INTO zhixi_meta (key, value) VALUES ('schema_version', '1')",
+                [],
+            )
+            .expect("insert schema version");
+        connection
+            .execute(
+                "INSERT INTO zhixi_settings (id, record_json) VALUES (?1, ?2)",
+                params![
+                    SETTINGS_ID,
+                    r#"{"lastOpenedPageId":"page_1"}"#
+                ],
+            )
+            .expect("insert settings");
+        connection
+            .execute(
+                "INSERT INTO zhixi_pages
+                  (id, parent_id, title, icon, cover, is_full_width, is_small_text, font_family, show_outline, position, created_at, updated_at)
+                  VALUES (?1, NULL, ?2, NULL, NULL, NULL, NULL, NULL, NULL, 0, ?3, ?3)",
+                params!["page_1", "Legacy Home", "2026-07-05T00:00:00.000Z"],
+            )
+            .expect("insert page");
+        connection
+            .execute(
+                "INSERT INTO zhixi_page_contents (page_id, blocks_json) VALUES (?1, ?2)",
+                params![
+                    "page_1",
+                    r#"[{"id":"block_1","type":"paragraph","text":"legacy body"}]"#
+                ],
+            )
+            .expect("insert page content");
+        connection
+            .execute(
+                "INSERT INTO zhixi_search_documents
+                  (document_id, kind, page_id, board_id, database_id, record_id, title, icon, excerpt, body)
+                  VALUES (?1, 'page', 'page_1', NULL, NULL, NULL, 'Legacy Home', NULL, 'legacy body', 'legacy body')",
+                ["page:page_1"],
+            )
+            .expect("insert legacy search document");
+        connection
+            .execute(
+                "INSERT INTO zhixi_search_documents_fts
+                  (document_id, kind, page_id, board_id, database_id, record_id, title, icon, excerpt, body)
+                  VALUES (?1, 'page', 'page_1', NULL, NULL, NULL, 'Legacy Home', NULL, 'legacy body', 'legacy body')",
+                ["page:page_1"],
+            )
+            .expect("insert legacy fts document");
+        drop(connection);
+
+        let storage = Storage::open(&data_dir).expect("open migrated storage");
+
+        assert_eq!(storage.schema_version().expect("schema version"), 2);
+        let page_content_columns = storage
+            .connection
+            .prepare("PRAGMA table_info(zhixi_page_contents)")
+            .expect("prepare page content pragma")
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query page content pragma")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect page content columns");
+        let search_document_columns = storage
+            .connection
+            .prepare("PRAGMA table_info(zhixi_search_documents)")
+            .expect("prepare search document pragma")
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query search document pragma")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect search document columns");
+        let search_results = storage
+            .search_workspace("legacy", 10)
+            .expect("search migrated database");
+        let rebuilt_page_docs: i64 = storage
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM zhixi_search_documents WHERE document_id LIKE 'page:page_1:%'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count rebuilt page docs");
+        let legacy_docs: i64 = storage
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM zhixi_search_documents WHERE document_id = 'page:page_1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count legacy docs");
+
+        assert!(page_content_columns.iter().any(|name| name == "properties_json"));
+        assert!(search_document_columns.iter().any(|name| name == "match_source"));
+        assert!(search_document_columns.iter().any(|name| name == "source_label"));
+        assert!(rebuilt_page_docs >= 2);
+        assert_eq!(legacy_docs, 0);
+        assert!(search_results
+            .iter()
+            .any(|result| result.page_id == "page_1" && !result.match_source.is_empty()));
     }
 
     #[test]

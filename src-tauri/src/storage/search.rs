@@ -238,7 +238,7 @@ pub fn delete_documents_for_owner(
     owner_id: &str,
 ) -> StorageResult<()> {
     let pattern = match owner_kind {
-        "page" => format!("page:{owner_id}%"),
+        "page" => format!("page:{owner_id}:%"),
         "board" => format!("board:{owner_id}"),
         "mindmap" => format!("mindmap:{owner_id}"),
         "database" => format!("database:{owner_id}%"),
