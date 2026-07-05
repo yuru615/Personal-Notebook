@@ -29,6 +29,20 @@ function getNextMissingPropertyKey(definitions: PagePropertyDefinition[]) {
   return defaultPropertyOrder.find((key) => !usedKeys.has(key)) ?? 'tags'
 }
 
+function getNextSelectValue(definition: PagePropertyDefinition, currentValue: PagePropertyValue) {
+  const labels = (definition.config.options ?? [])
+    .map((option) => option.label.trim())
+    .filter(Boolean)
+
+  if (labels.length === 0) {
+    return currentValue === '进行中' ? null : '进行中'
+  }
+
+  const currentLabel = typeof currentValue === 'string' ? currentValue : null
+  const currentIndex = currentLabel ? labels.indexOf(currentLabel) : -1
+  return labels[(currentIndex + 1 + labels.length) % labels.length]
+}
+
 export function PagePropertiesPanel({
   definitions,
   values,
@@ -39,7 +53,7 @@ export function PagePropertiesPanel({
     const currentValue = values[definition.id]
 
     if (definition.type === 'select') {
-      onSetValue(definition.id, currentValue === '进行中' ? null : '进行中')
+      onSetValue(definition.id, getNextSelectValue(definition, currentValue))
       return
     }
 
@@ -58,7 +72,10 @@ export function PagePropertiesPanel({
       return
     }
 
-    const nextValue = window.prompt(uiCopy.pageProperties.editValue, typeof currentValue === 'string' ? currentValue : '')
+    const nextValue = window.prompt(
+      uiCopy.pageProperties.editValue,
+      typeof currentValue === 'string' ? currentValue : '',
+    )
     if (nextValue === null) {
       return
     }

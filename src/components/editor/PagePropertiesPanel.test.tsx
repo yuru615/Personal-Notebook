@@ -42,7 +42,7 @@ describe('PagePropertiesPanel', () => {
     expect(screen.getByRole('button', { name: '进行中' })).toBeInTheDocument()
   })
 
-  it('allows editing default properties or adding one from the compact entry point', async () => {
+  it('uses configured select options in the compact interaction and still exposes add property', async () => {
     const user = userEvent.setup()
     const onSetValue = vi.fn()
     const onAddDefaultProperty = vi.fn()
@@ -64,7 +64,12 @@ describe('PagePropertiesPanel', () => {
             key: 'status',
             name: '状态',
             type: 'select',
-            config: {},
+            config: {
+              options: [
+                { id: 'todo', label: '待办', color: 'gray' },
+                { id: 'doing', label: '进行中', color: 'blue' },
+              ],
+            },
             createdAt: '',
             updatedAt: '',
           },
@@ -79,7 +84,7 @@ describe('PagePropertiesPanel', () => {
     )
 
     await user.click(screen.getByRole('button', { name: '空' }))
-    expect(onSetValue).toHaveBeenCalledWith('prop_status', '进行中')
+    expect(onSetValue).toHaveBeenCalledWith('prop_status', '待办')
 
     await user.click(screen.getByRole('button', { name: '添加属性' }))
     expect(onAddDefaultProperty).toHaveBeenCalled()
