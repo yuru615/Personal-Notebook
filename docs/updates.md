@@ -28,7 +28,7 @@
 - 已通过 focused vitest：`npx vitest run src/domain/pageProperties.test.ts src/store/createWorkspaceStore.test.ts src/domain/search.test.ts src/components/editor/PagePropertiesPanel.test.tsx src/components/search/SearchDialog.test.tsx src/app/App.test.tsx src/components/editor/PageHeader.test.tsx src/lib/workspaceRepository.test.ts src/lib/storageClient.test.ts`
 - 已通过全量测试的本机等价命令：`C:/Program Files/nodejs/npm.cmd run test`（本机 `npm test` 入口解析异常，直接 `npm.cmd` 可正常执行）
 - 已通过构建：`C:/Program Files/nodejs/npm.cmd run build`
-- `cargo test` 本轮未能完成：当前沙箱禁止写入 `src-tauri/target`，运行时在 `src-tauri/target/debug/.cargo-build-lock` 处收到“拒绝访问”
+- 已通过完整 Rust 测试：`cargo test --manifest-path E:\Workspace\个人知识库-桌面端\src-tauri\Cargo.toml`，结果为 46 passed、0 failed
 
 ## 2026-07-05 左侧页面结构区分组折叠
 
