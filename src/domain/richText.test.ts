@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { applyRichTextMark, richTextToMarkdown, richTextToPlainText } from './richText'
+import {
+  applyRichTextMark,
+  normalizeRichText,
+  replaceRichTextRange,
+  richTextToMarkdown,
+  richTextToPlainText,
+} from './richText'
 
 describe('richText', () => {
   it('applies a mark to a selected text range', () => {
@@ -49,5 +55,34 @@ describe('richText', () => {
     expect(richTextToMarkdown([{ text: 'blue', color: 'blue' }])).toBe(
       '<span style="color: #337ea9">blue</span>',
     )
+  })
+})
+
+describe('richText page relations', () => {
+  it('merges adjacent relation segments only when target and kind match', () => {
+    expect(
+      normalizeRichText([
+        { text: 'Product', pageId: 'page_product', relationKind: 'link' },
+        { text: ' Plan', pageId: 'page_product', relationKind: 'link' },
+        { text: '@Roadmap', pageId: 'page_roadmap', relationKind: 'mention' },
+      ]),
+    ).toEqual([
+      { text: 'Product Plan', pageId: 'page_product', relationKind: 'link' },
+      { text: '@Roadmap', pageId: 'page_roadmap', relationKind: 'mention' },
+    ])
+  })
+
+  it('replaces a typed trigger range with a relation segment', () => {
+    expect(
+      replaceRichTextRange(
+        [{ text: 'See [[Prod' }],
+        4,
+        10,
+        [{ text: 'Product Plan', pageId: 'page_product', relationKind: 'link' }],
+      ),
+    ).toEqual([
+      { text: 'See ' },
+      { text: 'Product Plan', pageId: 'page_product', relationKind: 'link' },
+    ])
   })
 })

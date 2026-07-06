@@ -10,11 +10,18 @@ function sameMarks(a: RichTextSegment, b: RichTextSegment) {
     Boolean(a.underline) === Boolean(b.underline) &&
     Boolean(a.strike) === Boolean(b.strike) &&
     (a.link ?? '') === (b.link ?? '') &&
+    (a.pageId ?? '') === (b.pageId ?? '') &&
+    (a.relationKind ?? '') === (b.relationKind ?? '') &&
     (a.color ?? '') === (b.color ?? '')
   )
 }
 
 function normalizeSegment(segment: RichTextSegment): RichTextSegment {
+  const hasPageRelation =
+    typeof segment.pageId === 'string' &&
+    segment.pageId.trim().length > 0 &&
+    (segment.relationKind === 'link' || segment.relationKind === 'mention')
+
   return {
     text: segment.text,
     ...(segment.bold ? { bold: true } : {}),
@@ -22,6 +29,7 @@ function normalizeSegment(segment: RichTextSegment): RichTextSegment {
     ...(segment.underline ? { underline: true } : {}),
     ...(segment.strike ? { strike: true } : {}),
     ...(segment.link ? { link: segment.link } : {}),
+    ...(hasPageRelation ? { pageId: segment.pageId, relationKind: segment.relationKind } : {}),
     ...(segment.color ? { color: segment.color } : {}),
   }
 }
@@ -52,6 +60,64 @@ export function richTextFromPlainText(text: string): RichTextSegment[] {
 
 export function richTextToPlainText(segments: RichTextSegment[] | undefined): string {
   return normalizeRichText(segments ?? []).map((segment) => segment.text).join('')
+}
+
+export function replaceRichTextRange(
+  segments: RichTextSegment[],
+  selectionStart: number,
+  selectionEnd: number,
+  replacement: RichTextSegment[],
+): RichTextSegment[] {
+  const plainText = richTextToPlainText(segments)
+  const start = Math.max(0, Math.min(selectionStart, selectionEnd, plainText.length))
+  const end = Math.max(0, Math.min(Math.max(selectionStart, selectionEnd), plainText.length))
+  const normalizedSegments = normalizeRichText(segments)
+  const normalizedReplacement = normalizeRichText(replacement)
+
+  if (start === end) {
+    return normalizeRichText([
+      ...normalizedSegments.slice(0, normalizedSegments.length),
+      ...normalizedReplacement,
+    ])
+  }
+
+  const next: RichTextSegment[] = []
+  let offset = 0
+  let inserted = false
+
+  for (const segment of normalizedSegments) {
+    const segmentStart = offset
+    const segmentEnd = offset + segment.text.length
+    offset = segmentEnd
+
+    if (segmentEnd <= start || segmentStart >= end) {
+      if (!inserted && segmentStart >= end) {
+        next.push(...normalizedReplacement)
+        inserted = true
+      }
+      next.push(segment)
+      continue
+    }
+
+    if (segmentStart < start) {
+      next.push({ ...segment, text: segment.text.slice(0, start - segmentStart) })
+    }
+
+    if (!inserted) {
+      next.push(...normalizedReplacement)
+      inserted = true
+    }
+
+    if (segmentEnd > end) {
+      next.push({ ...segment, text: segment.text.slice(end - segmentStart) })
+    }
+  }
+
+  if (!inserted) {
+    next.push(...normalizedReplacement)
+  }
+
+  return normalizeRichText(next)
 }
 
 function applyMarkPatch(segment: RichTextSegment, mark: RichTextMarkPatch): RichTextSegment {

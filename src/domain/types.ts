@@ -57,6 +57,7 @@ export type BlockType =
   | 'mindmap'
 
 export type TextColor = 'gray' | 'brown' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'pink' | 'red'
+export type PageRelationKind = 'link' | 'mention'
 export type BlockBackgroundColor =
   | 'gray'
   | 'brown'
@@ -92,6 +93,8 @@ export interface RichTextSegment {
   underline?: boolean
   strike?: boolean
   link?: string
+  pageId?: PageId
+  relationKind?: PageRelationKind
   color?: TextColor
 }
 
