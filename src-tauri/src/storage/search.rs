@@ -20,6 +20,7 @@ pub fn replace_page_document(
         document_id: format!("page:{}:title", page.id),
         kind: "page".to_string(),
         page_id: page.id.clone(),
+        block_id: None,
         board_id: None,
         database_id: None,
         record_id: None,
@@ -55,6 +56,7 @@ pub fn replace_board_document(
             document_id: format!("board:{board_id}"),
             kind: "whiteboard".to_string(),
             page_id: page_id.unwrap_or_default(),
+            block_id: None,
             board_id: Some(board_id.to_string()),
             database_id: None,
             record_id: None,
@@ -82,6 +84,7 @@ pub fn replace_mindmap_document(
             document_id: format!("mindmap:{mindmap_id}"),
             kind: "mindmap".to_string(),
             page_id: page_id.unwrap_or_default(),
+            block_id: None,
             board_id: None,
             database_id: None,
             record_id: None,
@@ -109,6 +112,7 @@ pub fn replace_data_table_documents(
             document_id: format!("database:{}", data_table.id),
             kind: "data_table".to_string(),
             page_id: page_id.clone(),
+            block_id: None,
             board_id: None,
             database_id: Some(data_table.id.clone()),
             record_id: None,
@@ -129,6 +133,7 @@ pub fn replace_data_table_documents(
                 document_id: format!("database:{}:record:{record_id}", data_table.id),
                 kind: "data_table_record".to_string(),
                 page_id: page_id.clone(),
+                block_id: None,
                 board_id: None,
                 database_id: Some(data_table.id.clone()),
                 record_id: Some(record_id),
@@ -159,7 +164,7 @@ pub fn search(
     let fts_query = format!("\"{}\"", trimmed.replace('"', "\"\""));
     let bounded_limit = limit.clamp(1, MAX_SEARCH_LIMIT) as i64;
     let mut statement = connection.prepare(
-        "SELECT d.kind, d.page_id, d.board_id, d.database_id, d.record_id, d.title, d.icon,
+        "SELECT d.kind, d.page_id, d.block_id, d.board_id, d.database_id, d.record_id, d.title, d.icon,
           d.excerpt, d.match_source, d.match_key, d.source_label
           FROM zhixi_search_documents_fts f
           JOIN zhixi_search_documents d ON d.document_id = f.document_id
@@ -171,15 +176,16 @@ pub fn search(
         Ok(SearchResult {
             kind: row.get(0)?,
             page_id: row.get(1)?,
-            board_id: row.get(2)?,
-            database_id: row.get(3)?,
-            record_id: row.get(4)?,
-            title: row.get(5)?,
-            icon: row.get(6)?,
-            excerpt: row.get(7)?,
-            match_source: row.get(8)?,
-            match_key: row.get(9)?,
-            source_label: row.get(10)?,
+            block_id: row.get(2)?,
+            board_id: row.get(3)?,
+            database_id: row.get(4)?,
+            record_id: row.get(5)?,
+            title: row.get(6)?,
+            icon: row.get(7)?,
+            excerpt: row.get(8)?,
+            match_source: row.get(9)?,
+            match_key: row.get(10)?,
+            source_label: row.get(11)?,
         })
     })?;
 
@@ -193,13 +199,14 @@ fn normalize_query(query: &str) -> String {
 fn insert_document(connection: &Connection, document: &SearchDocument) -> StorageResult<()> {
     connection.execute(
         "INSERT INTO zhixi_search_documents
-          (document_id, kind, page_id, board_id, database_id, record_id, title, icon, excerpt, body,
+          (document_id, kind, page_id, block_id, board_id, database_id, record_id, title, icon, excerpt, body,
             match_source, match_key, source_label)
-          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             document.document_id,
             document.kind,
             document.page_id,
+            document.block_id,
             document.board_id,
             document.database_id,
             document.record_id,
@@ -214,12 +221,13 @@ fn insert_document(connection: &Connection, document: &SearchDocument) -> Storag
     )?;
     connection.execute(
         "INSERT INTO zhixi_search_documents_fts
-          (document_id, kind, page_id, board_id, database_id, record_id, title, icon, excerpt, body)
-          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+          (document_id, kind, page_id, block_id, board_id, database_id, record_id, title, icon, excerpt, body)
+          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
             document.document_id,
             document.kind,
             document.page_id,
+            document.block_id,
             document.board_id,
             document.database_id,
             document.record_id,
@@ -293,6 +301,7 @@ fn property_documents(
                 document_id: format!("page:{}:property:{}", page.id, definition.id),
                 kind: "page".to_string(),
                 page_id: page.id.clone(),
+                block_id: None,
                 board_id: None,
                 database_id: None,
                 record_id: None,
@@ -312,18 +321,17 @@ fn block_documents(page: &PageRecord) -> Vec<SearchDocument> {
     page.blocks
         .iter()
         .enumerate()
-        .filter_map(|(index, block)| {
-            let entry = block_search_entry(block)?;
+        .flat_map(|(index, block)| {
             let block_id = block
                 .get("id")
                 .and_then(Value::as_str)
                 .map(str::to_string)
                 .unwrap_or_else(|| format!("index_{index}"));
-
-            Some(SearchDocument {
+            block_search_entries(block).into_iter().map(move |entry| SearchDocument {
                 document_id: format!("page:{}:block:{}:{}", page.id, block_id, entry.document_suffix),
                 kind: "page".to_string(),
                 page_id: page.id.clone(),
+                block_id: Some(block_id.clone()),
                 board_id: None,
                 database_id: None,
                 record_id: None,
@@ -339,8 +347,10 @@ fn block_documents(page: &PageRecord) -> Vec<SearchDocument> {
         .collect()
 }
 
-fn block_search_entry(block: &Value) -> Option<SearchEntry> {
-    match block.get("type").and_then(Value::as_str) {
+fn block_search_entries(block: &Value) -> Vec<SearchEntry> {
+    let mut entries = rich_text_relation_entries(block);
+
+    if let Some(entry) = match block.get("type").and_then(Value::as_str) {
         Some("paragraph" | "heading_1" | "heading_2" | "heading_3" | "todo" | "code") => {
             create_body_entry(block.get("text").and_then(Value::as_str).unwrap_or(""))
         }
@@ -376,7 +386,67 @@ fn block_search_entry(block: &Value) -> Option<SearchEntry> {
             block.get("alt").and_then(Value::as_str).unwrap_or(""),
         ]),
         _ => None,
+    } {
+        entries.push(entry);
     }
+
+    entries
+}
+
+fn rich_text_relation_entries(block: &Value) -> Vec<SearchEntry> {
+    let Some("paragraph" | "heading_1" | "heading_2" | "heading_3" | "todo") =
+        block.get("type").and_then(Value::as_str)
+    else {
+        return Vec::new();
+    };
+
+    let excerpt = block
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if excerpt.is_empty() {
+        return Vec::new();
+    }
+
+    block.get("richText")
+        .and_then(Value::as_array)
+        .map(|segments| {
+            segments
+                .iter()
+                .enumerate()
+                .filter_map(|(index, segment)| {
+                    let text = segment.get("text").and_then(Value::as_str)?.trim().to_string();
+                    let relation_kind = segment
+                        .get("relationKind")
+                        .and_then(Value::as_str)
+                        .filter(|kind| *kind == "link" || *kind == "mention")?;
+                    let _page_id = segment.get("pageId").and_then(Value::as_str)?;
+
+                    if text.is_empty() {
+                        return None;
+                    }
+
+                    Some(SearchEntry {
+                        document_suffix: format!("relation:{relation_kind}:{index}"),
+                        excerpt: excerpt.clone(),
+                        search_text: text,
+                        match_source: if relation_kind == "mention" {
+                            "page_mention".to_string()
+                        } else {
+                            "page_link".to_string()
+                        },
+                        source_label: if relation_kind == "mention" {
+                            "页面提及".to_string()
+                        } else {
+                            "页面链接".to_string()
+                        },
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn create_body_entry(text: &str) -> Option<SearchEntry> {
@@ -497,6 +567,7 @@ struct SearchDocument {
     document_id: String,
     kind: String,
     page_id: String,
+    block_id: Option<String>,
     board_id: Option<String>,
     database_id: Option<String>,
     record_id: Option<String>,

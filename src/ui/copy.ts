@@ -33,6 +33,7 @@ export const uiCopy = {
       all: '全部',
       page: '页面',
       whiteboard: '白板',
+      mindmap: '导图',
       dataTable: '数据表格',
       tags: '标签',
       status: '状态',
@@ -40,6 +41,7 @@ export const uiCopy = {
     groups: {
       page: '页面',
       whiteboard: '白板',
+      mindmap: '导图',
       dataTable: '数据表格',
     },
   },
@@ -73,10 +75,22 @@ export const uiCopy = {
     emptyValue: '空',
     editValue: '编辑属性',
     editMultiSelect: '编辑标签，使用逗号分隔',
+    clearDate: '清空日期',
+    today: '今天',
+  },
+  pageRelations: {
+    title: '页面关系',
+    backlinks: '链接到此页面',
+    mentions: '提及此页面',
   },
   editor: {
     addBlock: '添加块',
     childPage: '子页面',
+    pageRelation: {
+      linkSuggestions: '页面链接建议',
+      mentionSuggestions: '页面提及建议',
+      createPage: (title: string) => `新建页面“${title}”`,
+    },
   },
   saveStatus: {
     idle: '未保存',

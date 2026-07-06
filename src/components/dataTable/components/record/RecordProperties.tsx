@@ -7,6 +7,8 @@ type RecordPropertiesProps = {
   properties: Property[];
   record: DatabaseRecord;
   onCellChange: (property: Property, value: string | boolean | string[]) => void;
+  onCreateOption?: (property: Property, label: string) => void;
+  onDeleteOption?: (property: Property, optionId: string) => void;
 };
 
 const PROPERTY_LABELS: Record<PropertyType, string> = {
@@ -39,6 +41,8 @@ export default function RecordProperties({
   properties,
   record,
   onCellChange,
+  onCreateOption,
+  onDeleteOption,
 }: RecordPropertiesProps) {
   return (
     <section className="record-properties">
@@ -89,6 +93,8 @@ export default function RecordProperties({
                 property={property}
                 record={record}
                 onChange={(value) => onCellChange(property, value)}
+                onCreateOption={(label) => onCreateOption?.(property, label)}
+                onDeleteOption={(optionId) => onDeleteOption?.(property, optionId)}
               />
             )}
           </div>

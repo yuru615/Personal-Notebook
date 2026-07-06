@@ -1,11 +1,13 @@
 ﻿import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Suspense, lazy } from 'react'
+import { useMemo } from 'react'
 import {
   HashRouter,
   MemoryRouter,
   Navigate,
   Route,
   Routes,
+  useLocation,
   useMatch,
   useNavigate,
   useParams,
@@ -13,7 +15,9 @@ import {
 import { BlockEditor } from '../components/editor/BlockEditor'
 import { PageHeader, PageHeaderToolbar } from '../components/editor/PageHeader'
 import { PagePropertiesPanel } from '../components/editor/PagePropertiesPanel'
+import { PageRelationsPanel } from '../components/editor/PageRelationsPanel'
 import { PageOutline } from '../components/editor/PageOutline'
+import { getBlockAnchorId } from '../components/editor/blockAnchors'
 import { MindmapFrame } from '../components/mindmap/MindmapFrame'
 import { MindmapPage } from '../components/mindmap/MindmapPage'
 import { useDismissableLayer } from '../components/editor/useDismissableLayer'
@@ -39,6 +43,7 @@ import type {
   MindmapRecord,
   PageFontFamily,
   PagePropertyDefinition,
+  PagePropertyOption,
   PagePropertyValue,
   PageRecord,
   SaveStatus,
@@ -46,6 +51,7 @@ import type {
   WorkspaceSettings,
   WorkspaceSnapshot,
 } from '../domain/types'
+import { collectPageRelationMatches } from '../domain/pageRelations'
 import {
   createStorageWorkspaceRepository,
   type WorkspaceRepository,
@@ -137,6 +143,11 @@ interface AppProps {
   repository?: WorkspaceRepository
   store?: WorkspaceStore
   initialEntries?: string[]
+}
+
+interface CreatePageOptions {
+  title?: string
+  setCurrent?: boolean
 }
 
 const repositoryStoreCache = new WeakMap<WorkspaceRepository, WorkspaceStore>()
@@ -399,7 +410,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       sidebarWidth={state.settings.sidebarWidth ?? 272}
       pinnedSidebarItems={state.settings.pinnedSidebarItems ?? []}
       archiveTask={archiveTask}
-      onCreatePage={() => store.getState().createPage()}
+      onCreatePage={(parentId, options) => store.getState().createPage(parentId, options)}
       onSetSidebarLayout={(layout) => store.getState().setSidebarLayout(layout)}
       onSetSidebarWidth={(width) => store.getState().setSidebarWidth(width)}
       onTogglePinnedSidebarItem={(item) => store.getState().togglePinnedSidebarItem(item)}
@@ -457,6 +468,9 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       }
       onSetPagePropertyValue={(pageId, propertyId, value) =>
         store.getState().setPagePropertyValue(pageId, propertyId, value)
+      }
+      onSetPagePropertyOptions={(propertyId, options) =>
+        store.getState().setPagePropertyOptions(propertyId, options)
       }
       onAddDefaultPageProperty={(key) => store.getState().appendDefaultPageProperty(key)}
       onUpdateBlock={(pageId, blockId, nextBlock) =>
@@ -576,7 +590,7 @@ interface AppRoutesProps {
   sidebarWidth: number
   pinnedSidebarItems: SidebarPinnedItem[]
   archiveTask: ArchiveTaskStatus | null
-  onCreatePage: () => Promise<PageRecord>
+  onCreatePage: (parentId?: string, options?: CreatePageOptions) => Promise<PageRecord>
   onSetSidebarLayout: (layout: NonNullable<WorkspaceSettings['sidebarLayout']>) => Promise<void>
   onSetSidebarWidth: (width: number) => Promise<void>
   onTogglePinnedSidebarItem: (item: SidebarPinnedItem) => Promise<void>
@@ -610,6 +624,10 @@ interface AppRoutesProps {
     pageId: string,
     propertyId: string,
     value: PagePropertyValue,
+  ) => Promise<void>
+  onSetPagePropertyOptions: (
+    propertyId: string,
+    options: PagePropertyOption[],
   ) => Promise<void>
   onAddDefaultPageProperty: (key: 'tags' | 'status' | 'date' | 'notes') => Promise<void>
   onUpdateBlock: (
@@ -651,6 +669,10 @@ interface AppRoutesProps {
   onCleanupOrphanDataTables: () => Promise<void>
 }
 
+interface SearchFocusLocationState {
+  focusBlockId?: string
+}
+
 function AppRoutes({
   boards,
   dataTables,
@@ -690,6 +712,7 @@ function AppRoutes({
   onChangePageCover,
   onTogglePageOutlineVisible,
   onSetPagePropertyValue,
+  onSetPagePropertyOptions,
   onAddDefaultPageProperty,
   onUpdateBlock,
   onInsertBlock,
@@ -842,9 +865,13 @@ function AppRoutes({
         pageProperties={pageProperties}
         boards={boards}
         dataTables={dataTables}
+        mindmaps={mindmaps}
         onClose={() => setIsSearchOpen(false)}
-        onOpenPage={(pageId) => navigate(`/pages/${pageId}`)}
+        onOpenPage={(pageId, blockId) =>
+          navigate(`/pages/${pageId}`, blockId ? { state: { focusBlockId: blockId } } : undefined)
+        }
         onOpenBoard={(pageId, boardId) => navigate(`/pages/${pageId}/boards/${boardId}`)}
+        onOpenMindmap={(pageId, mindmapId) => navigate(`/pages/${pageId}/mindmaps/${mindmapId}`)}
         onOpenDataTable={(pageId, databaseId, recordId) =>
           navigate(
             recordId
@@ -876,6 +903,7 @@ function AppRoutes({
                 pageProperties={pageProperties}
                 currentPageId={currentPageId}
                 archiveTask={archiveTask}
+                onCreatePage={onCreatePage}
                 onRoutePageChange={onRoutePageChange}
                 onRenamePage={onRenamePage}
                 onDeletePage={handleRequestDeletePage}
@@ -886,6 +914,7 @@ function AppRoutes({
                 onChangePageCover={onChangePageCover}
                 onTogglePageOutlineVisible={onTogglePageOutlineVisible}
                 onSetPagePropertyValue={onSetPagePropertyValue}
+                onSetPagePropertyOptions={onSetPagePropertyOptions}
                 onAddDefaultPageProperty={onAddDefaultPageProperty}
                 onUpdateBlock={onUpdateBlock}
                 onInsertBlock={onInsertBlock}
@@ -1021,6 +1050,7 @@ interface PageRouteProps {
   pageProperties: PagePropertyDefinition[]
   currentPageId: string | null
   archiveTask: ArchiveTaskStatus | null
+  onCreatePage: (parentId?: string, options?: CreatePageOptions) => Promise<PageRecord>
   onRoutePageChange: (pageId: string) => Promise<void>
   onRenamePage: (pageId: string, title: string) => Promise<void>
   onDeletePage: (pageId: string) => void
@@ -1034,6 +1064,10 @@ interface PageRouteProps {
     pageId: string,
     propertyId: string,
     value: PagePropertyValue,
+  ) => Promise<void>
+  onSetPagePropertyOptions: (
+    propertyId: string,
+    options: PagePropertyOption[],
   ) => Promise<void>
   onAddDefaultPageProperty: (key: 'tags' | 'status' | 'date' | 'notes') => Promise<void>
   onUpdateBlock: (
@@ -1085,6 +1119,7 @@ function PageRoute({
   pageProperties,
   currentPageId,
   archiveTask,
+  onCreatePage,
   onRoutePageChange,
   onRenamePage,
   onDeletePage,
@@ -1095,6 +1130,7 @@ function PageRoute({
   onChangePageCover,
   onTogglePageOutlineVisible,
   onSetPagePropertyValue,
+  onSetPagePropertyOptions,
   onAddDefaultPageProperty,
   onUpdateBlock,
   onInsertBlock,
@@ -1117,10 +1153,21 @@ function PageRoute({
   onRestoreMissingMindmap,
 }: PageRouteProps) {
   const { pageId } = useParams()
+  const location = useLocation()
   const navigate = useNavigate()
   const page = pages.find((item) => item.id === pageId)
   const outlineVisible = page?.showOutline !== false
   const [topbarScrolled, setTopbarScrolled] = useState(false)
+  const focusBlockId = (location.state as SearchFocusLocationState | null)?.focusBlockId
+  const relationMatches = useMemo(() => {
+    if (!page) {
+      return []
+    }
+
+    return collectPageRelationMatches(pages).filter((item) => item.targetPageId === page.id)
+  }, [page, pages])
+  const linkMatches = relationMatches.filter((item) => item.kind === 'link')
+  const mentionMatches = relationMatches.filter((item) => item.kind === 'mention')
 
   useEffect(() => {
     if (!page || currentPageId === page.id) {
@@ -1129,6 +1176,22 @@ function PageRoute({
 
     void onRoutePageChange(page.id)
   }, [currentPageId, onRoutePageChange, page])
+
+  useEffect(() => {
+    if (!page || !focusBlockId) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      document
+        .getElementById(getBlockAnchorId(focusBlockId))
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [focusBlockId, location.key, page?.id])
 
   useEffect(() => {
     const updateTopbarScrolled = () => {
@@ -1230,6 +1293,9 @@ function PageRoute({
             onSetValue={(propertyId, value) => {
               void onSetPagePropertyValue(page.id, propertyId, value)
             }}
+            onSetOptions={(propertyId, options) => {
+              void onSetPagePropertyOptions(propertyId, options)
+            }}
             onAddDefaultProperty={(key) => {
               void onAddDefaultPageProperty(key)
             }}
@@ -1285,6 +1351,19 @@ function PageRoute({
             onOpenChildPage={(childPageId) => {
               navigate(`/pages/${childPageId}`)
             }}
+            onCreatePageRelation={async (title) => {
+              const createdPage = await onCreatePage(undefined, {
+                title,
+                setCurrent: false,
+              })
+
+              return {
+                id: createdPage.id,
+                title: createdPage.title,
+                icon: createdPage.icon,
+                parentId: createdPage.parentId,
+              }
+            }}
             onOpenWhiteboard={(boardId) => {
               navigate(`/pages/${page.id}/boards/${boardId}`)
             }}
@@ -1314,6 +1393,16 @@ function PageRoute({
               if (mindmap) {
                 navigate(`/pages/${page.id}/mindmaps/${mindmap.id}`)
               }
+            }}
+          />
+          <PageRelationsPanel
+            links={linkMatches}
+            mentions={mentionMatches}
+            onOpenSource={(sourcePageId, sourceBlockId) => {
+              navigate(
+                `/pages/${sourcePageId}`,
+                sourceBlockId ? { state: { focusBlockId: sourceBlockId } } : undefined,
+              )
             }}
           />
         </div>

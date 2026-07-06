@@ -41,11 +41,30 @@ export function normalizePagePropertyValue(
   definition: PagePropertyDefinition,
   value: unknown,
 ): PagePropertyValue {
+  const allowedOptionLabels =
+    definition.type === 'select' || definition.type === 'multiSelect'
+      ? Array.isArray(definition.config.options)
+        ? new Set(definition.config.options.map((option) => option.label))
+        : null
+      : null
+
   if (definition.type === 'multiSelect') {
-    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+    const nextValue = Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === 'string')
+      : []
+
+    return allowedOptionLabels
+      ? nextValue.filter((item) => allowedOptionLabels.has(item))
+      : nextValue
   }
 
-  return typeof value === 'string' && value.trim() ? value.trim() : null
+  const nextValue = typeof value === 'string' && value.trim() ? value.trim() : null
+
+  if (!nextValue) {
+    return null
+  }
+
+  return allowedOptionLabels && !allowedOptionLabels.has(nextValue) ? null : nextValue
 }
 
 export function normalizePagePropertyValues(

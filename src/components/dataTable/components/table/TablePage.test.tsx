@@ -2,8 +2,8 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createDefaultAppState } from '../../domain/factory'
-import type { AppState, DatabaseRecord } from '../../domain/types'
+import { createDefaultAppState, createProperty } from '../../domain/factory'
+import type { AppState, DatabaseRecord, Property } from '../../domain/types'
 import { AppStoreProvider } from '../../store/AppStore'
 import TablePage from './TablePage'
 
@@ -51,6 +51,11 @@ function renderTablePage(state: AppState, isEmbedded = true) {
       </AppStoreProvider>
     </MemoryRouter>,
   )
+}
+
+function addProperty(state: AppState, property: Property) {
+  state.properties[property.id] = property
+  state.database.propertyOrder.push(property.id)
 }
 
 afterEach(() => {
@@ -167,5 +172,87 @@ describe('TablePage embedded row loading', () => {
         value: originalInnerHeight,
       })
     }
+  })
+
+  it('creates and selects a new single-select option on Enter', async () => {
+    const user = userEvent.setup()
+    const state = createTableState(1, 10)
+    const statusProperty = {
+      ...createProperty({
+        key: 'status',
+        name: 'Status',
+        type: 'select',
+      }),
+      config: {
+        options: [
+          { id: 'status-open', label: 'Open', color: '#2563eb' },
+        ],
+      },
+    }
+
+    addProperty(state, statusProperty)
+
+    renderTablePage(state, false)
+
+    const trigger = screen.getByRole('button', { name: 'Status-record-1' })
+
+    await user.click(trigger)
+    await user.type(
+      screen.getByRole('textbox', { name: 'Status 选项输入' }),
+      'Blocked{Enter}',
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Status-record-1' })).toHaveTextContent(
+        'Blocked',
+      )
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Status-record-1' }))
+
+    const blockedOption = await screen.findByRole('option', { name: 'Blocked' })
+    expect(blockedOption).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('creates and appends a new multi-select option on Enter', async () => {
+    const user = userEvent.setup()
+    const state = createTableState(1, 10)
+    const tagsProperty = {
+      ...createProperty({
+        key: 'tags',
+        name: 'Tags',
+        type: 'multiSelect',
+      }),
+      config: {
+        options: [
+          { id: 'tag-alpha', label: 'Alpha', color: '#16a34a' },
+        ],
+      },
+    }
+
+    state.records['record-1'].values[tagsProperty.id] = ['Alpha']
+    addProperty(state, tagsProperty)
+
+    renderTablePage(state, false)
+
+    const trigger = screen.getByRole('button', { name: 'Tags-record-1' })
+
+    await user.click(trigger)
+    await user.type(
+      screen.getByRole('textbox', { name: 'Tags 选项输入' }),
+      'Beta{Enter}',
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Tags-record-1' })).toHaveTextContent(
+        'Alpha',
+      )
+      expect(screen.getByRole('button', { name: 'Tags-record-1' })).toHaveTextContent(
+        'Beta',
+      )
+    })
+
+    const betaOption = await screen.findByRole('option', { name: 'Beta' })
+    expect(betaOption).toHaveAttribute('aria-selected', 'true')
   })
 })

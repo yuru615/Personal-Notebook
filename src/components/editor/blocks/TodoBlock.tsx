@@ -1,5 +1,6 @@
 import type { CSSProperties, KeyboardEventHandler } from 'react'
 import type { RichTextSegment } from '../../../domain/types'
+import type { PageRelationAutocompleteItem } from '../PageRelationAutocomplete'
 import { RichTextEditable, type RichTextEditableChange } from '../RichTextEditable'
 
 interface TodoBlockProps {
@@ -9,9 +10,22 @@ interface TodoBlockProps {
   style?: CSSProperties
   onChange: (next: RichTextEditableChange & { checked: boolean }) => void
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>
+  relationPages?: PageRelationAutocompleteItem[]
+  onOpenPageRelation?: (pageId: string) => void
+  onCreatePageRelation?: (title: string) => Promise<PageRelationAutocompleteItem>
 }
 
-export function TodoBlock({ text, richText, checked, style, onChange, onKeyDown }: TodoBlockProps) {
+export function TodoBlock({
+  text,
+  richText,
+  checked,
+  style,
+  onChange,
+  onKeyDown,
+  relationPages,
+  onOpenPageRelation,
+  onCreatePageRelation,
+}: TodoBlockProps) {
   return (
     <div className="todo-row">
       <input
@@ -28,6 +42,9 @@ export function TodoBlock({ text, richText, checked, style, onChange, onKeyDown 
         style={style}
         onChange={(next) => onChange({ ...next, checked })}
         onKeyDown={onKeyDown}
+        relationPages={relationPages}
+        onOpenPageRelation={onOpenPageRelation}
+        onCreatePageRelation={onCreatePageRelation}
         placeholder="待办事项"
       />
     </div>

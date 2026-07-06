@@ -17,11 +17,14 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { DatabaseRecord, Property, RecordValue } from "../../domain/types";
+import { CreatableOptionPicker } from "../../../shared/CreatableOptionPicker";
 
 type CellEditorProps = {
   property: Property;
   record: DatabaseRecord;
   onChange: (value: string | boolean | string[]) => void;
+  onCreateOption?: (label: string) => void;
+  onDeleteOption?: (optionId: string) => void;
 };
 
 type FloatingPosition = {
@@ -206,6 +209,8 @@ export default function CellEditor({
   property,
   record,
   onChange,
+  onCreateOption,
+  onDeleteOption,
 }: CellEditorProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [floatingPosition, setFloatingPosition] = useState<FloatingPosition>({
@@ -422,6 +427,35 @@ export default function CellEditor({
 
   if (isOptionProperty) {
     const optionValues = property.config.options ?? [];
+    const handleSelectOption = (label: string) => {
+      if (property.type === "select") {
+        onChange(label);
+        setIsEditing(false);
+        return;
+      }
+
+      const currentValues = Array.isArray(rawValue) ? rawValue : [];
+
+      if (currentValues.includes(label)) {
+        return;
+      }
+
+      onChange([...currentValues, label]);
+    };
+
+    const handleDeselectOption = (label: string) => {
+      if (property.type !== "multiSelect") {
+        return;
+      }
+
+      const currentValues = Array.isArray(rawValue) ? rawValue : [];
+      onChange(currentValues.filter((value) => value !== label));
+    };
+
+    const handleCreateOption = (label: string) => {
+      onCreateOption?.(label);
+      handleSelectOption(label);
+    };
 
     return (
       <div className="cell-option-editor">
@@ -452,12 +486,7 @@ export default function CellEditor({
         </button>
 
         {renderFloatingLayer(
-          <div
-            className="cell-option-list"
-            role="listbox"
-            aria-label={`${property.name} \u9009\u9879`}
-            aria-multiselectable={property.type === "multiSelect" ? "true" : undefined}
-          >
+          <div className="cell-option-list">
             {property.type === "select" ? (
               <button
                 type="button"
@@ -479,41 +508,16 @@ export default function CellEditor({
                 ) : null}
               </button>
             ) : null}
-
-            {optionValues.map((option) => {
-              const isSelected = selectedOptionLabels.includes(option.label);
-
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  role="option"
-                  aria-selected={isSelected}
-                  className={isSelected ? "cell-option-item is-selected" : "cell-option-item"}
-                  onClick={() => {
-                    if (property.type === "select") {
-                      onChange(option.label);
-                      setIsEditing(false);
-                      return;
-                    }
-
-                    const currentValues = Array.isArray(rawValue) ? rawValue : [];
-                    const nextValues = isSelected
-                      ? currentValues.filter((value) => value !== option.label)
-                      : [...currentValues, option.label];
-
-                    onChange(nextValues);
-                  }}
-                >
-                  <span className="cell-option-item-copy">
-                    {renderOptionChip(option.label, "cell-option-item-pill")}
-                  </span>
-                  {isSelected ? (
-                    <Check size={14} strokeWidth={2} aria-hidden="true" />
-                  ) : null}
-                </button>
-              );
-            })}
+            <CreatableOptionPicker
+              mode={property.type === "select" ? "single" : "multiple"}
+              options={optionValues}
+              selectedLabels={selectedOptionLabels}
+              inputLabel={`${property.name} 选项输入`}
+              onSelect={handleSelectOption}
+              onDeselect={handleDeselectOption}
+              onCreate={handleCreateOption}
+              onDelete={onDeleteOption}
+            />
           </div>,
           "database-cell-popover--options",
         )}

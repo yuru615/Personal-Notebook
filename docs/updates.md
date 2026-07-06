@@ -4,6 +4,33 @@
 
 ## 维护规则
 
+## 2026-07-06 页面关系网络 v1
+
+提交：未提交
+
+简要描述：
+
+普通页面正文现在支持 `[[页面]]` 和 `@页面` 关系引用，页面底部新增 backlinks / mentions 区块，搜索也能区分页面链接与页面提及；页面包导入时会同步重写包内 relation target，并把包外 target 安全降级为普通文本。
+
+详细描述：
+
+- 段落、标题、待办等普通页面富文本现在支持创建内部页面链接和页面提及，relation 元数据直接挂在现有 rich text segment 上，不额外引入独立关系表。
+- 页面底部新增“链接到此页面”和“提及此页面”两个关系区，能展示来源页面、来源块上下文，并支持直接跳回来源位置。
+- 页面重命名后，正文中的 relation 显示文本会自动同步；删除目标页面后，正文会保留可见文字，但 relation 元数据会安全降级，避免留下坏链接。
+- 搜索新增“页面链接”“页面提及”两类命中来源，桌面端与前端搜索结果都保留来源块信息，便于直接打开到对应上下文。
+- 页面包导入现在会重写 `richText[].pageId`：若 relation 指向包内页面，则映射到新导入后的 page id；若指向包外页面，则保留文本并移除 `pageId / relationKind`，避免导入后残留失效关系。
+- relation 插入后的异步光标恢复现在只会作用于仍挂在文档中的编辑器，避免编辑器卸载后再改动全局 selection，减少切页或异步创建场景下的串扰。
+
+验证情况：
+
+- 已通过 Rust 回归：`cargo test import_page_package_rewrites_rich_text_page_relations`（使用临时 `CARGO_TARGET_DIR` 运行），结果 1 passed、0 failed。
+- 已通过 Rust 回归：`cargo test search_workspace_returns_relation_hits_with_block_ids`（使用临时 `CARGO_TARGET_DIR` 运行），结果 1 passed、0 failed。
+- 已通过前端定向验证：`npm run test -- src/domain/search.test.ts src/components/search/SearchDialog.test.tsx src/lib/storageClient.test.ts src/components/editor/PageRelationsPanel.test.tsx src/app/App.test.tsx`，结果 5 个文件、61 个测试全部通过。
+- 已通过关系编辑器回归：`npm run test -- src/components/editor/PageRelationsPanel.test.tsx src/app/App.test.tsx src/components/editor/RichTextEditable.test.tsx src/components/editor/PageRelationAutocomplete.test.tsx src/store/createWorkspaceStore.test.ts src/domain/search.test.ts src/components/search/SearchDialog.test.tsx src/lib/storageClient.test.ts`，结果 8 个文件、111 个测试全部通过。
+- 已通过前端全量测试：`npm test`，结果 71 个文件、486 个测试全部通过。
+- 已通过 Rust 全量测试：`cargo test`（使用临时 `CARGO_TARGET_DIR` 运行），结果 48 passed、0 failed。
+- 已通过构建：`npm run build`。
+
 ## 2026-07-05 页面属性与搜索升级
 
 提交：未提交
@@ -455,3 +482,99 @@
 - 已通过 `npm test -- src/styles/appShellLayout.test.ts`
 - 已通过 `npm test -- src/components/sidebar/SidebarTree.test.tsx`
 - 已通过 `npm run build`
+## 2026-07-05 页面属性编辑体验优化
+
+提交：未提交
+
+简要描述：
+
+将普通页面的属性编辑从 `prompt` 弹窗改为面板内直接编辑，优先补齐日期、状态、标签和备注四类属性的更顺手交互。
+
+详细描述：
+
+- 页面属性面板现在支持行内编辑，不再依赖系统 `prompt` 弹窗。
+- 日期属性改为原生日期输入框，支持直接选择日期，并提供清空日期入口。
+- 状态属性改为轻量选项列表，点击后先展开候选项，再选择保存。
+- 标签属性改为逗号分隔的行内输入，保存时会自动整理成标签数组。
+- 备注/文本属性改为行内输入框，支持 `Enter` 保存、`Escape` 取消。
+- 本次改动保持现有 store 与持久化契约不变，只调整前端交互层。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/editor/PagePropertiesPanel.test.tsx`
+## 2026-07-05 页面属性与数据表日期选择器统一
+
+提交：未提交
+
+简要描述：
+
+抽出共享日历面板，让普通页面属性和数据表日期字段使用同一套日期选择 UI。
+
+详细描述：
+
+- 新增共享日期日历面板组件，统一月份切换、日期网格、今天和清空操作。
+- 页面属性里的日期编辑不再使用原生日期输入框，改为与数据表一致的日历面板交互。
+- 数据表日期字段改为复用同一套共享日历面板，本身保留原有浮层定位和弹出方式。
+- 这次只统一日期面板本体，没有顺手改动状态、标签或数据表其他编辑器逻辑，保持改动范围收敛。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/dataTable/styles.test.ts src/components/editor/PagePropertiesPanel.test.tsx`
+- 已通过 `C:/Program Files/nodejs/npm.cmd run build`
+## 2026-07-05 页面属性日期弹窗优化
+
+提交：未提交
+
+简要描述：
+
+将普通页面属性里的日期选择从行内展开改成锚点弹窗，避免展开日历时把整行高度撑开。
+
+详细描述：
+
+- 页面属性日期字段现在保持原按钮常驻，点击后在按钮下方弹出日历面板。
+- 共享日期日历面板本体保持不变，这次只调整页面属性里的承载方式。
+- 点击弹窗外部区域或按 `Escape` 会关闭日期弹窗。
+- 这样既保留了和数据表一致的日期选择体验，也避免了属性行在展开时破坏排版节奏。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/editor/PagePropertiesPanel.test.tsx`
+- 已通过 `C:/Program Files/nodejs/npm.cmd run build`
+## 2026-07-05 页面属性日期 portal 浮层
+
+提交：未提交
+
+简要描述：
+
+将页面属性日期弹窗进一步改为挂载到 `body` 的 portal 浮层，并补上贴边与翻转定位。
+
+详细描述：
+
+- 页面属性日期弹窗不再依附在属性行内部渲染，而是通过 portal 挂到页面外层。
+- 新增基于触发按钮的浮层定位逻辑，优先显示在按钮下方，空间不够时会翻转到上方。
+- 浮层在靠近视口左右边缘时会自动收敛，避免超出窗口。
+- 保持原有点击外部关闭、`Escape` 关闭、今天/清空/选中日期等交互不变。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/editor/PagePropertiesPanel.test.tsx`
+- 已通过 `C:/Program Files/nodejs/npm.cmd run build`
+## 2026-07-05 选项输入回车创建与页面属性宿主接线
+
+提交：未提交
+
+简要描述：
+
+数据表和页面属性里的单选、多选现在都支持直接输入内容并按回车创建新选项，同时补齐了页面属性宿主接线，让新选项可以真正写回本地数据。
+
+详细描述：
+- 新增共享 `CreatableOptionPicker` 交互，统一输入、匹配已有选项、回车创建、单选选择和多选追加/取消选择的行为。
+- 数据表单元格编辑器 `CellEditor` 现在复用这套共享交互，表格页和记录页会在宿主层创建新选项，并沿用现有 `makeId('option')`、`#475569` 和 `updatePropertyOptions(...)` 持久化链路。
+- 记录页元数据区域也一起接入了新选项创建流程，避免只有表格单元格可创建、记录详情页不可创建的割裂体验。
+- 页面属性面板复用了同一套可创建选项交互，并在 `App.tsx` 中补上 `setPagePropertyOptions` 宿主接线，让页面属性中新建的状态/标签选项能真正保存。
+- 顺手修正了 `PagePropertiesPanel` 里的联合类型收窄问题，消除了这次改动暴露出的 TypeScript 构建错误。
+- 补充了共享组件测试、页面属性测试、表格单元格测试、表格页测试和记录页元数据测试，覆盖主要创建路径。
+
+验证情况：
+- `C:/Program Files/nodejs/npm.cmd test -- src/components/shared/CreatableOptionPicker.test.tsx src/components/editor/PagePropertiesPanel.test.tsx src/components/dataTable/components/table/CellEditor.test.tsx src/components/dataTable/components/table/TablePage.test.tsx src/components/dataTable/DataTablePage.test.tsx`
+- `C:/Program Files/nodejs/npm.cmd run build`

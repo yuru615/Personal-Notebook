@@ -162,6 +162,61 @@ describe('createWorkspaceStore data tables', () => {
     expect(counted.getSnapshot()?.pages.at(-1)?.properties?.[tagsDefinition!.id]).toEqual(['搜索'])
   })
 
+  it('creates a titled relation target page without changing currentPageId when setCurrent is false', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+    const created = await store.getState().createPage(undefined, {
+      title: 'Launch Notes',
+      setCurrent: false,
+    })
+
+    expect(created.title).toBe('Launch Notes')
+    expect(store.getState().currentPageId).toBe('page_1')
+    expect(counted.getSnapshot()?.pages.at(-1)).toMatchObject({ title: 'Launch Notes' })
+  })
+
+  it('renames relation labels everywhere the target page is referenced', async () => {
+    const workspace = createWorkspace()
+    const [templatePage] = workspace.pages
+    const counted = createCountingRepository({
+      ...workspace,
+      pages: [
+        {
+          ...templatePage,
+          id: 'page_target',
+          title: 'Old Plan',
+        },
+        {
+          ...templatePage,
+          id: 'page_source',
+          title: 'Source',
+          blocks: [
+            {
+              id: 'block_relation',
+              type: 'paragraph',
+              text: 'Old Plan',
+              richText: [{ text: 'Old Plan', pageId: 'page_target', relationKind: 'link' }],
+            },
+          ],
+        },
+      ],
+      settings: { lastOpenedPageId: 'page_source' },
+    })
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+    await store.getState().renamePage('page_target', 'Renamed Plan')
+    const sourcePage = store.getState().pages.find((page) => page.id === 'page_source')
+
+    expect(sourcePage?.blocks[0]).toMatchObject({
+      text: 'Renamed Plan',
+      richText: [{ text: 'Renamed Plan', pageId: 'page_target', relationKind: 'link' }],
+    })
+    expect(sourcePage?.updatedAt).not.toBe(templatePage.updatedAt)
+  })
+
   it('keeps overlapping page property edits instead of overwriting earlier values', async () => {
     const counted = createCountingRepository(createWorkspace())
     const store = createWorkspaceStore(counted.repository)
@@ -189,6 +244,92 @@ describe('createWorkspaceStore data tables', () => {
     expect(counted.getSnapshot()?.pages[0]?.properties).toMatchObject({
       [tagsDefinition!.id]: ['产品', '搜索'],
       [statusDefinition!.id]: '进行中',
+    })
+  })
+
+  it('keeps a newly created page property option selected when option and value saves overlap', async () => {
+    const workspace = createWorkspace()
+    let snapshot: WorkspaceSnapshot | null = structuredClone(workspace)
+    let saveCount = 0
+
+    const store = createWorkspaceStore({
+      async load() {
+        return snapshot ? structuredClone(snapshot) : null
+      },
+      async save(nextSnapshot: WorkspaceSnapshot) {
+        saveCount += 1
+
+        if (saveCount === 1) {
+          await new Promise((resolve) => setTimeout(resolve, 20))
+        }
+
+        snapshot = structuredClone(nextSnapshot)
+      },
+      async replace(nextSnapshot: WorkspaceSnapshot) {
+        snapshot = structuredClone(nextSnapshot)
+      },
+      async cleanupOrphanAssets() {
+        return 0
+      },
+    })
+
+    await store.getState().bootstrap()
+    const statusDefinition = store.getState().pageProperties.find((item) => item.key === 'status')
+
+    expect(statusDefinition).toBeTruthy()
+
+    const updateOptions = store.getState().setPagePropertyOptions(statusDefinition!.id, [
+      { id: 'todo', label: 'Todo', color: '#64748b' },
+      { id: 'blocked', label: 'Blocked', color: '#475569' },
+    ])
+    const updateValue = store
+      .getState()
+      .setPagePropertyValue('page_1', statusDefinition!.id, 'Blocked')
+
+    await Promise.all([updateOptions, updateValue])
+
+    expect(store.getState().pages[0]?.properties).toMatchObject({
+      [statusDefinition!.id]: 'Blocked',
+    })
+    expect(
+      store.getState().pageProperties.find((item) => item.id === statusDefinition!.id)?.config.options,
+    ).toEqual([
+      { id: 'todo', label: 'Todo', color: '#64748b' },
+      { id: 'blocked', label: 'Blocked', color: '#475569' },
+    ])
+    expect(snapshot?.pages[0]?.properties).toMatchObject({
+      [statusDefinition!.id]: 'Blocked',
+    })
+  })
+
+  it('removes deleted page property options from existing page values', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+    const tagsDefinition = store.getState().pageProperties.find((item) => item.key === 'tags')
+    const statusDefinition = store.getState().pageProperties.find((item) => item.key === 'status')
+
+    expect(tagsDefinition).toBeTruthy()
+    expect(statusDefinition).toBeTruthy()
+
+    await store.getState().setPagePropertyValue('page_1', tagsDefinition!.id, ['Alpha', 'Ghost'])
+    await store.getState().setPagePropertyValue('page_1', statusDefinition!.id, 'Doing')
+
+    await store.getState().setPagePropertyOptions(tagsDefinition!.id, [
+      { id: 'alpha', label: 'Alpha', color: '#2563eb' },
+    ])
+    await store.getState().setPagePropertyOptions(statusDefinition!.id, [
+      { id: 'todo', label: 'Todo', color: '#64748b' },
+    ])
+
+    expect(store.getState().pages[0]?.properties).toMatchObject({
+      [tagsDefinition!.id]: ['Alpha'],
+      [statusDefinition!.id]: null,
+    })
+    expect(counted.getSnapshot()?.pages[0]?.properties).toMatchObject({
+      [tagsDefinition!.id]: ['Alpha'],
+      [statusDefinition!.id]: null,
     })
   })
 
@@ -235,6 +376,49 @@ describe('createWorkspaceStore data tables', () => {
     ])
   })
 
+  it('strips relation metadata when the target page is deleted', async () => {
+    const workspace = createWorkspace()
+    const [templatePage] = workspace.pages
+    const counted = createCountingRepository({
+      ...workspace,
+      pages: [
+        {
+          ...templatePage,
+          id: 'page_target',
+          title: 'Product Plan',
+        },
+        {
+          ...templatePage,
+          id: 'page_source',
+          title: 'Source',
+          blocks: [
+            {
+              id: 'block_relation',
+              type: 'paragraph',
+              text: 'Product Plan',
+              richText: [{ text: 'Product Plan', pageId: 'page_target', relationKind: 'link' }],
+            },
+          ],
+        },
+      ],
+      settings: { lastOpenedPageId: 'page_source' },
+    })
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+    await store.getState().deletePage('page_target')
+    const sourcePage = store.getState().pages[0]
+
+    expect(sourcePage.blocks[0]).toMatchObject({
+      text: 'Product Plan',
+      richText: [{ text: 'Product Plan' }],
+    })
+    expect((sourcePage.blocks[0] as Extract<BlockRecord, { type: 'paragraph' }>).richText?.[0]).not.toHaveProperty(
+      'pageId',
+    )
+    expect(sourcePage.updatedAt).not.toBe(templatePage.updatedAt)
+  })
+
   it('deletes a page branch and moves the current page to the next available page', async () => {
     const workspace = createWorkspace()
     workspace.pages = [
@@ -266,6 +450,46 @@ describe('createWorkspaceStore data tables', () => {
     expect(store.getState().currentPageId).toBe('page_next')
     expect(store.getState().settings.lastOpenedPageId).toBe('page_next')
     expect(counted.getSnapshot()?.pages.map((page) => page.id)).toEqual(['page_next'])
+  })
+
+  it('remaps duplicated in-branch relation targets to the duplicated page ids', async () => {
+    const workspace = createWorkspace()
+    workspace.pages = [
+      {
+        ...workspace.pages[0],
+        id: 'page_parent',
+        title: 'Parent',
+        blocks: [{ id: 'block_child_page', type: 'child_page', pageId: 'page_child' }],
+      },
+      {
+        ...workspace.pages[0],
+        id: 'page_child',
+        parentId: 'page_parent',
+        title: 'Child',
+        blocks: [
+          {
+            id: 'block_relation',
+            type: 'paragraph',
+            text: 'Parent',
+            richText: [{ text: 'Parent', pageId: 'page_parent', relationKind: 'link' }],
+          },
+        ],
+      },
+    ]
+
+    const store = createWorkspaceStore(createMemoryRepository(workspace))
+    await store.getState().bootstrap()
+    const duplicatedParent = await store.getState().duplicatePage('page_parent')
+    const duplicatedChild = store.getState().pages.find((page) => page.parentId === duplicatedParent?.id)
+
+    expect(duplicatedChild?.blocks[0]).toMatchObject({
+      richText: [
+        expect.objectContaining({
+          pageId: duplicatedParent?.id,
+          relationKind: 'link',
+        }),
+      ],
+    })
   })
 
   it('duplicates a page branch and clones linked page resources', async () => {

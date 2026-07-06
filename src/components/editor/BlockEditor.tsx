@@ -31,6 +31,7 @@ import { MindmapBlock } from './blocks/MindmapBlock'
 import { WhiteboardBlock } from './blocks/WhiteboardBlock'
 import { getSlashMenuOptions, SlashMenu } from './SlashMenu'
 import type { ReorderPosition } from '../../utils/reorder'
+import type { PageRelationAutocompleteItem } from './PageRelationAutocomplete'
 
 const EmbeddedDataTableBlock = lazy(() =>
   import('./blocks/EmbeddedDataTableBlock').then((module) => ({
@@ -80,6 +81,7 @@ interface BlockEditorProps {
   onUpdateDataTableSnapshot?: (databaseId: string, snapshot: unknown) => void
   onOpenMindmap?: (mindmapId: string) => void
   onRestoreMindmap?: (mindmapId: string) => void
+  onCreatePageRelation?: (title: string) => Promise<PageRelationAutocompleteItem>
 }
 
 export function BlockEditor({
@@ -106,8 +108,17 @@ export function BlockEditor({
   onUpdateDataTableSnapshot,
   onOpenMindmap,
   onRestoreMindmap,
+  onCreatePageRelation,
 }: BlockEditorProps) {
-  const childPageMap = new Map(allPages.map((item) => [item.id, item]))
+  const pageById = new Map(allPages.map((item) => [item.id, item]))
+  const relationPages = allPages.map(({ id, title, icon, parentId }) => ({
+    id,
+    title,
+    icon,
+    parentId,
+    pathLabel: buildPageRelationPathLabel(pageById, id),
+  }))
+  const childPageMap = pageById
   const boardMap = new Map(boards.map((board) => [board.id, board]))
   const dataTableMap = new Map(dataTables.map((dataTable) => [dataTable.id, dataTable]))
   const mindmapMap = new Map(mindmaps.map((mindmap) => [mindmap.id, mindmap]))
@@ -749,6 +760,9 @@ export function BlockEditor({
                 value={block.text}
                 richText={block.richText}
                 style={getTextInputStyle(textStyle)}
+                relationPages={relationPages}
+                onOpenPageRelation={onOpenChildPage}
+                onCreatePageRelation={onCreatePageRelation}
                 onChange={({ text, richText }) => onUpdateBlock(block.id, { ...block, text, richText })}
                 onKeyDown={(event) => handleEditableBlockKeyDown(event, block)}
               />,
@@ -763,6 +777,9 @@ export function BlockEditor({
                 richText={block.richText}
                 checked={block.checked}
                 style={getTextInputStyle(textStyle)}
+                relationPages={relationPages}
+                onOpenPageRelation={onOpenChildPage}
+                onCreatePageRelation={onCreatePageRelation}
                 onChange={({ text, richText, checked }) =>
                   onUpdateBlock(block.id, { ...block, text, richText, checked })
                 }
@@ -955,6 +972,26 @@ function getFocusModeForBlockType(type: BlockType): FocusRequest['mode'] {
 
 function normalizeListItemText(value: string) {
   return value.replace(/\r\n?/g, '\n').replace(/\n+/g, ' ')
+}
+
+function buildPageRelationPathLabel(
+  pageById: Map<string, PageRecord>,
+  pageId: string,
+) {
+  const chain: string[] = []
+  const seen = new Set<string>()
+  let current = pageById.get(pageId)
+
+  while (current && !seen.has(current.id)) {
+    const title = current.title.trim() || uiCopy.page.untitled
+    chain.push(title)
+    seen.add(current.id)
+    current = current.parentId ? pageById.get(current.parentId) : undefined
+  }
+
+  const orderedChain = chain.reverse()
+  const pathLabel = orderedChain.slice(0, -1).join(' / ')
+  return pathLabel.length > 0 ? pathLabel : undefined
 }
 
 function requestEditorFrame(callback: () => void) {

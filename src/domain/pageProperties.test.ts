@@ -47,4 +47,41 @@ describe('pageProperties', () => {
       ),
     ).toBeNull()
   })
+  it('drops removed select values when explicit options are provided', () => {
+    expect(
+      normalizePagePropertyValue(
+        {
+          id: 'prop_status',
+          key: 'status',
+          name: 'Status',
+          type: 'select',
+          config: {
+            options: [{ id: 'todo', label: 'Todo', color: '#64748b' }],
+          },
+          createdAt: '',
+          updatedAt: '',
+        },
+        'Doing',
+      ),
+    ).toBeNull()
+  })
+
+  it('filters removed multi-select values when explicit options are provided', () => {
+    expect(
+      normalizePagePropertyValue(
+        {
+          id: 'prop_tags',
+          key: 'tags',
+          name: 'Tags',
+          type: 'multiSelect',
+          config: {
+            options: [{ id: 'alpha', label: 'Alpha', color: '#2563eb' }],
+          },
+          createdAt: '',
+          updatedAt: '',
+        },
+        ['Alpha', 'Ghost', 1],
+      ),
+    ).toEqual(['Alpha'])
+  })
 })

@@ -1,15 +1,27 @@
-import type { CSSProperties, FormEvent, KeyboardEventHandler, MouseEvent } from 'react'
+import type {
+  CSSProperties,
+  FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  KeyboardEventHandler,
+  MouseEvent,
+} from 'react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { RichTextSegment, TextColor } from '../../domain/types'
 import {
   applyRichTextMark,
   normalizeRichText,
+  replaceRichTextRange,
   richTextFromPlainText,
   richTextToPlainText,
   type RichTextMarkPatch,
 } from '../../domain/richText'
+import { getPageRelationDisplayText } from '../../domain/pageRelations'
 import { openExternalLink } from '../../lib/externalLinks'
 import { textColorValues } from './blockTextStyle'
+import {
+  PageRelationAutocomplete,
+  type PageRelationAutocompleteItem,
+} from './PageRelationAutocomplete'
 
 export interface RichTextEditableChange {
   text: string
@@ -25,6 +37,11 @@ interface RichTextEditableProps {
   ariaLabel: string
   onChange: (next: RichTextEditableChange) => void
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>
+  relationPages?: PageRelationAutocompleteItem[]
+  onOpenPageRelation?: (pageId: string) => void
+  onCreatePageRelation?: (
+    title: string,
+  ) => Promise<PageRelationAutocompleteItem>
 }
 
 interface SelectionOffsets {
@@ -33,6 +50,15 @@ interface SelectionOffsets {
 }
 
 interface ToolbarPosition {
+  top: number
+  left: number
+}
+
+interface RelationAutocompleteState {
+  kind: 'link' | 'mention'
+  start: number
+  query: string
+  activeIndex: number
   top: number
   left: number
 }
@@ -102,7 +128,9 @@ function richTextToHtml(segments: RichTextSegment[]) {
         html = `<s>${html}</s>`
       }
 
-      if (segment.link) {
+      if (segment.pageId && segment.relationKind) {
+        html = `<a href="/pages/${escapeAttribute(segment.pageId)}" data-page-id="${escapeAttribute(segment.pageId)}" data-page-relation-kind="${escapeAttribute(segment.relationKind)}" class="page-relation-inline page-relation-inline-${escapeAttribute(segment.relationKind)}">${html}</a>`
+      } else if (segment.link) {
         html = `<a href="${escapeAttribute(segment.link)}">${html}</a>`
       }
 
@@ -140,9 +168,18 @@ function marksFromElement(element: Element, marks: Omit<RichTextSegment, 'text'>
   }
 
   if (tagName === 'a') {
-    const href = element.getAttribute('href')
-    if (href) {
-      nextMarks.link = href
+    const pageId = element.getAttribute('data-page-id')
+    const relationKind = element.getAttribute('data-page-relation-kind')
+
+    if (pageId && (relationKind === 'link' || relationKind === 'mention')) {
+      nextMarks.pageId = pageId
+      nextMarks.relationKind = relationKind
+      delete nextMarks.link
+    } else {
+      const href = element.getAttribute('href')
+      if (href) {
+        nextMarks.link = href
+      }
     }
   }
 
@@ -189,6 +226,8 @@ function hasRichTextMarks(segments: RichTextSegment[]) {
       segment.underline ||
       segment.strike ||
       segment.link ||
+      segment.pageId ||
+      segment.relationKind ||
       segment.color,
   )
 }
@@ -210,6 +249,8 @@ function segmentsEqual(left: RichTextSegment[], right: RichTextSegment[]) {
       segment.underline === other.underline &&
       segment.strike === other.strike &&
       segment.link === other.link &&
+      segment.pageId === other.pageId &&
+      segment.relationKind === other.relationKind &&
       segment.color === other.color
     )
   })
@@ -226,6 +267,198 @@ function getLinkTarget(target: EventTarget | null) {
       : target.parentElement?.closest('a[href]')
 
   return element instanceof HTMLAnchorElement ? element : null
+}
+
+function getCollapsedSelectionOffset(root: HTMLElement): number | null {
+  const selection = window.getSelection()
+
+  if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) {
+    return null
+  }
+
+  const range = selection.getRangeAt(0)
+  if (!root.contains(range.commonAncestorContainer)) {
+    return null
+  }
+
+  const beforeSelection = range.cloneRange()
+  beforeSelection.selectNodeContents(root)
+  beforeSelection.setEnd(range.startContainer, range.startOffset)
+  return beforeSelection.toString().length
+}
+
+function getCollapsedSelectionPosition(root: HTMLElement) {
+  const selection = window.getSelection()
+  const range = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null
+  const rootRect = root.getBoundingClientRect()
+
+  if (
+    !range ||
+    !root.contains(range.commonAncestorContainer) ||
+    typeof range.getBoundingClientRect !== 'function'
+  ) {
+    return {
+      top: rootRect.bottom + 8,
+      left: rootRect.left,
+    }
+  }
+
+  range.collapse(true)
+  const rect = range.getBoundingClientRect()
+  const anchorRect = rect.width > 0 || rect.height > 0 ? rect : rootRect
+
+  return {
+    top: anchorRect.bottom + 8,
+    left: anchorRect.left,
+  }
+}
+
+function getDomPositionForOffset(root: HTMLElement, offset: number) {
+  let remaining = Math.max(0, offset)
+  let fallback: { node: Node; offset: number } = {
+    node: root,
+    offset: root.childNodes.length,
+  }
+
+  function visit(node: Node): { node: Node; offset: number } | null {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent ?? ''
+      if (remaining <= text.length) {
+        return { node, offset: remaining }
+      }
+
+      remaining -= text.length
+      fallback = { node, offset: text.length }
+      return null
+    }
+
+    if (node instanceof HTMLBRElement) {
+      const parent = node.parentNode
+      const index = parent ? Array.from(parent.childNodes).indexOf(node) : -1
+
+      if (remaining === 0 && parent && index >= 0) {
+        return { node: parent, offset: index + 1 }
+      }
+
+      remaining = Math.max(0, remaining - 1)
+      if (parent && index >= 0) {
+        fallback = { node: parent, offset: index + 1 }
+      }
+
+      return null
+    }
+
+    for (const child of Array.from(node.childNodes)) {
+      const result = visit(child)
+      if (result) {
+        return result
+      }
+    }
+
+    return null
+  }
+
+  return visit(root) ?? fallback
+}
+
+function setCollapsedSelectionOffset(root: HTMLElement, offset: number) {
+  const selection = window.getSelection()
+
+  if (!selection) {
+    return
+  }
+
+  const position = getDomPositionForOffset(root, offset)
+  const range = document.createRange()
+  range.setStart(position.node, position.offset)
+  range.collapse(true)
+  selection.removeAllRanges()
+  selection.addRange(range)
+  root.focus()
+}
+
+function moveSelectionAfterCurrentRelation(root: HTMLElement) {
+  const selection = window.getSelection()
+
+  if (!selection) {
+    return
+  }
+
+  const anchorNode = selection.anchorNode
+  const anchorElement =
+    anchorNode instanceof Element
+      ? anchorNode
+      : anchorNode instanceof Node
+        ? anchorNode.parentElement
+        : null
+  const relationElement = anchorElement?.closest('a[data-page-id]')
+
+  if (!relationElement || !root.contains(relationElement)) {
+    return
+  }
+
+  const parent = relationElement.parentNode
+  const index = parent ? Array.from(parent.childNodes).indexOf(relationElement) : -1
+
+  if (!parent || index < 0) {
+    return
+  }
+
+  const range = document.createRange()
+  range.setStart(parent, index + 1)
+  range.collapse(true)
+  selection.removeAllRanges()
+  selection.addRange(range)
+  root.focus()
+}
+
+function setCollapsedSelectionAfterRelation(root: HTMLElement, offset: number) {
+  setCollapsedSelectionOffset(root, offset)
+  moveSelectionAfterCurrentRelation(root)
+}
+
+function scheduleCollapsedSelectionOffset(root: HTMLElement, offset: number) {
+  const restoreSelection = () => {
+    if (!root.isConnected) {
+      return
+    }
+
+    setCollapsedSelectionAfterRelation(root, offset)
+  }
+
+  if (typeof window.requestAnimationFrame === 'function') {
+    window.requestAnimationFrame(restoreSelection)
+    return
+  }
+
+  window.setTimeout(restoreSelection, 0)
+}
+
+function getRelationAutocompleteDraft(
+  element: HTMLElement,
+  autocompleteState: RelationAutocompleteState,
+  baseSegments?: RichTextSegment[],
+) {
+  const end = getCollapsedSelectionOffset(element)
+  if (end === null || end < autocompleteState.start) {
+    return null
+  }
+
+  const text = richTextToPlainText(baseSegments ?? readSegmentsFromElement(element))
+  const rawToken = text.slice(autocompleteState.start, end)
+  const query =
+    autocompleteState.kind === 'mention'
+      ? rawToken.replace(/^@/, '')
+      : rawToken.replace(/^\[\[/, '')
+
+  if (
+    (autocompleteState.kind === 'mention' && !rawToken.startsWith('@')) ||
+    (autocompleteState.kind === 'link' && !rawToken.startsWith('[['))
+  ) {
+    return null
+  }
+
+  return { end, query }
 }
 
 function toChangePayload(segments: RichTextSegment[]): RichTextEditableChange {
@@ -367,13 +600,19 @@ export function RichTextEditable({
   ariaLabel,
   onChange,
   onKeyDown,
+  relationPages = [],
+  onOpenPageRelation,
+  onCreatePageRelation,
 }: RichTextEditableProps) {
   const editableRef = useRef<HTMLDivElement | null>(null)
   const toolbarRef = useRef<HTMLDivElement | null>(null)
+  const relationAutocompleteMenuRef = useRef<HTMLDivElement | null>(null)
   const isFocusedRef = useRef(false)
   const selectionRef = useRef<SelectionOffsets | null>(null)
   const ignoreSelectionChangeRef = useRef(false)
   const isLinkMenuOpenRef = useRef(false)
+  const relationAutocompleteRef = useRef<RelationAutocompleteState | null>(null)
+  const pendingPropSyncSegmentsRef = useRef<RichTextSegment[] | null>(null)
   const [isEmpty, setIsEmpty] = useState(value.length === 0)
   const [toolbarPosition, setToolbarPosition] = useState<ToolbarPosition | null>(null)
   const [isColorMenuOpen, setIsColorMenuOpen] = useState(false)
@@ -382,6 +621,10 @@ export function RichTextEditable({
   const [hoveredLinkHref, setHoveredLinkHref] = useState<string | null>(null)
   const [isModifierPressed, setIsModifierPressed] = useState(false)
   const [activeMarks, setActiveMarks] = useState<ActiveSelectionMarks>(emptyActiveSelectionMarks)
+  const [relationAutocomplete, setRelationAutocomplete] = useState<RelationAutocompleteState | null>(
+    null,
+  )
+  const [isCreatingPageRelation, setIsCreatingPageRelation] = useState(false)
   const isLinkOpenReady = Boolean(hoveredLinkHref && isModifierPressed)
 
   useLayoutEffect(() => {
@@ -391,8 +634,17 @@ export function RichTextEditable({
       return
     }
 
+    if (isCreatingPageRelation) {
+      return
+    }
+
     const segments = getSegments(value, richText)
     const normalizedSegments = normalizeRichText(segments)
+    const pendingPropSyncSegments = pendingPropSyncSegmentsRef.current
+
+    if (pendingPropSyncSegments && segmentsEqual(normalizedSegments, pendingPropSyncSegments)) {
+      pendingPropSyncSegmentsRef.current = null
+    }
 
     if (isFocusedRef.current) {
       const currentSegments = readSegmentsFromElement(element)
@@ -400,15 +652,91 @@ export function RichTextEditable({
         setIsEmpty(richTextToPlainText(normalizedSegments).length === 0)
         return
       }
+
+      if (pendingPropSyncSegments && segmentsEqual(currentSegments, pendingPropSyncSegments)) {
+        setIsEmpty(richTextToPlainText(currentSegments).length === 0)
+        return
+      }
     }
 
     element.innerHTML = richTextToHtml(normalizedSegments)
     setIsEmpty(richTextToPlainText(normalizedSegments).length === 0)
-  }, [richText, value])
+  }, [isCreatingPageRelation, richText, value])
+
+  const relationQuery = relationAutocomplete?.query.trim() ?? ''
+  const normalizedRelationQuery = relationQuery.toLocaleLowerCase()
+  const relationSuggestions = relationAutocomplete
+    ? relationPages.filter((page) =>
+        normalizedRelationQuery.length === 0
+          ? true
+          : page.title.toLocaleLowerCase().includes(normalizedRelationQuery),
+      )
+    : []
+  const canCreateRelationPage =
+    Boolean(onCreatePageRelation) &&
+    relationQuery.length > 0 &&
+    relationSuggestions.length === 0
+
+  function closeRelationAutocomplete() {
+    relationAutocompleteRef.current = null
+    setRelationAutocomplete(null)
+  }
+
+  function updateRelationAutocompleteQuery() {
+    const element = editableRef.current
+    const autocompleteState = relationAutocompleteRef.current
+
+    if (!element || !autocompleteState) {
+      return
+    }
+
+    const draft = getRelationAutocompleteDraft(element, autocompleteState)
+    if (!draft) {
+      closeRelationAutocomplete()
+      return
+    }
+
+    const position = getCollapsedSelectionPosition(element)
+    setRelationAutocomplete((current) =>
+      current
+        ? {
+            ...current,
+            query: draft.query,
+            activeIndex: 0,
+            top: position.top,
+            left: position.left,
+          }
+        : current,
+    )
+  }
+
+  function openRelationAutocomplete(kind: 'link' | 'mention', start: number) {
+    const element = editableRef.current
+
+    if (!element) {
+      return
+    }
+
+    const position = getCollapsedSelectionPosition(element)
+    const nextState = {
+      kind,
+      start,
+      query: '',
+      activeIndex: 0,
+      top: position.top,
+      left: position.left,
+    } satisfies RelationAutocompleteState
+    relationAutocompleteRef.current = nextState
+    setRelationAutocomplete(nextState)
+  }
 
   useEffect(() => {
     isLinkMenuOpenRef.current = isLinkMenuOpen
   }, [isLinkMenuOpen])
+
+  useEffect(() => {
+    relationAutocompleteRef.current = relationAutocomplete
+  }, [relationAutocomplete])
 
   useEffect(() => {
     function syncModifierState(event: KeyboardEvent) {
@@ -440,8 +768,13 @@ export function RichTextEditable({
 
       const editable = editableRef.current
       const toolbar = toolbarRef.current
+      const relationAutocompleteMenu = relationAutocompleteMenuRef.current
 
-      if (editable?.contains(target) || toolbar?.contains(target)) {
+      if (
+        editable?.contains(target) ||
+        toolbar?.contains(target) ||
+        relationAutocompleteMenu?.contains(target)
+      ) {
         return
       }
 
@@ -452,6 +785,7 @@ export function RichTextEditable({
       selectionRef.current = null
       setActiveMarks(emptyActiveSelectionMarks)
       setHoveredLinkHref(null)
+      closeRelationAutocomplete()
 
       const selection = window.getSelection()
       if (selection && editable && selection.rangeCount > 0) {
@@ -470,7 +804,7 @@ export function RichTextEditable({
       const editable = editableRef.current
       const selection = window.getSelection()
 
-      if (!editable || !selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      if (!editable || !selection || selection.rangeCount === 0) {
         if (isLinkMenuOpenRef.current && selectionRef.current) {
           return
         }
@@ -482,6 +816,7 @@ export function RichTextEditable({
         selectionRef.current = null
         setActiveMarks(emptyActiveSelectionMarks)
         setHoveredLinkHref(null)
+        closeRelationAutocomplete()
         return
       }
 
@@ -498,7 +833,28 @@ export function RichTextEditable({
         selectionRef.current = null
         setActiveMarks(emptyActiveSelectionMarks)
         setHoveredLinkHref(null)
+        closeRelationAutocomplete()
         return
+      }
+
+      if (selection.isCollapsed) {
+        setToolbarPosition(null)
+        setIsColorMenuOpen(false)
+        setIsLinkMenuOpen(false)
+        setLinkDraft('')
+        selectionRef.current = null
+        setActiveMarks(emptyActiveSelectionMarks)
+        setHoveredLinkHref(null)
+
+        if (relationAutocompleteRef.current) {
+          updateRelationAutocompleteQuery()
+        }
+
+        return
+      }
+
+      if (relationAutocompleteRef.current) {
+        closeRelationAutocomplete()
       }
 
       const nextSelection = getSelectionOffsets(editable)
@@ -567,6 +923,95 @@ export function RichTextEditable({
     onChange(payload)
   }
 
+  function insertPageRelationAtRange(
+    page: PageRelationAutocompleteItem,
+    kind: 'link' | 'mention',
+    start: number,
+    end: number,
+    baseSegmentsOverride?: RichTextSegment[],
+  ) {
+    const element = editableRef.current
+
+    if (!element) {
+      return
+    }
+
+    const baseSegments = baseSegmentsOverride ?? readSegmentsFromElement(element)
+    const displayText = getPageRelationDisplayText(page.title, kind)
+    const nextSegments = replaceRichTextRange(baseSegments, start, end, [
+      { text: displayText, pageId: page.id, relationKind: kind },
+    ])
+    const nextCaretOffset = start + displayText.length
+
+    pendingPropSyncSegmentsRef.current = nextSegments
+    closeRelationAutocomplete()
+    commitSegments(nextSegments)
+    setCollapsedSelectionAfterRelation(element, nextCaretOffset)
+    scheduleCollapsedSelectionOffset(element, nextCaretOffset)
+  }
+
+  function insertPageRelation(page: PageRelationAutocompleteItem, kind: 'link' | 'mention') {
+    const element = editableRef.current
+    const autocompleteState = relationAutocomplete
+
+    if (!element || !autocompleteState || autocompleteState.kind !== kind) {
+      return
+    }
+
+    const caretOffset = getCollapsedSelectionOffset(element)
+    if (caretOffset === null) {
+      return
+    }
+
+    insertPageRelationAtRange(
+      page,
+      kind,
+      autocompleteState.start,
+      caretOffset,
+    )
+  }
+
+  async function createPageRelation() {
+    const element = editableRef.current
+    const autocompleteState = relationAutocompleteRef.current ?? relationAutocomplete
+
+    if (!autocompleteState || !onCreatePageRelation || isCreatingPageRelation || !element) {
+      return
+    }
+
+    const baseSegments = readSegmentsFromElement(element)
+    const draft = getRelationAutocompleteDraft(element, autocompleteState, baseSegments)
+    const title = draft?.query.trim() ?? ''
+    if (!title) {
+      return
+    }
+
+    if (!draft) {
+      return
+    }
+
+    const insertionRange = {
+      kind: autocompleteState.kind,
+      start: autocompleteState.start,
+      end: draft.end,
+    } as const
+
+    setIsCreatingPageRelation(true)
+
+    try {
+      const page = await onCreatePageRelation(title)
+      insertPageRelationAtRange(
+        page,
+        insertionRange.kind,
+        insertionRange.start,
+        insertionRange.end,
+        baseSegments,
+      )
+    } finally {
+      setIsCreatingPageRelation(false)
+    }
+  }
+
   function handleInput() {
     const element = editableRef.current
 
@@ -581,6 +1026,7 @@ export function RichTextEditable({
     selectionRef.current = selection
     setActiveMarks(getActiveSelectionMarks(segments, selection))
     onChange(payload)
+    updateRelationAutocompleteQuery()
   }
 
   function applySelectionMark(mark: RichTextMarkPatch, selectionOverride?: SelectionOffsets | null) {
@@ -666,7 +1112,7 @@ export function RichTextEditable({
 
   function handleMouseMove(event: MouseEvent<HTMLDivElement>) {
     const link = getLinkTarget(event.target)
-    setHoveredLinkHref(link?.getAttribute('href') ?? null)
+    setHoveredLinkHref(link?.dataset.pageId ? null : (link?.getAttribute('href') ?? null))
     setIsModifierPressed(event.ctrlKey || event.metaKey)
   }
 
@@ -676,22 +1122,156 @@ export function RichTextEditable({
 
   function handleMouseDownCapture(event: MouseEvent<HTMLDivElement>) {
     const link = getLinkTarget(event.target)
-    if (!link || !(event.ctrlKey || event.metaKey)) {
+    if (!link) {
       return
     }
 
-    event.preventDefault()
+    if (link.dataset.pageId) {
+      event.preventDefault()
+      return
+    }
+
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault()
+    }
   }
 
   function handleClick(event: MouseEvent<HTMLDivElement>) {
     const link = getLinkTarget(event.target)
-    if (!link || !(event.ctrlKey || event.metaKey)) {
+    if (!link) {
       return
     }
 
-    event.preventDefault()
-    event.stopPropagation()
-    void openExternalLink(link.getAttribute('href') ?? link.href)
+    const pageId = link.dataset.pageId
+
+    if (pageId) {
+      event.preventDefault()
+      event.stopPropagation()
+      onOpenPageRelation?.(pageId)
+      return
+    }
+
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault()
+      event.stopPropagation()
+      void openExternalLink(link.getAttribute('href') ?? link.href)
+    }
+  }
+
+  function handleEditorKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (relationAutocomplete) {
+      const element = editableRef.current
+
+      if (!element || getCollapsedSelectionOffset(element) === null) {
+        closeRelationAutocomplete()
+        onKeyDown?.(event)
+        return
+      }
+
+      if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
+        event.preventDefault()
+        closeRelationAutocomplete()
+        return
+      }
+
+      if (event.key === 'ArrowDown' && !event.nativeEvent.isComposing) {
+        event.preventDefault()
+        setRelationAutocomplete((current) =>
+          current
+            ? {
+                ...current,
+                activeIndex:
+                  relationSuggestions.length === 0
+                    ? 0
+                    : (current.activeIndex + 1) % relationSuggestions.length,
+              }
+            : current,
+        )
+        return
+      }
+
+      if (event.key === 'ArrowUp' && !event.nativeEvent.isComposing) {
+        event.preventDefault()
+        setRelationAutocomplete((current) =>
+          current
+            ? {
+                ...current,
+                activeIndex:
+                  relationSuggestions.length === 0
+                    ? 0
+                    : current.activeIndex <= 0
+                      ? relationSuggestions.length - 1
+                      : current.activeIndex - 1,
+              }
+            : current,
+        )
+        return
+      }
+
+      if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+        const liveDraft = getRelationAutocompleteDraft(element, relationAutocomplete)
+        const normalizedLiveQuery = liveDraft?.query.trim().toLocaleLowerCase() ?? ''
+        const liveSuggestions = relationPages.filter((page) =>
+          normalizedLiveQuery.length === 0
+            ? true
+            : page.title.toLocaleLowerCase().includes(normalizedLiveQuery),
+        )
+        const canCreateLiveRelationPage =
+          Boolean(onCreatePageRelation) &&
+          Boolean(liveDraft?.query.trim()) &&
+          liveSuggestions.length === 0
+
+        if (liveSuggestions.length > 0) {
+          event.preventDefault()
+          insertPageRelation(
+            liveSuggestions[Math.min(relationAutocomplete.activeIndex, liveSuggestions.length - 1)],
+            relationAutocomplete.kind,
+          )
+          return
+        }
+
+        if (canCreateLiveRelationPage || isCreatingPageRelation) {
+          event.preventDefault()
+          if (!isCreatingPageRelation) {
+            void createPageRelation()
+          }
+          return
+        }
+      }
+    }
+
+    if (
+      event.key === '@' &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.nativeEvent.isComposing
+    ) {
+      const element = editableRef.current
+      const caretOffset = element ? getCollapsedSelectionOffset(element) : null
+      if (caretOffset !== null) {
+        queueMicrotask(() => openRelationAutocomplete('mention', caretOffset))
+      }
+    }
+
+    if (
+      event.key === '[' &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.nativeEvent.isComposing
+    ) {
+      const element = editableRef.current
+      const caretOffset = element ? getCollapsedSelectionOffset(element) : null
+      const text = element ? richTextToPlainText(readSegmentsFromElement(element)) : ''
+      const previousCharacter = caretOffset !== null ? text.charAt(Math.max(0, caretOffset - 1)) : ''
+
+      if (caretOffset !== null && previousCharacter === '[') {
+        queueMicrotask(() => openRelationAutocomplete('link', Math.max(0, caretOffset - 1)))
+      }
+    }
+
+    onKeyDown?.(event)
   }
 
   return (
@@ -700,7 +1280,7 @@ export function RichTextEditable({
         ref={editableRef}
         role="textbox"
         aria-label={ariaLabel}
-        contentEditable
+        contentEditable={!isCreatingPageRelation}
         suppressContentEditableWarning
         className={className}
         style={style}
@@ -720,8 +1300,22 @@ export function RichTextEditable({
         onMouseLeave={handleMouseLeave}
         onMouseUp={refreshToolbar}
         onKeyUp={refreshToolbar}
-        onKeyDown={onKeyDown}
+        onKeyDown={handleEditorKeyDown}
       />
+      {relationAutocomplete ? (
+        <PageRelationAutocomplete
+          panelRef={relationAutocompleteMenuRef}
+          kind={relationAutocomplete.kind}
+          suggestions={relationSuggestions}
+          activeIndex={Math.min(relationAutocomplete.activeIndex, Math.max(0, relationSuggestions.length - 1))}
+          top={relationAutocomplete.top}
+          left={relationAutocomplete.left}
+          createTitle={canCreateRelationPage ? relationQuery : undefined}
+          createDisabled={isCreatingPageRelation}
+          onSelect={(page) => insertPageRelation(page, relationAutocomplete.kind)}
+          onCreate={canCreateRelationPage ? () => void createPageRelation() : undefined}
+        />
+      ) : null}
       {toolbarPosition ? (
         <div
           ref={toolbarRef}

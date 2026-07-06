@@ -9,8 +9,15 @@ import {
   type MouseEvent,
 } from "react";
 import { useNavigate } from "react-router-dom";
+import { makeId } from "../../domain/factory";
 import { applyFilters, applySort, evaluateFormulaValue } from "../../domain/query";
-import type { AppState, DatabaseRecord, Property, RecordValue } from "../../domain/types";
+import type {
+  AppState,
+  DatabaseRecord,
+  Property,
+  RecordValue,
+  SelectOption,
+} from "../../domain/types";
 import { useAppStore } from "../../store/AppStore";
 import WorkspaceShell from "../layout/WorkspaceShell";
 import BoardView from "./BoardView";
@@ -38,6 +45,7 @@ const BOARD_TITLE_COLLATOR = new Intl.Collator("zh-CN", {
   numeric: true,
   sensitivity: "base",
 });
+const NEW_OPTION_PLACEHOLDER_COLOR = "#475569";
 
 function normalizeSearchValue(value: RecordValue) {
   if (Array.isArray(value)) {
@@ -793,6 +801,38 @@ export default function TablePage({
     actions.createRecord();
   };
 
+  const createPropertyOption = (property: Property, label: string) => {
+    if (property.type !== "select" && property.type !== "multiSelect") {
+      return;
+    }
+
+    if ((property.config.options ?? []).some((option) => option.label === label)) {
+      return;
+    }
+
+    const nextOptions: SelectOption[] = [
+      ...(property.config.options ?? []),
+      {
+        id: makeId("option"),
+        label,
+        color: NEW_OPTION_PLACEHOLDER_COLOR,
+      },
+    ];
+
+    actions.updatePropertyOptions(property.id, nextOptions);
+  };
+
+  const deletePropertyOption = (property: Property, optionId: string) => {
+    if (property.type !== "select" && property.type !== "multiSelect") {
+      return;
+    }
+
+    actions.updatePropertyOptions(
+      property.id,
+      (property.config.options ?? []).filter((option) => option.id !== optionId),
+    );
+  };
+
   return (
     <WorkspaceShell
       databaseName={state.database.name}
@@ -1039,6 +1079,8 @@ export default function TablePage({
               onRenameProperty={actions.renameProperty}
               onUpdatePropertyType={actions.updatePropertyType}
               onUpdatePropertyOptions={actions.updatePropertyOptions}
+              onCreateOption={createPropertyOption}
+              onDeleteOption={deletePropertyOption}
               onUpdateFormulaExpression={actions.updateFormulaExpression}
               onInsertProperty={insertPropertyAdjacent}
               onColumnWidthChange={updateColumnWidth}
@@ -1133,6 +1175,8 @@ export default function TablePage({
               onCellChange={(property, value) =>
                 actions.updateRecordValue(peekRecord.id, property, value)
               }
+              onCreateOption={createPropertyOption}
+              onDeleteOption={deletePropertyOption}
             />
           ) : null}
 

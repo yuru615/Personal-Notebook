@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -238,5 +238,322 @@ describe('RichTextEditable', () => {
     fireEvent.pointerDown(document.body)
 
     expect(screen.queryByRole('toolbar')).not.toBeInTheDocument()
+  })
+
+  it('shows page-link suggestions for [[ and inserts a confirmed relation segment', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+
+    render(
+      <RichTextEditable
+        ariaLabel="body"
+        className="block-input paragraph-block"
+        value=""
+        relationPages={[
+          { id: 'page_product', title: 'Product Plan', icon: '📄', parentId: null },
+          { id: 'page_roadmap', title: 'Roadmap', icon: '📘', parentId: null },
+        ]}
+        onChange={onChange}
+      />,
+    )
+
+    const editor = screen.getByRole('textbox', { name: 'body' })
+    await user.click(editor)
+    await user.keyboard('[BracketLeft][BracketLeft]Prod')
+
+    expect(await screen.findByRole('listbox', { name: '页面链接建议' })).toBeInTheDocument()
+    await user.keyboard('{Enter}')
+
+    expect(onChange).toHaveBeenLastCalledWith({
+      text: 'Product Plan',
+      richText: [{ text: 'Product Plan', pageId: 'page_product', relationKind: 'link' }],
+    })
+  })
+
+  it('restores the caret after inserting a relation so typing can continue', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+
+    render(
+      <RichTextEditable
+        ariaLabel="body"
+        className="block-input paragraph-block"
+        value=""
+        relationPages={[{ id: 'page_product', title: 'Product Plan', icon: null, parentId: null }]}
+        onChange={onChange}
+      />,
+    )
+
+    const editor = screen.getByRole('textbox', { name: 'body' })
+    await user.click(editor)
+    await user.keyboard('[BracketLeft][BracketLeft]Prod{Enter}!')
+
+    expect(onChange).toHaveBeenLastCalledWith({
+      text: 'Product Plan!',
+      richText: [
+        { text: 'Product Plan', pageId: 'page_product', relationKind: 'link' },
+        { text: '!' },
+      ],
+    })
+  })
+
+  it('opens an existing internal page relation on click', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    const onOpenPageRelation = vi.fn()
+
+    render(
+      <RichTextEditable
+        ariaLabel="body"
+        className="block-input paragraph-block"
+        value="Launch Notes"
+        richText={[{ text: '@Launch Notes', pageId: 'page_new', relationKind: 'mention' }]}
+        relationPages={[]}
+        onOpenPageRelation={onOpenPageRelation}
+        onChange={onChange}
+      />,
+    )
+
+    await user.click(screen.getByRole('link', { name: '@Launch Notes' }))
+    expect(onOpenPageRelation).toHaveBeenCalledWith('page_new')
+  })
+
+  it('creates a new mention target when there is no existing page match', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    const onCreatePageRelation = vi.fn().mockResolvedValue({
+      id: 'page_new',
+      title: 'Launch Notes',
+      icon: null,
+      parentId: null,
+    })
+
+    render(
+      <RichTextEditable
+        ariaLabel="body"
+        className="block-input paragraph-block"
+        value=""
+        relationPages={[]}
+        onCreatePageRelation={onCreatePageRelation}
+        onChange={onChange}
+      />,
+    )
+
+    const editor = screen.getByRole('textbox', { name: 'body' })
+    await user.click(editor)
+    await user.keyboard('@Launch Notes')
+    await user.click(await screen.findByRole('button', { name: '新建页面“Launch Notes”' }))
+
+    expect(onCreatePageRelation).toHaveBeenCalledWith('Launch Notes')
+    expect(onChange).toHaveBeenLastCalledWith({
+      text: '@Launch Notes',
+      richText: [{ text: '@Launch Notes', pageId: 'page_new', relationKind: 'mention' }],
+    })
+  })
+
+  it('does not forward consumed relation autocomplete keys to outer handlers', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    const onKeyDown = vi.fn()
+
+    render(
+      <RichTextEditable
+        ariaLabel="body"
+        className="block-input paragraph-block"
+        value=""
+        relationPages={[
+          { id: 'page_alpha', title: 'Alpha', icon: null, parentId: null },
+          { id: 'page_product', title: 'Product Plan', icon: null, parentId: null },
+        ]}
+        onChange={onChange}
+        onKeyDown={onKeyDown}
+      />,
+    )
+
+    const editor = screen.getByRole('textbox', { name: 'body' })
+    await user.click(editor)
+    await user.keyboard('[BracketLeft][BracketLeft]Prod')
+    expect(await screen.findByRole('listbox', { name: '页面链接建议' })).toBeInTheDocument()
+
+    onKeyDown.mockClear()
+    await user.keyboard('{ArrowDown}{Enter}')
+
+    expect(onKeyDown).not.toHaveBeenCalled()
+    expect(onChange).toHaveBeenLastCalledWith({
+      text: 'Product Plan',
+      richText: [{ text: 'Product Plan', pageId: 'page_product', relationKind: 'link' }],
+    })
+  })
+
+  it('prevents duplicate page creation while relation page creation is pending', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    let resolveCreate:
+      | ((value: { id: string; title: string; icon: null; parentId: null }) => void)
+      | undefined
+    const onCreatePageRelation = vi.fn().mockImplementation(
+      () =>
+        new Promise<{ id: string; title: string; icon: null; parentId: null }>((resolve) => {
+          resolveCreate = resolve
+        }),
+    )
+
+    render(
+      <RichTextEditable
+        ariaLabel="body"
+        className="block-input paragraph-block"
+        value=""
+        relationPages={[]}
+        onCreatePageRelation={onCreatePageRelation}
+        onChange={onChange}
+      />,
+    )
+
+    const editor = screen.getByRole('textbox', { name: 'body' })
+    await user.click(editor)
+    await user.keyboard('@Launch Notes')
+
+    const createButton = await screen.findByRole('button', { name: /Launch Notes/ })
+    await user.keyboard('{Enter}{Enter}')
+
+    expect(onCreatePageRelation).toHaveBeenCalledTimes(1)
+    expect(createButton).toBeDisabled()
+
+    resolveCreate?.({
+      id: 'page_new',
+      title: 'Launch Notes',
+      icon: null,
+      parentId: null,
+    })
+
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith({
+        text: '@Launch Notes',
+        richText: [{ text: '@Launch Notes', pageId: 'page_new', relationKind: 'mention' }],
+      }),
+    )
+  })
+
+  it('keeps the original relation replacement range during async page creation', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    let resolveCreate:
+      | ((value: { id: string; title: string; icon: null; parentId: null }) => void)
+      | undefined
+    const onCreatePageRelation = vi.fn().mockImplementation(
+      () =>
+        new Promise<{ id: string; title: string; icon: null; parentId: null }>((resolve) => {
+          resolveCreate = resolve
+        }),
+    )
+
+    function AsyncCreateHarness() {
+      const [current, setCurrent] = useState({
+        text: '',
+        richText: undefined as undefined | Array<{ text: string; pageId?: string; relationKind?: 'mention' }>,
+      })
+
+      return (
+        <RichTextEditable
+          ariaLabel="body"
+          className="block-input paragraph-block"
+          value={current.text}
+          richText={current.richText}
+          relationPages={[]}
+          onCreatePageRelation={onCreatePageRelation}
+          onChange={(next) => {
+            onChange(next)
+            setCurrent({
+              text: next.text,
+              richText: next.richText as typeof current.richText,
+            })
+          }}
+        />
+      )
+    }
+
+    render(<AsyncCreateHarness />)
+
+    const editor = screen.getByRole('textbox', { name: 'body' })
+    await user.click(editor)
+    await user.keyboard('@Launch Notes')
+    await user.keyboard('{Enter}')
+
+    window.getSelection()?.removeAllRanges()
+
+    resolveCreate?.({
+      id: 'page_new',
+      title: 'Launch Notes',
+      icon: null,
+      parentId: null,
+    })
+
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith({
+        text: '@Launch Notes',
+        richText: [{ text: '@Launch Notes', pageId: 'page_new', relationKind: 'mention' }],
+      }),
+    )
+  })
+
+  it('does not consume autocomplete keys while the user is composing text', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    const onKeyDown = vi.fn()
+
+    render(
+      <RichTextEditable
+        ariaLabel="body"
+        className="block-input paragraph-block"
+        value=""
+        relationPages={[{ id: 'page_product', title: 'Product Plan', icon: null, parentId: null }]}
+        onChange={onChange}
+        onKeyDown={onKeyDown}
+      />,
+    )
+
+    const editor = screen.getByRole('textbox', { name: 'body' })
+    await user.click(editor)
+    await user.keyboard('@Prod')
+    expect(await screen.findByRole('listbox', { name: '页面提及建议' })).toBeInTheDocument()
+
+    onChange.mockClear()
+    onKeyDown.mockClear()
+
+    fireEvent.keyDown(editor, { key: 'ArrowDown', isComposing: true })
+    fireEvent.keyDown(editor, { key: 'Enter', isComposing: true })
+
+    expect(onKeyDown).toHaveBeenCalledTimes(2)
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('closes autocomplete when the selection is no longer collapsed', async () => {
+    const user = userEvent.setup()
+    const onKeyDown = vi.fn()
+
+    render(
+      <RichTextEditable
+        ariaLabel="body"
+        className="block-input paragraph-block"
+        value=""
+        relationPages={[{ id: 'page_product', title: 'Product Plan', icon: null, parentId: null }]}
+        onChange={vi.fn()}
+        onKeyDown={onKeyDown}
+      />,
+    )
+
+    const editor = screen.getByRole('textbox', { name: 'body' })
+    await user.click(editor)
+    await user.keyboard('@Prod')
+    expect(await screen.findByRole('listbox', { name: '页面提及建议' })).toBeInTheDocument()
+
+    selectText(editor, 0, 5)
+    await waitFor(() =>
+      expect(screen.queryByRole('listbox', { name: '页面提及建议' })).not.toBeInTheDocument(),
+    )
+
+    onKeyDown.mockClear()
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    expect(onKeyDown).toHaveBeenCalledTimes(1)
   })
 })

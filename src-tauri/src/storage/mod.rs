@@ -1858,6 +1858,32 @@ fn import_id(prefix: &str, counter: &mut u64) -> String {
     )
 }
 
+fn rewrite_rich_text_relation_segments(
+    rich_text: &mut [Value],
+    page_id_map: &std::collections::HashMap<String, String>,
+) {
+    for segment in rich_text {
+        let Some(object) = segment.as_object_mut() else {
+            continue;
+        };
+        let Some(page_id) = object
+            .get("pageId")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+        else {
+            continue;
+        };
+
+        if let Some(next_id) = page_id_map.get(&page_id) {
+            object.insert("pageId".to_string(), Value::String(next_id.clone()));
+            continue;
+        }
+
+        object.remove("pageId");
+        object.remove("relationKind");
+    }
+}
+
 fn rewrite_block_ids_and_refs(
     blocks: &mut [Value],
     page_id_map: &std::collections::HashMap<String, String>,
@@ -1898,6 +1924,9 @@ fn rewrite_block_ids_and_refs(
             if let Some(next_id) = asset_id_map.get(asset_id) {
                 *asset_id = next_id.clone();
             }
+        }
+        if let Some(rich_text) = object.get_mut("richText").and_then(Value::as_array_mut) {
+            rewrite_rich_text_relation_segments(rich_text, page_id_map);
         }
     }
 }
@@ -2340,7 +2369,7 @@ mod tests {
     fn initializes_schema_with_wal_foreign_keys_and_version() {
         let storage = Storage::open_in_memory_for_tests().expect("storage opens");
 
-        assert_eq!(storage.schema_version().expect("schema version"), 2);
+        assert_eq!(storage.schema_version().expect("schema version"), 3);
         assert_eq!(
             storage.pragma_string("journal_mode").expect("journal mode"),
             "memory"
@@ -2474,6 +2503,71 @@ mod tests {
             .filter(|result| result.page_id == "page_1")
             .count()
             >= 2);
+    }
+
+    #[test]
+    fn search_workspace_returns_relation_hits_with_block_ids() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let snapshot = WorkspaceSnapshot {
+            boards: vec![],
+            data_tables: vec![],
+            mindmaps: vec![],
+            page_properties: vec![],
+            pages: vec![
+                PageRecord {
+                    id: "page_target".to_string(),
+                    parent_id: None,
+                    title: "Product Plan".to_string(),
+                    icon: None,
+                    cover: None,
+                    properties: Some(json!({})),
+                    is_full_width: None,
+                    is_small_text: None,
+                    font_family: None,
+                    show_outline: None,
+                    blocks: vec![],
+                    created_at: "2026-07-06T00:00:00.000Z".to_string(),
+                    updated_at: "2026-07-06T00:00:00.000Z".to_string(),
+                },
+                PageRecord {
+                    id: "page_source".to_string(),
+                    parent_id: None,
+                    title: "Meeting Notes".to_string(),
+                    icon: None,
+                    cover: None,
+                    properties: Some(json!({})),
+                    is_full_width: None,
+                    is_small_text: None,
+                    font_family: None,
+                    show_outline: None,
+                    blocks: vec![json!({
+                        "id": "block_relation",
+                        "type": "paragraph",
+                        "text": "See Product Plan",
+                        "richText": [
+                            { "text": "See " },
+                            { "text": "Product Plan", "pageId": "page_target", "relationKind": "link" }
+                        ]
+                    })],
+                    created_at: "2026-07-06T00:00:00.000Z".to_string(),
+                    updated_at: "2026-07-06T00:00:00.000Z".to_string(),
+                },
+            ],
+            settings: WorkspaceSettings {
+                last_opened_page_id: Some("page_source".to_string()),
+            },
+        };
+
+        storage
+            .replace_workspace_backup(snapshot)
+            .expect("replace snapshot");
+
+        let results = storage.search_workspace("Product Plan", 20).expect("search");
+        assert!(results.iter().any(|result| {
+            result.page_id == "page_source"
+                && result.block_id.as_deref() == Some("block_relation")
+                && result.match_source == "page_link"
+        }));
     }
 
     #[test]
@@ -2693,7 +2787,7 @@ mod tests {
 
         let storage = Storage::open(&data_dir).expect("open migrated storage");
 
-        assert_eq!(storage.schema_version().expect("schema version"), 2);
+        assert_eq!(storage.schema_version().expect("schema version"), 3);
         let page_content_columns = storage
             .connection
             .prepare("PRAGMA table_info(zhixi_page_contents)")
@@ -3294,6 +3388,111 @@ mod tests {
             Some("block_image")
         );
         assert!(image_block.get("assetId").and_then(Value::as_str).is_some());
+    }
+
+    #[test]
+    fn import_page_package_rewrites_rich_text_page_relations() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        let target = Storage::open_in_memory_for_tests().expect("target opens");
+        target
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed target snapshot");
+        let snapshot = WorkspaceSnapshot {
+            boards: vec![],
+            data_tables: vec![],
+            mindmaps: vec![],
+            page_properties: vec![],
+            pages: vec![
+                PageRecord {
+                    id: "page_root".to_string(),
+                    parent_id: None,
+                    title: "Root".to_string(),
+                    icon: None,
+                    cover: None,
+                    properties: Some(json!({})),
+                    is_full_width: None,
+                    is_small_text: None,
+                    font_family: None,
+                    show_outline: None,
+                    blocks: vec![
+                        json!({
+                            "id": "block_link_child",
+                            "type": "paragraph",
+                            "text": "Child",
+                            "richText": [{ "text": "Child", "pageId": "page_child", "relationKind": "link" }]
+                        }),
+                        json!({
+                            "id": "block_link_external",
+                            "type": "paragraph",
+                            "text": "Outside",
+                            "richText": [{ "text": "Outside", "pageId": "page_external", "relationKind": "link" }]
+                        }),
+                    ],
+                    created_at: "2026-07-06T00:00:00.000Z".to_string(),
+                    updated_at: "2026-07-06T00:00:00.000Z".to_string(),
+                },
+                PageRecord {
+                    id: "page_child".to_string(),
+                    parent_id: Some("page_root".to_string()),
+                    title: "Child".to_string(),
+                    icon: None,
+                    cover: None,
+                    properties: Some(json!({})),
+                    is_full_width: None,
+                    is_small_text: None,
+                    font_family: None,
+                    show_outline: None,
+                    blocks: vec![],
+                    created_at: "2026-07-06T00:00:00.000Z".to_string(),
+                    updated_at: "2026-07-06T00:00:00.000Z".to_string(),
+                },
+            ],
+            settings: WorkspaceSettings {
+                last_opened_page_id: Some("page_root".to_string()),
+            },
+        };
+
+        source
+            .replace_workspace_backup(snapshot)
+            .expect("replace source snapshot");
+        let archive = source
+            .export_page_package("page_root")
+            .expect("export page package");
+
+        let result = target
+            .import_page_package(archive)
+            .expect("import page package");
+        let imported = target.export_workspace_backup().expect("export target snapshot");
+        let root = imported
+            .pages
+            .iter()
+            .find(|page| page.id == result.root_page_id)
+            .expect("imported root page");
+        let child = imported
+            .pages
+            .iter()
+            .find(|page| page.parent_id.as_deref() == Some(result.root_page_id.as_str()))
+            .expect("imported child page");
+
+        let rich_text = root.blocks[0]
+            .get("richText")
+            .and_then(Value::as_array)
+            .expect("rich text");
+        assert_eq!(
+            rich_text[0].get("pageId").and_then(Value::as_str),
+            Some(child.id.as_str())
+        );
+
+        let degraded = root.blocks[1]
+            .get("richText")
+            .and_then(Value::as_array)
+            .expect("degraded rich text");
+        assert!(degraded[0].get("pageId").is_none());
+        assert!(degraded[0].get("relationKind").is_none());
+        assert_eq!(
+            degraded[0].get("text").and_then(Value::as_str),
+            Some("Outside")
+        );
     }
 
     #[test]

@@ -220,6 +220,8 @@ pub struct SearchResult {
     pub kind: String,
     pub page_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub board_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub database_id: Option<String>,

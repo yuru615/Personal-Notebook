@@ -7,6 +7,10 @@ import {
   normalizePagePropertyDefinitions,
   normalizePagePropertyValues,
 } from '../domain/pageProperties'
+import {
+  stripDeletedPageRelations,
+  syncPageRelationTitles,
+} from '../domain/pageRelations'
 import { normalizeRichText, richTextFromPlainText } from '../domain/richText'
 import { createSeedWorkspace } from '../domain/seed'
 import type {
@@ -45,6 +49,11 @@ const UNTITLED_PAGE_TITLE = '未命名'
 const COPY_SUFFIX = ' \u526f\u672c'
 const BLOCK_SAVE_DEBOUNCE_MS = 600
 
+interface CreatePageOptions {
+  title?: string
+  setCurrent?: boolean
+}
+
 export interface WorkspaceState {
   boards: BoardRecord[]
   dataTables: DataTableRecord[]
@@ -55,7 +64,7 @@ export interface WorkspaceState {
   currentPageId: PageId | null
   saveStatus: SaveStatus
   bootstrap: () => Promise<void>
-  createPage: (parentId?: PageId) => Promise<PageRecord>
+  createPage: (parentId?: PageId, options?: CreatePageOptions) => Promise<PageRecord>
   setCurrentPage: (pageId: PageId) => Promise<void>
   setSidebarLayout: (layout: NonNullable<WorkspaceSettings['sidebarLayout']>) => Promise<void>
   setSidebarWidth: (width: number) => Promise<void>
@@ -136,7 +145,7 @@ function createEmptyState(): WorkspaceState {
     currentPageId: null,
     saveStatus: 'idle',
     bootstrap: async () => undefined,
-    createPage: async () => {
+    createPage: async (_parentId?: PageId, _options?: CreatePageOptions) => {
       throw new Error('not implemented')
     },
     setCurrentPage: async () => {
@@ -275,13 +284,14 @@ function createEmptyState(): WorkspaceState {
   }
 }
 
-function createPageRecord(parentId?: PageId): PageRecord {
+function createPageRecord(parentId?: PageId, title = UNTITLED_PAGE_TITLE): PageRecord {
   const now = new Date().toISOString()
+  const nextTitle = title.trim() || UNTITLED_PAGE_TITLE
 
   return {
     id: createId('page'),
     parentId: parentId ?? null,
-    title: UNTITLED_PAGE_TITLE,
+    title: nextTitle,
     icon: null,
     cover: null,
     properties: {},
@@ -788,6 +798,41 @@ function withEditableBlockText(
   }
 }
 
+function remapBlockPageRelationTargets(
+  block: BlockRecord,
+  nextPageIdBySourceId: ReadonlyMap<string, string>,
+): BlockRecord {
+  const richText = getEditableBlockRichText(block)
+
+  if (!richText) {
+    return block
+  }
+
+  let didChange = false
+  const nextRichText = richText.map((segment) => {
+    if (!segment.pageId) {
+      return segment
+    }
+
+    const nextPageId = nextPageIdBySourceId.get(segment.pageId)
+    if (!nextPageId || nextPageId === segment.pageId) {
+      return segment
+    }
+
+    didChange = true
+    return {
+      ...segment,
+      pageId: nextPageId,
+    }
+  })
+
+  if (!didChange) {
+    return block
+  }
+
+  return withEditableBlockText(block, getEditableBlockText(block) ?? '', nextRichText)
+}
+
 function isDataTableCommandType(type: BlockType) {
   return type === 'data_table' || type === 'data_table_inline'
 }
@@ -869,9 +914,34 @@ function filterResourcesReferencedByPages(
   }
 }
 
+function touchPagesWithChangedBlocks(
+  previousPages: PageRecord[],
+  nextPages: PageRecord[],
+  updatedAt: string,
+) {
+  const previousPageById = new Map(previousPages.map((page) => [page.id, page]))
+
+  return nextPages.map((page) => {
+    const previousPage = previousPageById.get(page.id)
+
+    if (!previousPage || page.updatedAt !== previousPage.updatedAt) {
+      return page
+    }
+
+    return JSON.stringify(previousPage.blocks) === JSON.stringify(page.blocks)
+      ? page
+      : {
+          ...page,
+          updatedAt,
+        }
+  })
+}
+
 export function createWorkspaceStore(repository: WorkspaceRepository) {
   const undoStack: WorkspaceSnapshot[] = []
   const redoStack: WorkspaceSnapshot[] = []
+  let pagePropertyPersistQueue: Promise<void> = Promise.resolve()
+  let pagePropertyPersistVersion = 0
   let nonPageAssetsPersistQueue: Promise<void> = Promise.resolve()
   let nonPageAssetsPersistVersion = 0
   let pendingBlockSaveTimer: ReturnType<typeof setTimeout> | null = null
@@ -967,7 +1037,28 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       }
 
       await pendingBlockSaveTask
+      await pagePropertyPersistQueue
       await nonPageAssetsPersistQueue
+    }
+
+    async function persistPagePropertyState(errorMessage: string) {
+      const persistVersion = ++pagePropertyPersistVersion
+      const persistTask = pagePropertyPersistQueue.then(() =>
+        repository.save(createSnapshotFromState(get())),
+      )
+      pagePropertyPersistQueue = persistTask.catch(() => undefined)
+
+      try {
+        await persistTask
+        if (persistVersion === pagePropertyPersistVersion) {
+          set({ saveStatus: 'saved' })
+        }
+      } catch {
+        if (persistVersion === pagePropertyPersistVersion) {
+          set({ saveStatus: 'error' })
+        }
+        throw new Error(errorMessage)
+      }
     }
 
     async function persistNonPageAssets(
@@ -1057,11 +1148,12 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       }
     },
 
-    createPage: async (parentId?: PageId) => {
-      const page = createPageRecord(parentId)
+    createPage: async (parentId?: PageId, options?: CreatePageOptions) => {
       const state = get()
+      const page = createPageRecord(parentId, options?.title)
+      const nextCurrentPageId = options?.setCurrent === false ? state.currentPageId : page.id
       const nextSettings = createSettings(
-        page.id,
+        nextCurrentPageId,
         state.settings.sidebarLayout ?? 'compact',
         state.settings.sidebarWidth ?? 272,
         state.settings.pinnedSidebarItems ?? [],
@@ -1081,7 +1173,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           boards: nextSnapshot.boards,
           pages: nextSnapshot.pages,
           settings: nextSettings,
-          currentPageId: page.id,
+          currentPageId: nextCurrentPageId,
           saveStatus: 'saved',
         })
       } catch {
@@ -1420,13 +1512,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         saveStatus: 'saving',
       })
 
-      try {
-        await repository.save(createSnapshotFromState(get()))
-        set({ saveStatus: 'saved' })
-      } catch {
-        set({ saveStatus: 'error' })
-        throw new Error('Failed to update page property value')
-      }
+      await persistPagePropertyState('Failed to update page property value')
     },
 
     appendDefaultPageProperty: async (key) => {
@@ -1515,6 +1601,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
     setPagePropertyOptions: async (propertyId, options) => {
       const state = get()
+      const now = new Date().toISOString()
       const nextPageProperties = state.pageProperties.map((definition) =>
         definition.id === propertyId
           ? {
@@ -1523,31 +1610,29 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
                 ...definition.config,
                 options: structuredClone(options),
               },
-              updatedAt: new Date().toISOString(),
+              updatedAt: now,
             }
           : definition,
       )
+      const nextPages = state.pages.map((page) => {
+        const nextProperties = normalizePagePropertyValues(nextPageProperties, page.properties)
+        return JSON.stringify(page.properties ?? {}) === JSON.stringify(nextProperties)
+          ? page
+          : {
+              ...page,
+              properties: nextProperties,
+              updatedAt: now,
+            }
+      })
 
       pushUndoSnapshot(state)
-      set({ saveStatus: 'saving' })
+      set({
+        pages: nextPages,
+        pageProperties: nextPageProperties,
+        saveStatus: 'saving',
+      })
 
-      try {
-        await repository.save(
-          createSnapshotFromState({
-            ...state,
-            pageProperties: nextPageProperties,
-          }),
-        )
-        set({
-          boards: state.boards,
-          pages: state.pages,
-          pageProperties: nextPageProperties,
-          saveStatus: 'saved',
-        })
-      } catch {
-        set({ saveStatus: 'error' })
-        throw new Error('Failed to update page property options')
-      }
+      await persistPagePropertyState('Failed to update page property options')
     },
 
     renameBoard: async (boardId: string, title: string) => {
@@ -2088,14 +2173,21 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
     renamePage: async (pageId: PageId, title: string) => {
       const state = get()
       const nextTitle = title.trim() || UNTITLED_PAGE_TITLE
-      const nextPages = state.pages.map((page) =>
-        page.id === pageId
-          ? {
-              ...page,
-              title: nextTitle,
-              updatedAt: new Date().toISOString(),
-            }
-          : page,
+      const updatedAt = new Date().toISOString()
+      const nextPages = touchPagesWithChangedBlocks(
+        state.pages,
+        syncPageRelationTitles(
+          state.pages.map((page) =>
+            page.id === pageId
+              ? {
+                  ...page,
+                  title: nextTitle,
+                  updatedAt,
+                }
+              : page,
+          ),
+        ),
+        updatedAt,
       )
 
       pushUndoSnapshot(state)
@@ -2134,7 +2226,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       let nextDataTables = state.dataTables
       let nextMindmaps = state.mindmaps
 
-      const nextPages = [
+      const nextPages = syncPageRelationTitles([
         ...state.pages,
         ...sourceBranch.map((sourceBranchPage) => {
           const nextPageId = nextPageIdBySourceId.get(sourceBranchPage.id) ?? createId('page')
@@ -2223,10 +2315,13 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
               return createMindmapBlock(nextMindmapId ?? block.mindmapId)
             }
 
-            return {
-              ...structuredClone(block),
-              id: createId('block'),
-            }
+            return remapBlockPageRelationTargets(
+              {
+                ...structuredClone(block),
+                id: createId('block'),
+              },
+              nextPageIdBySourceId,
+            )
           })
 
           return {
@@ -2242,7 +2337,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
             updatedAt: now,
           }
         }),
-      ]
+      ])
 
       const duplicatedPage = nextPages.find((page) => page.id === nextPageIdBySourceId.get(pageId)) ?? null
 
@@ -2274,7 +2369,13 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
     deletePage: async (pageId: PageId) => {
       const state = get()
-      const nextPages = deletePageBranch(state.pages, pageId)
+      const deletedPageIds = new Set(collectPageBranch(state.pages, pageId).map((page) => page.id))
+      const updatedAt = new Date().toISOString()
+      const nextPages = touchPagesWithChangedBlocks(
+        state.pages,
+        stripDeletedPageRelations(deletePageBranch(state.pages, pageId), deletedPageIds),
+        updatedAt,
+      )
       const nextResources = filterResourcesReferencedByPages(state, nextPages)
       const currentPageDeleted =
         state.currentPageId !== null && !nextPages.some((page) => page.id === state.currentPageId)

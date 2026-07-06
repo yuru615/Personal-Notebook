@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DataTableRecord, PageRecord } from '../../domain/types'
-import { createDefaultAppState } from './domain/factory'
+import { createDefaultAppState, createProperty } from './domain/factory'
 import { DataTablePage } from './DataTablePage'
 
 const page: PageRecord = {
@@ -263,6 +263,77 @@ describe('DataTablePage', () => {
     expect(screen.getByRole('textbox', { name: '输入正文' })).toHaveTextContent('访谈摘要')
     expect(screen.queryByRole('textbox', { name: '块内容' })).not.toBeInTheDocument()
   })
+  it('creates and selects a new record-page metadata option on Enter', async () => {
+    const user = userEvent.setup()
+    const snapshot = createDefaultAppState()
+    const recordId = 'record-1'
+    const statusProperty = {
+      ...createProperty({
+        key: 'status',
+        name: 'Status',
+        type: 'select',
+      }),
+      config: {
+        options: [{ id: 'status-open', label: 'Open', color: '#2563eb' }],
+      },
+    }
+
+    snapshot.properties[statusProperty.id] = statusProperty
+    snapshot.database.propertyOrder.push(statusProperty.id)
+    snapshot.records[recordId] = {
+      id: recordId,
+      title: '瀹㈡埛璁胯皥',
+      values: {},
+      createdAt: '2026-06-22T00:00:00.000Z',
+      updatedAt: '2026-06-22T00:00:00.000Z',
+    }
+    snapshot.recordPages[recordId] = {
+      recordId,
+      blockIds: [],
+      updatedAt: '2026-06-22T00:00:00.000Z',
+    }
+
+    render(
+      <MemoryRouter initialEntries={[`/pages/page-1/data-tables/database-1/records/${recordId}`]}>
+        <Routes>
+          <Route
+            path="/pages/:pageId/data-tables/:databaseId/records/:recordId"
+            element={
+              <DataTablePage
+                page={page}
+                dataTable={{ ...dataTable, snapshot }}
+                saveStatus="saved"
+                route="record"
+                basePath="/pages/page-1/data-tables/database-1"
+                onChange={vi.fn()}
+                onRename={vi.fn()}
+                onChangeIcon={vi.fn()}
+                onChangeCover={vi.fn()}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Status-record-1' }))
+    await user.type(
+      screen.getByRole('textbox', { name: 'Status 选项输入' }),
+      'Blocked{Enter}',
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Status-record-1' })).toHaveTextContent(
+        'Blocked',
+      )
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Status-record-1' }))
+
+    const blockedOption = await screen.findByRole('option', { name: 'Blocked' })
+    expect(blockedOption).toHaveAttribute('aria-selected', 'true')
+  })
+
   it('uses the page header controls on the full data table page', async () => {
     const user = userEvent.setup()
     const onRename = vi.fn()

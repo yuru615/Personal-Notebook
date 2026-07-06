@@ -2,7 +2,7 @@ use rusqlite::{Connection, OptionalExtension};
 
 use super::error::StorageResult;
 
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
     connection.pragma_update(None, "foreign_keys", "ON")?;
@@ -158,6 +158,7 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
           document_id TEXT PRIMARY KEY NOT NULL,
           kind TEXT NOT NULL,
           page_id TEXT NOT NULL,
+          block_id TEXT,
           board_id TEXT,
           database_id TEXT,
           record_id TEXT,
@@ -174,6 +175,7 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
           document_id UNINDEXED,
           kind UNINDEXED,
           page_id UNINDEXED,
+          block_id UNINDEXED,
           board_id UNINDEXED,
           database_id UNINDEXED,
           record_id UNINDEXED,
@@ -189,6 +191,10 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
 
     if current_version < 2 {
         migrate_to_v2(connection)?;
+    }
+
+    if current_version < 3 {
+        migrate_to_v3(connection)?;
     }
 
     connection.execute(
@@ -241,6 +247,30 @@ fn migrate_to_v2(connection: &Connection) -> StorageResult<()> {
         "zhixi_search_documents",
         "source_label",
         "TEXT NOT NULL DEFAULT '正文'",
+    )?;
+    Ok(())
+}
+
+fn migrate_to_v3(connection: &Connection) -> StorageResult<()> {
+    ensure_column(connection, "zhixi_search_documents", "block_id", "TEXT")?;
+    connection.execute_batch(
+        "
+        DROP TABLE IF EXISTS zhixi_search_documents_fts;
+        CREATE VIRTUAL TABLE zhixi_search_documents_fts USING fts5(
+          document_id UNINDEXED,
+          kind UNINDEXED,
+          page_id UNINDEXED,
+          block_id UNINDEXED,
+          board_id UNINDEXED,
+          database_id UNINDEXED,
+          record_id UNINDEXED,
+          title,
+          icon UNINDEXED,
+          excerpt UNINDEXED,
+          body
+        );
+        DELETE FROM zhixi_search_documents;
+        ",
     )?;
     Ok(())
 }

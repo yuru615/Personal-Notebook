@@ -6,8 +6,13 @@ import type {
   PageRecord as KnowledgePageRecord,
 } from "../../../../domain/types";
 import { BlockEditor as KnowledgeBlockEditor } from "../../../editor/BlockEditor";
-import { nowIso } from "../../domain/factory";
-import type { Block, BlockType as RecordBlockType } from "../../domain/types";
+import { makeId, nowIso } from "../../domain/factory";
+import type {
+  Block,
+  BlockType as RecordBlockType,
+  Property,
+  SelectOption,
+} from "../../domain/types";
 import { useAppStore } from "../../store/AppStore";
 import WorkspaceShell from "../layout/WorkspaceShell";
 import ConfirmDialog from "../table/ConfirmDialog";
@@ -25,6 +30,7 @@ const DELETE_BLOCK_DESCRIPTION =
   "\u8fd9\u4e2a\u5185\u5bb9\u5757\u4f1a\u4ece\u5f53\u524d\u8bb0\u5f55\u4e2d\u6c38\u4e45\u5220\u9664\u3002\u6b64\u64cd\u4f5c\u4e0d\u53ef\u64a4\u9500\u3002";
 const DELETE_CONFIRM_LABEL = "\u786e\u8ba4\u5220\u9664";
 const DELETE_CANCEL_LABEL = "\u53d6\u6d88";
+const NEW_OPTION_PLACEHOLDER_COLOR = "#475569";
 const KNOWLEDGE_RECORD_BLOCK_TYPES: KnowledgeBlockType[] = [
   "paragraph",
   "heading_1",
@@ -115,6 +121,38 @@ export default function RecordPage({ basePath, showSidebar = true }: RecordPageP
     if (titleProperty) {
       actions.updateRecordValue(record.id, titleProperty, value);
     }
+  };
+
+  const handleCreateOption = (property: Property, label: string) => {
+    if (property.type !== "select" && property.type !== "multiSelect") {
+      return;
+    }
+
+    if ((property.config.options ?? []).some((option) => option.label === label)) {
+      return;
+    }
+
+    const nextOptions: SelectOption[] = [
+      ...(property.config.options ?? []),
+      {
+        id: makeId("option"),
+        label,
+        color: NEW_OPTION_PLACEHOLDER_COLOR,
+      },
+    ];
+
+    actions.updatePropertyOptions(property.id, nextOptions);
+  };
+
+  const handleDeleteOption = (property: Property, optionId: string) => {
+    if (property.type !== "select" && property.type !== "multiSelect") {
+      return;
+    }
+
+    actions.updatePropertyOptions(
+      property.id,
+      (property.config.options ?? []).filter((option) => option.id !== optionId),
+    );
   };
 
   const appendBlock = (type: RecordBlockType) => {
@@ -231,6 +269,8 @@ export default function RecordPage({ basePath, showSidebar = true }: RecordPageP
           onCellChange={(property, value) =>
             actions.updateRecordValue(record.id, property, value)
           }
+          onCreateOption={handleCreateOption}
+          onDeleteOption={handleDeleteOption}
         />
 
         <section className="record-body">

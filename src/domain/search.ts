@@ -1,15 +1,21 @@
+import { extractMindmapTitle } from '../components/mindmap/mindmapModel'
+import { normalizeWhiteboardSnapshot } from '../components/whiteboard/whiteboardModel'
+import { normalizeRichText, richTextToPlainText } from './richText'
 import type {
   BlockRecord,
   BoardRecord,
   DataTableRecord,
+  MindmapRecord,
   PagePropertyDefinition,
   PageRecord,
 } from './types'
 
 export interface SearchResult {
-  kind: 'page' | 'whiteboard' | 'data_table' | 'data_table_record'
+  kind: 'page' | 'whiteboard' | 'mindmap' | 'data_table' | 'data_table_record'
   pageId: string
+  blockId?: string
   boardId?: string
+  mindmapId?: string
   databaseId?: string
   recordId?: string
   title: string
@@ -20,7 +26,13 @@ export interface SearchResult {
     | 'body'
     | 'property'
     | 'media'
+    | 'page_link'
+    | 'page_mention'
     | 'whiteboard'
+    | 'whiteboard_title'
+    | 'whiteboard_content'
+    | 'mindmap_title'
+    | 'mindmap_node'
     | 'data_table'
     | 'data_table_record'
   matchKey?: string
@@ -33,6 +45,7 @@ interface SearchEntry {
   matchSource: SearchResult['matchSource']
   matchKey?: string
   sourceLabel: string
+  blockId?: string
 }
 
 export function searchPages(
@@ -53,10 +66,7 @@ export function searchPages(
     const entries: SearchEntry[] = [
       createSearchEntry(page.title, 'title', '标题'),
       ...getPropertySearchEntries(page, definitions),
-      ...page.blocks.flatMap((block) => {
-        const entry = getBlockSearchEntry(block, pageTitleById)
-        return entry ? [entry] : []
-      }),
+      ...page.blocks.flatMap((block) => getBlockSearchEntries(block, pageTitleById)),
     ].flatMap((entry) => (entry ? [entry] : []))
 
     for (const entry of entries) {
@@ -67,6 +77,7 @@ export function searchPages(
       results.push({
         kind: 'page',
         pageId: page.id,
+        blockId: entry.blockId,
         title: page.title,
         icon: page.icon,
         excerpt: entry.excerpt,
@@ -102,26 +113,133 @@ export function searchBoards(
     }
   }
 
-  return boards
-    .filter(
-      (board) =>
-        pageIdByBoardId.has(board.id) && normalizeSearchText(board.title).includes(normalizedQuery),
-    )
-    .map((board) => {
-      const pageId = pageIdByBoardId.get(board.id) ?? ''
-      const pageTitle = pageTitleById.get(pageId)
+  const results: SearchResult[] = []
 
-      return {
-        kind: 'whiteboard' as const,
+  for (const board of boards) {
+    const pageId = pageIdByBoardId.get(board.id)
+
+    if (!pageId) {
+      continue
+    }
+
+    const pageTitle = pageTitleById.get(pageId)
+    const titleExcerpt = pageTitle ? `白板 / ${pageTitle}` : '白板'
+    const titleEntry = createSearchEntry(board.title, 'whiteboard_title', '白板标题')
+
+    if (titleEntry && normalizeSearchText(titleEntry.searchText).includes(normalizedQuery)) {
+      results.push({
+        kind: 'whiteboard',
         pageId,
         boardId: board.id,
         title: board.title,
-        icon: '□',
-        excerpt: pageTitle ? `白板 · ${pageTitle}` : '白板',
-        matchSource: 'whiteboard' as const,
-        sourceLabel: '白板',
+        icon: '◻',
+        excerpt: titleExcerpt,
+        matchSource: titleEntry.matchSource,
+        sourceLabel: titleEntry.sourceLabel,
+      })
+    }
+
+    for (const text of getWhiteboardSearchTexts(board.snapshot)) {
+      const entry = createSearchEntry(text, 'whiteboard_content', '白板内容')
+
+      if (!entry || !normalizeSearchText(entry.searchText).includes(normalizedQuery)) {
+        continue
       }
-    })
+
+      results.push({
+        kind: 'whiteboard',
+        pageId,
+        boardId: board.id,
+        title: board.title,
+        icon: '◻',
+        excerpt: entry.excerpt,
+        matchSource: entry.matchSource,
+        sourceLabel: entry.sourceLabel,
+      })
+    }
+  }
+
+  return results
+}
+
+export function searchMindmaps(
+  pages: PageRecord[],
+  mindmaps: MindmapRecord[],
+  query: string,
+): SearchResult[] {
+  const normalizedQuery = normalizeSearchText(query)
+
+  if (!normalizedQuery) {
+    return []
+  }
+
+  const pageTitleById = new Map(pages.map((page) => [page.id, page.title]))
+  const pageIdByMindmapId = new Map<string, string>()
+
+  for (const page of pages) {
+    for (const block of page.blocks) {
+      if (block.type === 'mindmap' && !pageIdByMindmapId.has(block.mindmapId)) {
+        pageIdByMindmapId.set(block.mindmapId, page.id)
+      }
+    }
+  }
+
+  const results: SearchResult[] = []
+
+  for (const mindmap of mindmaps) {
+    const pageId = pageIdByMindmapId.get(mindmap.id)
+
+    if (!pageId) {
+      continue
+    }
+
+    const pageTitle = pageTitleById.get(pageId)
+    const titleExcerpt = pageTitle ? `导图 / ${pageTitle}` : '导图'
+    const snapshotTitle = extractMindmapTitle(mindmap.snapshot as { title?: unknown })
+    const displayTitle = mindmap.title.trim() || snapshotTitle
+    const titleSearchText = buildSearchText([displayTitle, snapshotTitle])
+    const titleTextSet = new Set(
+      [displayTitle, snapshotTitle].map((text) => normalizeSearchText(text)).filter(Boolean),
+    )
+
+    if (normalizeSearchText(titleSearchText).includes(normalizedQuery)) {
+      results.push({
+        kind: 'mindmap',
+        pageId,
+        mindmapId: mindmap.id,
+        title: displayTitle,
+        icon: '🧭',
+        excerpt: titleExcerpt,
+        matchSource: 'mindmap_title',
+        sourceLabel: '导图标题',
+      })
+    }
+
+    for (const text of getMindmapNodeTexts(mindmap.snapshot)) {
+      if (titleTextSet.has(normalizeSearchText(text))) {
+        continue
+      }
+
+      const entry = createSearchEntry(text, 'mindmap_node', '导图节点')
+
+      if (!entry || !normalizeSearchText(entry.searchText).includes(normalizedQuery)) {
+        continue
+      }
+
+      results.push({
+        kind: 'mindmap',
+        pageId,
+        mindmapId: mindmap.id,
+        title: displayTitle,
+        icon: '🧭',
+        excerpt: entry.excerpt,
+        matchSource: entry.matchSource,
+        sourceLabel: entry.sourceLabel,
+      })
+    }
+  }
+
+  return results
 }
 
 export function searchDataTables(
@@ -156,7 +274,7 @@ export function searchDataTables(
     }
 
     const pageTitle = pageTitleById.get(pageId)
-    const excerpt = pageTitle ? `数据表格 · ${pageTitle}` : '数据表格'
+    const excerpt = pageTitle ? `数据表格 / ${pageTitle}` : '数据表格'
 
     if (normalizeSearchText(dataTable.title).includes(normalizedQuery)) {
       results.push({
@@ -183,7 +301,7 @@ export function searchDataTables(
         recordId: record.id,
         title: record.title,
         icon: '▦',
-        excerpt: `${dataTable.title} · 记录`,
+        excerpt: `${dataTable.title} / 记录`,
         matchSource: 'data_table_record',
         sourceLabel: '记录',
       })
@@ -225,6 +343,47 @@ function getPropertySearchEntries(
   })
 }
 
+function getBlockSearchEntries(
+  block: BlockRecord,
+  pageTitleById: Map<string, string>,
+): SearchEntry[] {
+  const relationEntries = getRichTextRelationEntries(block)
+  const bodyEntry = getBlockSearchEntry(block, pageTitleById)
+
+  return bodyEntry ? [...relationEntries, bodyEntry] : relationEntries
+}
+
+function getRichTextRelationEntries(block: BlockRecord): SearchEntry[] {
+  if (
+    block.type !== 'paragraph' &&
+    block.type !== 'heading_1' &&
+    block.type !== 'heading_2' &&
+    block.type !== 'heading_3' &&
+    block.type !== 'todo'
+  ) {
+    return []
+  }
+
+  const richText = normalizeRichText(block.richText ?? [{ text: block.text }])
+  const excerpt = richTextToPlainText(richText)
+
+  return richText.flatMap((segment) => {
+    if (!segment.pageId || !segment.relationKind) {
+      return []
+    }
+
+    return [
+      {
+        excerpt,
+        searchText: segment.text,
+        matchSource: segment.relationKind === 'mention' ? 'page_mention' : 'page_link',
+        sourceLabel: segment.relationKind === 'mention' ? '页面提及' : '页面链接',
+        blockId: block.id,
+      },
+    ]
+  })
+}
+
 function getBlockSearchEntry(
   block: BlockRecord,
   pageTitleById: Map<string, string>,
@@ -236,29 +395,29 @@ function getBlockSearchEntry(
     case 'heading_3':
     case 'todo':
     case 'code':
-      return createSearchEntry(block.text, 'body', '正文')
+      return createSearchEntry(block.text, 'body', '正文', block.id)
     case 'bulleted_list':
     case 'numbered_list':
-      return createSearchEntry(block.items.join(' '), 'body', '正文')
+      return createSearchEntry(block.items.join(' '), 'body', '正文', block.id)
     case 'table':
-      return createSearchEntry(block.rows.flat().join(' '), 'body', '正文')
+      return createSearchEntry(block.rows.flat().join(' '), 'body', '正文', block.id)
     case 'image':
-      return createMediaSearchEntry([block.name, block.caption, block.alt])
+      return createMediaSearchEntry([block.name, block.caption, block.alt], block.id)
     case 'video':
     case 'audio':
-      return createMediaSearchEntry([block.name, block.caption])
+      return createMediaSearchEntry([block.name, block.caption], block.id)
     case 'child_page':
-      return createSearchEntry(pageTitleById.get(block.pageId) ?? '', 'body', '正文')
+      return createSearchEntry(pageTitleById.get(block.pageId) ?? '', 'body', '正文', block.id)
     case 'whiteboard':
-      return createSearchEntry('白板', 'whiteboard', '白板')
+      return createSearchEntry('白板', 'whiteboard', '白板', block.id)
     case 'data_table':
-      return createSearchEntry('数据表格', 'data_table', '数据表格')
+      return createSearchEntry('数据表格', 'data_table', '数据表格', block.id)
     case 'mindmap':
-      return createSearchEntry('导图', 'body', '导图')
+      return createSearchEntry('导图', 'body', '导图', block.id)
   }
 }
 
-function createMediaSearchEntry(parts: string[]) {
+function createMediaSearchEntry(parts: string[], blockId?: string) {
   const trimmedParts = parts.map((part) => part.trim()).filter(Boolean)
   const excerpt = trimmedParts[0] ?? ''
 
@@ -274,6 +433,7 @@ function createMediaSearchEntry(parts: string[]) {
     ]),
     matchSource: 'media' as const,
     sourceLabel: '媒体',
+    blockId,
   }
 }
 
@@ -281,6 +441,7 @@ function createSearchEntry(
   text: string,
   matchSource: SearchResult['matchSource'],
   sourceLabel: string,
+  blockId?: string,
 ): SearchEntry | null {
   const excerpt = text.trim()
 
@@ -293,6 +454,7 @@ function createSearchEntry(
     searchText: excerpt,
     matchSource,
     sourceLabel,
+    blockId,
   }
 }
 
@@ -318,6 +480,39 @@ function buildFileNameSearchAliases(value: string) {
       ),
     ),
   )
+}
+
+function getWhiteboardSearchTexts(snapshot: unknown) {
+  const normalized = normalizeWhiteboardSnapshot(snapshot)
+
+  return [
+    ...normalized.notes.map((note) => note.text),
+    ...normalized.texts.map((text) => text.text),
+    ...normalized.shapes.map((shape) => shape.text),
+  ]
+    .map((text) => text.trim())
+    .filter(Boolean)
+}
+
+function getMindmapNodeTexts(snapshot: unknown) {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    return []
+  }
+
+  const nodes = (snapshot as { nodes?: unknown }).nodes
+
+  if (!nodes || typeof nodes !== 'object' || Array.isArray(nodes)) {
+    return []
+  }
+
+  return Object.values(nodes).flatMap((node) => {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) {
+      return []
+    }
+
+    const text = (node as { text?: unknown }).text
+    return typeof text === 'string' && text.trim() ? [text.trim()] : []
+  })
 }
 
 function getDataTableRecords(snapshot: unknown): Array<{ id: string; title: string }> {

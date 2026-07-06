@@ -1,14 +1,17 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type {
   BoardRecord,
   DataTableRecord,
+  MindmapRecord,
   PagePropertyDefinition,
   PageRecord,
 } from '../../domain/types'
 import {
   searchBoards,
   searchDataTables,
+  searchMindmaps,
   searchPages,
   type SearchResult,
 } from '../../domain/search'
@@ -20,14 +23,16 @@ interface SearchDialogProps {
   pageProperties?: PagePropertyDefinition[]
   boards?: BoardRecord[]
   dataTables?: DataTableRecord[]
+  mindmaps?: MindmapRecord[]
   onSearch?: (query: string) => Promise<AsyncSearchResult[]>
   onClose: () => void
-  onOpenPage: (pageId: string) => void
+  onOpenPage: (pageId: string, blockId?: string) => void
   onOpenBoard?: (pageId: string, boardId: string) => void
+  onOpenMindmap?: (pageId: string, mindmapId: string) => void
   onOpenDataTable?: (pageId: string, databaseId: string, recordId?: string) => void
 }
 
-type SearchFilter = 'all' | 'page' | 'whiteboard' | 'data_table' | 'tags' | 'status'
+type SearchFilter = 'all' | 'page' | 'whiteboard' | 'mindmap' | 'data_table' | 'tags' | 'status'
 type AsyncSearchResult = Omit<SearchResult, 'matchSource' | 'sourceLabel'> & {
   matchSource?: SearchResult['matchSource']
   matchKey?: string
@@ -35,6 +40,7 @@ type AsyncSearchResult = Omit<SearchResult, 'matchSource' | 'sourceLabel'> & {
 }
 
 const OPEN_WHITEBOARD_LABEL = '打开白板'
+const OPEN_MINDMAP_LABEL = '打开导图'
 const OPEN_DATA_TABLE_LABEL = '打开数据表格'
 const OPEN_DATA_TABLE_RECORD_LABEL = '打开记录'
 
@@ -44,10 +50,12 @@ export function SearchDialog({
   pageProperties = [],
   boards = [],
   dataTables = [],
+  mindmaps = [],
   onSearch,
   onClose,
   onOpenPage,
   onOpenBoard,
+  onOpenMindmap,
   onOpenDataTable,
 }: SearchDialogProps) {
   const [query, setQuery] = useState('')
@@ -59,9 +67,10 @@ export function SearchDialog({
     () => [
       ...searchPages(pages, pageProperties, query),
       ...searchBoards(pages, boards, query),
+      ...searchMindmaps(pages, mindmaps, query),
       ...searchDataTables(pages, dataTables, query),
     ],
-    [boards, dataTables, pageProperties, pages, query],
+    [boards, dataTables, mindmaps, pageProperties, pages, query],
   )
   const results = onSearch ? asyncResults : localResults
   const filteredResults = useMemo(() => {
@@ -101,6 +110,11 @@ export function SearchDialog({
             (result) => result.kind === 'data_table' || result.kind === 'data_table_record',
           ),
         },
+        {
+          key: 'mindmap',
+          label: uiCopy.search.groups.mindmap,
+          results: filteredResults.filter((result) => result.kind === 'mindmap'),
+        },
       ].filter((group) => group.results.length > 0),
     [filteredResults],
   )
@@ -121,6 +135,12 @@ export function SearchDialog({
       return
     }
 
+    if (result.kind === 'mindmap' && result.mindmapId) {
+      onOpenMindmap?.(result.pageId, result.mindmapId)
+      closeDialog()
+      return
+    }
+
     if (
       (result.kind === 'data_table' || result.kind === 'data_table_record') &&
       result.databaseId
@@ -130,7 +150,7 @@ export function SearchDialog({
       return
     }
 
-    onOpenPage(result.pageId)
+    onOpenPage(result.pageId, result.blockId)
     closeDialog()
   }
 
@@ -229,11 +249,21 @@ export function SearchDialog({
     }
   }, [onSearch, open, query])
 
+  useEffect(() => {
+    if (activeIndex < 0) {
+      return
+    }
+
+    document
+      .querySelector<HTMLElement>(`.search-result[data-search-result-index="${activeIndex}"]`)
+      ?.scrollIntoView?.({ block: 'nearest' })
+  }, [activeIndex, filteredResults])
+
   if (!open) {
     return null
   }
 
-  return (
+  const dialog = (
     <div className="search-overlay" role="presentation" onMouseDown={closeDialog}>
       <section
         aria-label={uiCopy.search.title}
@@ -310,6 +340,7 @@ export function SearchDialog({
                         ]
                           .filter(Boolean)
                           .join(' ')}
+                        data-search-result-index={index}
                         aria-label={resultAriaLabels[index] ?? getResultActionLabel(result)}
                         aria-current={index === activeIndex ? 'true' : undefined}
                         onClick={() => openResult(result)}
@@ -338,6 +369,12 @@ export function SearchDialog({
       </section>
     </div>
   )
+
+  if (typeof document === 'undefined') {
+    return dialog
+  }
+
+  return createPortal(dialog, document.body)
 }
 
 function normalizeAsyncSearchResult(result: AsyncSearchResult): SearchResult {
@@ -353,6 +390,10 @@ function normalizeAsyncSearchResult(result: AsyncSearchResult): SearchResult {
 function inferMatchSource(kind: SearchResult['kind']): SearchResult['matchSource'] {
   if (kind === 'whiteboard') {
     return 'whiteboard'
+  }
+
+  if (kind === 'mindmap') {
+    return 'mindmap_title'
   }
 
   if (kind === 'data_table') {
@@ -382,8 +423,36 @@ function getSourceLabel(
     return '媒体'
   }
 
+  if (matchSource === 'page_link') {
+    return '页面链接'
+  }
+
+  if (matchSource === 'page_mention') {
+    return '页面提及'
+  }
+
+  if (matchSource === 'whiteboard_title') {
+    return '白板标题'
+  }
+
+  if (matchSource === 'whiteboard_content') {
+    return '白板内容'
+  }
+
   if (matchSource === 'whiteboard' || kind === 'whiteboard') {
     return '白板'
+  }
+
+  if (matchSource === 'mindmap_title') {
+    return '导图标题'
+  }
+
+  if (matchSource === 'mindmap_node') {
+    return '导图节点'
+  }
+
+  if (kind === 'mindmap') {
+    return '导图'
   }
 
   if (matchSource === 'data_table' || kind === 'data_table') {
@@ -402,6 +471,7 @@ function getFilterOptions(): Array<{ key: SearchFilter; label: string }> {
     { key: 'all', label: uiCopy.search.filters.all },
     { key: 'page', label: uiCopy.search.filters.page },
     { key: 'whiteboard', label: uiCopy.search.filters.whiteboard },
+    { key: 'mindmap', label: uiCopy.search.filters.mindmap },
     { key: 'data_table', label: uiCopy.search.filters.dataTable },
     { key: 'tags', label: uiCopy.search.filters.tags },
     { key: 'status', label: uiCopy.search.filters.status },
@@ -411,6 +481,10 @@ function getFilterOptions(): Array<{ key: SearchFilter; label: string }> {
 function getResultKey(result: SearchResult) {
   if (result.kind === 'whiteboard') {
     return `${result.pageId}-${result.boardId}`
+  }
+
+  if (result.kind === 'mindmap') {
+    return `${result.pageId}-${result.mindmapId}`
   }
 
   if (result.kind === 'data_table' || result.kind === 'data_table_record') {
@@ -423,6 +497,10 @@ function getResultKey(result: SearchResult) {
 function getResultActionLabel(result: SearchResult) {
   if (result.kind === 'whiteboard') {
     return OPEN_WHITEBOARD_LABEL
+  }
+
+  if (result.kind === 'mindmap') {
+    return OPEN_MINDMAP_LABEL
   }
 
   if (result.kind === 'data_table_record') {

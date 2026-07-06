@@ -121,6 +121,32 @@ describe('createTauriStorageClient', () => {
     expect(eventApi.invoke).toHaveBeenCalledWith('search_workspace', { query: '产品', limit: 30 })
   })
 
+  it('passes through relation hits with block ids from the backend', async () => {
+    const { createTauriStorageClient } = await import('./storageClient')
+    eventApi.invoke.mockResolvedValueOnce([
+      {
+        kind: 'page',
+        pageId: 'page_source',
+        blockId: 'block_relation',
+        title: 'Meeting Notes',
+        icon: '📝',
+        excerpt: 'See Product Plan',
+        matchSource: 'page_link',
+        sourceLabel: '页面链接',
+      },
+    ])
+
+    const client = createTauriStorageClient()
+
+    await expect(client.searchWorkspace('Product')).resolves.toEqual([
+      expect.objectContaining({
+        blockId: 'block_relation',
+        matchSource: 'page_link',
+        sourceLabel: '页面链接',
+      }),
+    ])
+  })
+
   it('writes assets and resolves asset file paths through typed Tauri commands', async () => {
     const { createTauriStorageClient } = await import('./storageClient')
     eventApi.invoke

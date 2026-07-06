@@ -1,5 +1,6 @@
 import type { CSSProperties, KeyboardEventHandler } from 'react'
 import type { RichTextSegment } from '../../../domain/types'
+import type { PageRelationAutocompleteItem } from '../PageRelationAutocomplete'
 import { RichTextEditable, type RichTextEditableChange } from '../RichTextEditable'
 
 interface ParagraphBlockProps {
@@ -9,6 +10,9 @@ interface ParagraphBlockProps {
   style?: CSSProperties
   onChange: (next: RichTextEditableChange) => void
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>
+  relationPages?: PageRelationAutocompleteItem[]
+  onOpenPageRelation?: (pageId: string) => void
+  onCreatePageRelation?: (title: string) => Promise<PageRelationAutocompleteItem>
 }
 
 export function ParagraphBlock({
@@ -18,6 +22,9 @@ export function ParagraphBlock({
   style,
   onChange,
   onKeyDown,
+  relationPages,
+  onOpenPageRelation,
+  onCreatePageRelation,
 }: ParagraphBlockProps) {
   const blockClassName =
     variant === 'paragraph' ? 'paragraph-block' : `paragraph-block ${variant}-block`
@@ -31,6 +38,9 @@ export function ParagraphBlock({
       style={style}
       onChange={onChange}
       onKeyDown={onKeyDown}
+      relationPages={relationPages}
+      onOpenPageRelation={onOpenPageRelation}
+      onCreatePageRelation={onCreatePageRelation}
       placeholder="输入正文"
     />
   )

@@ -3115,7 +3115,7 @@ button {
 }
 
 .database-cell-popover--options {
-  padding: 8px;
+  padding: 10px;
 }
 
 .database-cell-popover--date {
@@ -3124,7 +3124,8 @@ button {
 
 .cell-option-list {
   display: grid;
-  gap: 2px;
+  gap: 8px;
+  min-width: 0;
 }
 
 .cell-option-item {
@@ -3133,8 +3134,8 @@ button {
   justify-content: space-between;
   gap: 10px;
   width: 100%;
-  min-height: 32px;
-  padding: 4px 8px;
+  min-height: 34px;
+  padding: 0 10px;
   border: none;
   border-radius: 8px;
   background: transparent;

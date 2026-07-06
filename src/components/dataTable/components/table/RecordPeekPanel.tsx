@@ -26,6 +26,8 @@ type RecordPeekPanelProps = {
     property: Property,
     value: string | boolean | string[],
   ) => void;
+  onCreateOption?: (property: Property, label: string) => void;
+  onDeleteOption?: (property: Property, optionId: string) => void;
 };
 
 function getBlockPreview(block: Block) {
@@ -85,6 +87,8 @@ export default function RecordPeekPanel({
   onOpenFullPage,
   onTitleChange,
   onCellChange,
+  onCreateOption,
+  onDeleteOption,
 }: RecordPeekPanelProps) {
   const dialogLabel = mode === "sidePeek" ? "侧边预览" : "居中预览";
   const titleValue = record.title === "未命名记录" ? "" : record.title;
@@ -142,6 +146,8 @@ export default function RecordPeekPanel({
             properties={metadataProperties}
             record={record}
             onCellChange={onCellChange}
+            onCreateOption={onCreateOption}
+            onDeleteOption={onDeleteOption}
           />
 
           <section className="record-peek-summary">

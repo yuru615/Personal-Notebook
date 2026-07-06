@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import type { BoardRecord, DataTableRecord, PageRecord } from '../../domain/types'
+import type { BoardRecord, DataTableRecord, MindmapRecord, PageRecord } from '../../domain/types'
 import { SearchDialog } from './SearchDialog'
 
 const now = '2026-06-15T00:00:00.000Z'
@@ -98,7 +98,62 @@ const dataTables: DataTableRecord[] = [
   },
 ]
 
+const mindmapPages: PageRecord[] = [
+  {
+    id: 'page-mindmap',
+    parentId: null,
+    title: 'Strategy Workspace',
+    icon: '🧭',
+    cover: null,
+    blocks: [{ id: 'block-mindmap', type: 'mindmap', mindmapId: 'mindmap-strategy' }],
+    createdAt: now,
+    updatedAt: now,
+  },
+]
+
+const mindmaps: MindmapRecord[] = [
+  {
+    id: 'mindmap-strategy',
+    title: 'Strategy Map',
+    snapshot: {
+      id: 'doc-root',
+      title: 'Strategy Map',
+      structure: 'mindmap',
+      rootId: 'node-root',
+      nodes: {
+        'node-root': {
+          id: 'node-root',
+          parentId: null,
+          childIds: ['node-1'],
+          text: 'Strategy Map',
+          collapsed: false,
+        },
+        'node-1': {
+          id: 'node-1',
+          parentId: 'node-root',
+          childIds: [],
+          text: 'North star metric',
+          collapsed: false,
+        },
+      },
+    },
+    createdAt: now,
+    updatedAt: now,
+  },
+]
+
 describe('SearchDialog', () => {
+  it('renders the overlay at the document root so it covers the whole app shell', () => {
+    const { container } = render(
+      <div data-testid="search-host">
+        <SearchDialog open pages={pages} onClose={vi.fn()} onOpenPage={vi.fn()} />
+      </div>,
+    )
+
+    expect(container.querySelector('.search-overlay')).toBeNull()
+    expect(document.body.querySelector('.search-overlay')).toBeInTheDocument()
+  })
+
   it('opens the selected search result with the keyboard', async () => {
     const user = userEvent.setup()
     const onClose = vi.fn()
@@ -118,8 +173,32 @@ describe('SearchDialog', () => {
 
     fireEvent.keyDown(input, { key: 'Enter' })
 
-    expect(onOpenPage).toHaveBeenCalledWith('page-b')
+    expect(onOpenPage).toHaveBeenCalledWith('page-b', 'block-b')
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('scrolls the active result into view when keyboard navigation changes selection', async () => {
+    const user = userEvent.setup()
+    const scrollIntoView = vi.fn()
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView
+    HTMLElement.prototype.scrollIntoView = scrollIntoView
+
+    try {
+      render(<SearchDialog open pages={pages} onClose={vi.fn()} onOpenPage={vi.fn()} />)
+
+      const input = screen.getByPlaceholderText(searchPlaceholder)
+      await user.type(input, 'feedback')
+      scrollIntoView.mockClear()
+
+      fireEvent.keyDown(input, { key: 'ArrowDown' })
+
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' })
+      expect(
+        screen.getByRole('button', { name: `${openPageLabel} Search Improvements` }),
+      ).toHaveClass('search-result-active')
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView
+    }
   })
 
   it('opens a referenced whiteboard result and hides orphan whiteboards', async () => {
@@ -152,18 +231,44 @@ describe('SearchDialog', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('opens referenced data table and record results', async () => {
+  it('renders a mindmap group and opens referenced mindmap results', async () => {
     const user = userEvent.setup()
-    const onClose = vi.fn()
+    const onOpenPage = vi.fn()
+    const onOpenMindmap = vi.fn()
+
+    render(
+      <SearchDialog
+        open
+        pages={mindmapPages}
+        mindmaps={mindmaps}
+        onClose={vi.fn()}
+        onOpenPage={onOpenPage}
+        onOpenMindmap={onOpenMindmap}
+      />,
+    )
+
+    await user.type(screen.getByPlaceholderText(searchPlaceholder), 'north star')
+
+    expect(await screen.findByRole('heading', { name: '导图' })).toBeInTheDocument()
+    expect(screen.getByText('导图节点')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '打开导图 Strategy Map' }))
+
+    expect(onOpenMindmap).toHaveBeenCalledWith('page-mindmap', 'mindmap-strategy')
+    expect(onOpenPage).not.toHaveBeenCalled()
+  })
+
+  it('opens referenced data table results', async () => {
+    const user = userEvent.setup()
     const onOpenPage = vi.fn()
     const onOpenDataTable = vi.fn()
 
-    const { rerender } = render(
+    render(
       <SearchDialog
         open
         pages={dataTablePages}
         dataTables={dataTables}
-        onClose={onClose}
+        onClose={vi.fn()}
         onOpenPage={onOpenPage}
         onOpenDataTable={onOpenDataTable}
       />,
@@ -176,13 +281,19 @@ describe('SearchDialog', () => {
 
     expect(onOpenDataTable).toHaveBeenCalledWith('page-a', 'database-feedback', undefined)
     expect(onOpenPage).not.toHaveBeenCalled()
+  })
 
-    rerender(
+  it('opens referenced data table record results', async () => {
+    const user = userEvent.setup()
+    const onOpenPage = vi.fn()
+    const onOpenDataTable = vi.fn()
+
+    render(
       <SearchDialog
         open
         pages={dataTablePages}
         dataTables={dataTables}
-        onClose={onClose}
+        onClose={vi.fn()}
         onOpenPage={onOpenPage}
         onOpenDataTable={onOpenDataTable}
       />,
@@ -225,7 +336,35 @@ describe('SearchDialog', () => {
     expect(screen.getByText('正文')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: `${openPageLabel} Async Result` }))
-    expect(onOpenPage).toHaveBeenCalledWith('page-async')
+    expect(onOpenPage).toHaveBeenCalledWith('page-async', undefined)
+  })
+
+  it('shows relation source labels for asynchronous page relation hits', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <SearchDialog
+        open
+        pages={[]}
+        onClose={vi.fn()}
+        onOpenPage={vi.fn()}
+        onSearch={vi.fn().mockResolvedValue([
+          {
+            kind: 'page',
+            pageId: 'page-source',
+            blockId: 'block-relation',
+            title: 'Meeting Notes',
+            icon: '📝',
+            excerpt: 'See Product Plan',
+            matchSource: 'page_link',
+          },
+        ])}
+      />,
+    )
+
+    await user.type(screen.getByPlaceholderText(searchPlaceholder), 'Product')
+
+    expect(await screen.findByText('页面链接')).toBeInTheDocument()
   })
 
   it('renders multiple results from the same page with distinct accessible labels', async () => {

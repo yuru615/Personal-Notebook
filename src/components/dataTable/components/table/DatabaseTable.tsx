@@ -85,6 +85,8 @@ type DatabaseTableProps = {
   onRenameProperty?: (propertyId: string, name: string) => void;
   onUpdatePropertyType?: (propertyId: string, type: PropertyType) => void;
   onUpdatePropertyOptions?: (propertyId: string, options: SelectOption[]) => void;
+  onCreateOption?: (property: Property, label: string) => void;
+  onDeleteOption?: (property: Property, optionId: string) => void;
   onUpdateFormulaExpression?: (
     propertyId: string,
     formulaExpression: string,
@@ -145,6 +147,8 @@ export default function DatabaseTable({
   onRenameProperty,
   onUpdatePropertyType,
   onUpdatePropertyOptions,
+  onCreateOption,
+  onDeleteOption,
   onUpdateFormulaExpression,
   onInsertProperty,
   onColumnWidthChange,
@@ -457,6 +461,8 @@ export default function DatabaseTable({
                 property={property}
                 record={record}
                 onChange={(value) => onCellChange(record.id, property, value)}
+                onCreateOption={(label) => onCreateOption?.(property, label)}
+                onDeleteOption={(optionId) => onDeleteOption?.(property, optionId)}
               />
               <RecordOpenLink
                 to={`${recordBasePath}/records/${record.id}`}
@@ -472,6 +478,8 @@ export default function DatabaseTable({
               property={property}
               record={record}
               onChange={(value) => onCellChange(record.id, property, value)}
+              onCreateOption={(label) => onCreateOption?.(property, label)}
+              onDeleteOption={(optionId) => onDeleteOption?.(property, optionId)}
             />
           )}
         </td>

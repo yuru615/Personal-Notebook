@@ -305,6 +305,138 @@ describe('App', () => {
     ).toBeInTheDocument()
   })
 
+  it('navigates a page-content search hit to the matched block on the target page', async () => {
+    const user = userEvent.setup()
+    const scrollIntoView = vi.fn()
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView
+    HTMLElement.prototype.scrollIntoView = scrollIntoView
+
+    try {
+      Reflect.set(globalThis, '__TAURI_INTERNALS__', {})
+      const snapshot: WorkspaceSnapshot = {
+        boards: [],
+        dataTables: [],
+        mindmaps: [],
+        pages: [
+          {
+            id: 'page_current',
+            parentId: null,
+            title: 'Current Page',
+            icon: null,
+            cover: null,
+            blocks: [{ id: 'block_current', type: 'paragraph', text: 'misc notes' }],
+            createdAt: '2026-07-06T00:00:00.000Z',
+            updatedAt: '2026-07-06T00:00:00.000Z',
+          },
+          {
+            id: 'page_target',
+            parentId: null,
+            title: 'Search Notes',
+            icon: null,
+            cover: null,
+            blocks: [
+              { id: 'block_1', type: 'paragraph', text: 'customer interview summary' },
+              { id: 'block_2', type: 'paragraph', text: 'customer follow-up checklist' },
+            ],
+            createdAt: '2026-07-06T00:00:00.000Z',
+            updatedAt: '2026-07-06T00:00:00.000Z',
+          },
+        ],
+        settings: { lastOpenedPageId: 'page_current' },
+      }
+
+      render(
+        <App
+          repository={createMemoryRepository(snapshot)}
+          initialEntries={['/pages/page_current']}
+        />,
+      )
+
+      await screen.findByDisplayValue('Current Page')
+
+      await user.click(screen.getByRole('button', { name: '搜索' }))
+      await user.type(screen.getByPlaceholderText('搜索页面或内容'), 'follow-up')
+
+      const result = await screen.findByRole('button', {
+        name: '打开页面 Search Notes',
+      })
+
+      scrollIntoView.mockClear()
+      await user.click(result)
+
+      await screen.findByDisplayValue('Search Notes')
+
+      await waitFor(() => {
+        expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' })
+      })
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView
+    }
+  })
+
+  it('opens the source block when a bottom backlinks entry is clicked', async () => {
+    const user = userEvent.setup()
+    const scrollIntoView = vi.fn()
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView
+    HTMLElement.prototype.scrollIntoView = scrollIntoView
+
+    try {
+      const snapshot: WorkspaceSnapshot = {
+        boards: [],
+        dataTables: [],
+        mindmaps: [],
+        pageProperties: [],
+        pages: [
+          {
+            id: 'page_target',
+            parentId: null,
+            title: 'Product Plan',
+            icon: null,
+            cover: null,
+            properties: {},
+            blocks: [],
+            createdAt: '2026-07-06T00:00:00.000Z',
+            updatedAt: '2026-07-06T00:00:00.000Z',
+          },
+          {
+            id: 'page_source',
+            parentId: null,
+            title: 'Meeting Notes',
+            icon: null,
+            cover: null,
+            properties: {},
+            blocks: [
+              {
+                id: 'block_relation',
+                type: 'paragraph',
+                text: 'See Product Plan',
+                richText: [
+                  { text: 'See ' },
+                  { text: 'Product Plan', pageId: 'page_target', relationKind: 'link' },
+                ],
+              },
+            ],
+            createdAt: '2026-07-06T00:00:00.000Z',
+            updatedAt: '2026-07-06T00:00:00.000Z',
+          },
+        ],
+        settings: { lastOpenedPageId: 'page_target' },
+      }
+
+      render(<App repository={createMemoryRepository(snapshot)} initialEntries={['/pages/page_target']} />)
+
+      await user.click(await screen.findByRole('button', { name: /See Product Plan/ }))
+
+      await screen.findByDisplayValue('Meeting Notes')
+
+      await waitFor(() => {
+        expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' })
+      })
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView
+    }
+  })
+
   it('shows page properties below the title and lets search surface property hits on normal pages', async () => {
     const user = userEvent.setup()
     const snapshot: WorkspaceSnapshot = {

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { BoardRecord, DataTableRecord, PagePropertyDefinition, PageRecord } from './types'
-import { searchBoards, searchDataTables, searchPages } from './search'
+import type {
+  BoardRecord,
+  DataTableRecord,
+  MindmapRecord,
+  PagePropertyDefinition,
+  PageRecord,
+} from './types'
+import { searchBoards, searchDataTables, searchMindmaps, searchPages } from './search'
 
 const now = '2026-06-15T00:00:00.000Z'
 const pagePropertyDefinitions: PagePropertyDefinition[] = []
@@ -105,6 +111,19 @@ const dataTablePages: PageRecord[] = [
   },
 ]
 
+const mindmapPages: PageRecord[] = [
+  {
+    id: 'page-mindmap',
+    parentId: null,
+    title: 'Strategy Workspace',
+    icon: null,
+    cover: null,
+    blocks: [{ id: 'block-mindmap', type: 'mindmap', mindmapId: 'mindmap-strategy' }],
+    createdAt: now,
+    updatedAt: now,
+  },
+]
+
 const dataTables: DataTableRecord[] = [
   {
     id: 'database-roadmap',
@@ -136,6 +155,37 @@ const dataTables: DataTableRecord[] = [
           values: {},
           createdAt: now,
           updatedAt: now,
+        },
+      },
+    },
+    createdAt: now,
+    updatedAt: now,
+  },
+]
+
+const mindmaps: MindmapRecord[] = [
+  {
+    id: 'mindmap-strategy',
+    title: 'Strategy Map',
+    snapshot: {
+      id: 'doc-root',
+      title: 'Strategy Map',
+      structure: 'mindmap',
+      rootId: 'node-root',
+      nodes: {
+        'node-root': {
+          id: 'node-root',
+          parentId: null,
+          childIds: ['node-1'],
+          text: 'Strategy Map',
+          collapsed: false,
+        },
+        'node-1': {
+          id: 'node-1',
+          parentId: 'node-root',
+          childIds: [],
+          text: 'North star metric',
+          collapsed: false,
         },
       },
     },
@@ -195,13 +245,92 @@ describe('searchPages', () => {
     expect(searchPages(multiMatchPages, pagePropertyDefinitions, 'customer')).toMatchObject([
       {
         pageId: 'page-multi',
+        blockId: 'block-1',
         excerpt: 'customer interview summary',
       },
       {
         pageId: 'page-multi',
+        blockId: 'block-2',
         excerpt: 'customer follow-up checklist',
       },
     ])
+  })
+
+  it('attaches block ids to block-backed page hits so the app can jump to the matched block', () => {
+    expect(searchPages(pages, pagePropertyDefinitions, 'schedule')).toMatchObject([
+      {
+        pageId: 'page-a',
+        blockId: 'block-a2',
+        excerpt: 'Schedule customer interviews',
+      },
+    ])
+  })
+
+  it('returns relation hits with block ids and keeps multiple relation matches from the same page', () => {
+    const relationPages: PageRecord[] = [
+      {
+        id: 'page-target',
+        parentId: null,
+        title: 'Product Plan',
+        icon: null,
+        cover: null,
+        blocks: [],
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: 'page-source',
+        parentId: null,
+        title: 'Meeting Notes',
+        icon: null,
+        cover: null,
+        blocks: [
+          {
+            id: 'block-relation',
+            type: 'paragraph',
+            text: 'See Product Plan and @Product Plan',
+            richText: [
+              { text: 'See ' },
+              { text: 'Product Plan', pageId: 'page-target', relationKind: 'link' },
+              { text: ' and ' },
+              { text: '@Product Plan', pageId: 'page-target', relationKind: 'mention' },
+            ],
+          },
+        ],
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]
+
+    const relationResults = searchPages(
+      relationPages,
+      pagePropertyDefinitions,
+      'product plan',
+    ).filter((result) => result.pageId === 'page-source')
+
+    expect(relationResults).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          pageId: 'page-source',
+          blockId: 'block-relation',
+          matchSource: 'page_link',
+          sourceLabel: '页面链接',
+          excerpt: 'See Product Plan and @Product Plan',
+        }),
+        expect.objectContaining({
+          pageId: 'page-source',
+          blockId: 'block-relation',
+          matchSource: 'page_mention',
+          sourceLabel: '页面提及',
+          excerpt: 'See Product Plan and @Product Plan',
+        }),
+      ]),
+    )
+    expect(
+      relationResults.filter(
+        (result) => result.matchSource === 'page_link' || result.matchSource === 'page_mention',
+      ),
+    ).toHaveLength(2)
   })
 
   it('emits property hits with source labels and keeps multiple hits from the same page', () => {
@@ -310,10 +439,51 @@ describe('searchPages', () => {
         pageId: 'page-board',
         boardId: 'board-feedback',
         title: 'Feedback Board',
+        matchSource: 'whiteboard_title',
+        sourceLabel: '白板标题',
       },
     ])
 
     expect(searchBoards(boardPages, boards, 'orphan')).toEqual([])
+  })
+
+  it('returns whiteboard content hits with their own source label', () => {
+    const boardsWithContent: BoardRecord[] = [
+      {
+        id: 'board-feedback',
+        title: 'Feedback Board',
+        snapshot: {
+          version: 1,
+          elements: [
+            {
+              id: 'text-1',
+              type: 'text',
+              x: 0,
+              y: 0,
+              width: 120,
+              height: 40,
+              text: 'Customer quote wall',
+              color: '#111111',
+              fontSize: 16,
+            },
+          ],
+          viewport: { x: 0, y: 0, zoom: 1 },
+        },
+        createdAt: now,
+        updatedAt: '2026-06-16T00:00:00.000Z',
+      },
+    ]
+
+    expect(searchBoards(boardPages, boardsWithContent, 'quote')).toMatchObject([
+      {
+        pageId: 'page-board',
+        boardId: 'board-feedback',
+        title: 'Feedback Board',
+        excerpt: 'Customer quote wall',
+        matchSource: 'whiteboard_content',
+        sourceLabel: '白板内容',
+      },
+    ])
   })
 
   it('returns referenced data tables and their records', () => {
@@ -337,5 +507,30 @@ describe('searchPages', () => {
     ])
 
     expect(searchDataTables(dataTablePages, dataTables, 'orphan')).toEqual([])
+  })
+
+  it('returns referenced mindmaps for both title hits and node hits', () => {
+    expect(searchMindmaps(mindmapPages, mindmaps, 'strategy')).toMatchObject([
+      {
+        kind: 'mindmap',
+        pageId: 'page-mindmap',
+        mindmapId: 'mindmap-strategy',
+        title: 'Strategy Map',
+        matchSource: 'mindmap_title',
+        sourceLabel: '导图标题',
+      },
+    ])
+
+    expect(searchMindmaps(mindmapPages, mindmaps, 'north star')).toMatchObject([
+      {
+        kind: 'mindmap',
+        pageId: 'page-mindmap',
+        mindmapId: 'mindmap-strategy',
+        title: 'Strategy Map',
+        excerpt: 'North star metric',
+        matchSource: 'mindmap_node',
+        sourceLabel: '导图节点',
+      },
+    ])
   })
 })
