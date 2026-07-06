@@ -102,6 +102,11 @@ describe('pageRelations', () => {
     expect(getPageRelationDisplayText('Renamed Plan', 'mention')).toBe('@Renamed Plan')
     expect(pages[1].blocks[0]).toMatchObject({
       text: 'Renamed Plan @Renamed Plan',
+      richText: [
+        { text: 'Renamed Plan', pageId: 'page_target', relationKind: 'link' },
+        { text: ' ' },
+        { text: '@Renamed Plan', pageId: 'page_target', relationKind: 'mention' },
+      ],
     })
   })
 })

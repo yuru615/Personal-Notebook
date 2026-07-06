@@ -85,4 +85,19 @@ describe('richText page relations', () => {
       { text: 'Product Plan', pageId: 'page_product', relationKind: 'link' },
     ])
   })
+
+  it('inserts a relation segment at a collapsed caret position inside plain text', () => {
+    expect(
+      replaceRichTextRange(
+        [{ text: 'See Prod later' }],
+        4,
+        4,
+        [{ text: 'Product Plan', pageId: 'page_product', relationKind: 'link' }],
+      ),
+    ).toEqual([
+      { text: 'See ' },
+      { text: 'Product Plan', pageId: 'page_product', relationKind: 'link' },
+      { text: 'Prod later' },
+    ])
+  })
 })

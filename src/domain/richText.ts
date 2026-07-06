@@ -75,10 +75,32 @@ export function replaceRichTextRange(
   const normalizedReplacement = normalizeRichText(replacement)
 
   if (start === end) {
-    return normalizeRichText([
-      ...normalizedSegments.slice(0, normalizedSegments.length),
-      ...normalizedReplacement,
-    ])
+    const next: RichTextSegment[] = []
+    let offset = 0
+    let inserted = false
+
+    for (const segment of normalizedSegments) {
+      const segmentStart = offset
+      const segmentEnd = offset + segment.text.length
+      offset = segmentEnd
+
+      if (inserted || segmentEnd < start || segmentStart > start) {
+        next.push(segment)
+        continue
+      }
+
+      const caretOffset = start - segmentStart
+      next.push({ ...segment, text: segment.text.slice(0, caretOffset) })
+      next.push(...normalizedReplacement)
+      next.push({ ...segment, text: segment.text.slice(caretOffset) })
+      inserted = true
+    }
+
+    if (!inserted) {
+      next.push(...normalizedReplacement)
+    }
+
+    return normalizeRichText(next)
   }
 
   const next: RichTextSegment[] = []
