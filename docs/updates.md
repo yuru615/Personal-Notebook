@@ -578,3 +578,236 @@
 验证情况：
 - `C:/Program Files/nodejs/npm.cmd test -- src/components/shared/CreatableOptionPicker.test.tsx src/components/editor/PagePropertiesPanel.test.tsx src/components/dataTable/components/table/CellEditor.test.tsx src/components/dataTable/components/table/TablePage.test.tsx src/components/dataTable/DataTablePage.test.tsx`
 - `C:/Program Files/nodejs/npm.cmd run build`
+
+## 2026-07-06 搜索媒体分组与说明补强
+
+提交：未提交
+
+简要描述：
+
+全局搜索结果里新增了独立的“媒体”分组与筛选，同时媒体命中结果现在会把文件名和媒体说明文字一起显示出来。
+
+详细描述：
+
+- 搜索弹窗新增“媒体”筛选入口，媒体命中不再混在普通“页面”分组里。
+- 媒体结果仍沿用现有页面结果类型，只按 `matchSource === 'media'` 单独分组，保持改动范围最小。
+- 图片命中结果现在会显示“文件名 / caption / alt”，音频和视频命中结果会显示“文件名 / caption”。
+- 前端内存搜索和桌面端 Rust 搜索索引都做了同样处理，避免网页端与桌面端显示不一致。
+- 补充了搜索弹窗分组筛选回归测试，以及桌面端工作区搜索的媒体摘要回归测试。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/search/SearchDialog.test.tsx`
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/domain/search.test.ts`
+- 已通过 `cargo test search_workspace_keeps_media_file_names_and_descriptions_in_excerpts --manifest-path src-tauri/Cargo.toml`（使用项目内临时 `CARGO_TARGET_DIR`）
+- 已通过 `C:/Program Files/nodejs/npm.cmd run build`
+
+## 2026-07-06 页面属性选项颜色对齐数据表格
+
+提交：未提交
+
+简要描述：
+
+页面属性里的标签和状态不再统一落成灰色占位色，改为沿用数据表格同样的选项配色逻辑。
+
+详细描述：
+
+- 页面属性选项新增与数据表格一致的颜色归一化规则，避免新建标签/状态后全部显示成灰色。
+- 旧工作区里已经保存成占位灰色的页面属性选项，在加载时会自动重分配到共享调色板颜色。
+- 页面属性面板新建选项时直接复用同一套配色规则，保证界面即时显示的颜色和最终保存结果一致。
+- store 层更新页面属性选项时也会统一做颜色归一化，避免前端、持久化和再次打开后的表现不一致。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/domain/pageProperties.test.ts src/store/createWorkspaceStore.test.ts src/components/editor/PagePropertiesPanel.test.tsx`
+- 已通过 `C:/Program Files/nodejs/npm.cmd run build`
+
+## 2026-07-06 页面属性值外层灰框去除
+
+提交：未提交
+
+简要描述：
+
+去掉了页面属性值外层持续显示的灰色底框，只保留真正的标签色块和更轻的悬浮反馈。
+
+详细描述：
+
+- 页面属性值按钮默认改为透明背景，不再整块包一层灰色底。
+- 标签和状态内部的彩色色块保持不变，视觉焦点回到真正的属性值本身。
+- “添加属性”按钮继续保留原来的浅灰底，避免和普通属性值入口混在一起。
+- 悬浮到页面属性值上时，保留一层很轻的交互反馈，保证可点击性还在。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/styles/pageOutlineLayout.test.ts`
+- 已通过 `C:/Program Files/nodejs/npm.cmd run build`
+
+## 2026-07-06 页面属性备注宽编辑态
+
+提交：未提交
+
+简要描述：
+
+把页面属性里的“备注”输入框改成“起点不变、向右拉宽”的编辑态，结束位置会贴到正文区域边缘。
+
+详细描述：
+
+- 这次只针对默认“备注”属性生效，不改动其他文本属性的现有紧凑编辑方式。
+- 进入编辑态后，备注这一行仍保留原来的两列布局，属性名和输入框的起始位置都不变。
+- 真正变宽的只有右侧输入框本身，它会沿着原来的属性值起点继续向右扩展，直到正文区域边缘。
+- 因此普通宽度和自适应正文宽度两种页面模式下，备注输入框都会更好地贴合正文内容区，但不会把左侧标签区挤乱。
+- 补了组件测试和样式回归测试，锁定“备注宽编辑态”这个交互，避免后面样式回归。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/editor/PagePropertiesPanel.test.tsx src/styles/pageOutlineLayout.test.ts`
+- 已通过 `C:/Program Files/nodejs/npm.cmd run build`
+
+## 2026-07-06 左侧导入图标语义修正
+
+提交：未提交
+
+简要描述：
+
+把左侧页面结构板块功能菜单里的“导入”图标从更像下载的样式换成更贴近导入语义的样式。
+
+详细描述：
+
+- 左侧功能菜单中的“导入”按钮原先使用了下载方向的图标，容易和“导出/下载”混淆。
+- 这次只替换图标本身，不改按钮位置、交互和文案。
+- 新图标改为上行导入语义，和当前“导入页面包”动作更一致。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/sidebar/SidebarTree.test.tsx`
+
+## 2026-07-06 空白正文行插入态统一
+
+提交：未提交
+
+简要描述：
+
+统一了正文里“没有任何内容的行”的交互：空白行现在会按插入态显示，左侧是 `+` 菜单，不再误显示成普通文本块的转换手柄。
+
+详细描述：
+
+- 底部空白插入行在没有输入任何文字时，按 `Enter` 现在也会直接创建一个新的空段落。
+- 纯空、且没有任何样式属性的段落块，会按插入态渲染：左侧显示 `+`，点击后展开完整块菜单，而不是普通块的“拖动/转换”菜单。
+- 当页面最后一个块已经是这种空白插入态段落时，会隐藏额外的底部空白插入行，避免出现两个连续空白入口。
+- 这样从正文回车出来的下一行、以及页面底部的空白行，体验终于统一了。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/editor/EmptyBlockRow.test.tsx src/components/editor/BlockEditor.test.tsx`
+
+## 2026-07-06 空白插入态提示词对齐
+
+提交：未提交
+
+简要描述：
+
+当光标落在空白插入态正文行时，现在会显示和底部 `+` 空白行一致的提示词“输入 / 打开命令菜单”，未聚焦的其他空白行不再持续显示提示词。
+
+详细描述：
+
+- 纯空、无样式的插入态段落块，现在会复用底部 `+` 空白行同一套提示词，不再沿用普通正文块的“输入正文”。
+- 这类插入态正文行只有在当前获得焦点时才显示提示词，未聚焦时保持空白，避免页面里每个空行都挂着提示文字。
+- 普通有内容段落、普通空段落以及其他类型块的提示词逻辑不受影响，只对插入态空白行生效。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/editor/BlockEditor.test.tsx src/styles/pageOutlineLayout.test.ts`
+
+## 2026-07-06 正文底部空白区点击聚焦优化
+
+提交：未提交
+
+简要描述：
+
+点击正文最下方空白区时，光标现在会自动落到最后一条空白行里，不会再丢到页面空白处。
+
+详细描述：
+
+- 当点击 `editor-surface` 自身的底部空白区域时，编辑器会主动接管焦点。
+- 如果页面底部显示的是默认 `+` 空白插入行，就自动把焦点落到这条空白行的输入框里。
+- 如果页面最后一个块已经是插入态空白段落，就自动把焦点落到这条空白段落里。
+- 这样用户在正文最下方继续输入时，不需要再费力找最后那条空白行的位置。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/editor/BlockEditor.test.tsx src/components/editor/EmptyBlockRow.test.tsx src/components/editor/BlockFrame.test.tsx`
+- 已通过 `C:/Program Files/nodejs/npm.cmd run build`
+
+## 2026-07-06 空白行手柄稳定性优化
+
+提交：未提交
+
+简要描述：
+
+新增或删除底部空白行时，插入态空段落的手柄现在会保持稳定显示，不再和底部 `+` 空白行之间来回闪跳。
+
+详细描述：
+
+- 给插入态空段落对应的块框架补了 `block-frame-insert-mode` 标记，明确区分它和普通正文块。
+- 让插入态空段落的左侧手柄和底部 `+` 空白行采用一致的常显策略，避免从“默认隐藏”切到“默认显示”时产生视觉抖动。
+- 保留普通正文块原有的悬浮/聚焦显示逻辑，只收敛空白插入态这条交互路径，影响范围更小。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/editor/BlockEditor.test.tsx src/styles/pageOutlineLayout.test.ts`
+
+## 2026-07-06 空白行手柄与底部吸附逻辑收紧
+
+提交：未提交
+
+简要描述：
+
+把空白行左侧 `+` 的显示逻辑收回到悬浮/聚焦态，同时把正文底部的自动吸附聚焦限制为“点击最后一行下方空白区”才生效。
+
+详细描述：
+
+- 去掉了插入态空段落手柄的全局常显规则，避免页面里多个空白行同时把左侧 `+` 全部亮出来。
+- 底部 `+` 空白行改为和普通块手柄一致，只在鼠标悬浮或该行获得焦点时显示，减少视觉噪音。
+- `editor-surface` 的点击吸附逻辑增加了位置判断，只有点击位置已经低于最后一个正文子项底边时，才会自动把焦点送到最后的空白行。
+- 这样中间空白行之间的留白区域不会再误跳到底部，底部继续输入的体验也还保留。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/editor/BlockEditor.test.tsx src/styles/pageOutlineLayout.test.ts`
+
+## 2026-07-06 搜索与页面属性弹窗滚动锁定
+
+提交：未提交
+
+简要描述：
+
+搜索弹窗和页面属性值弹窗打开时，现在会锁住背景正文滚动，避免一边看弹窗一边把后面的页面带着滑走。
+
+详细描述：
+
+- 全局搜索打开时，会锁定文档根滚动，关闭搜索后恢复之前的滚动状态。
+- 页面属性的单选、多选和日期弹窗打开时，也会锁定背景正文滚动，关闭后再恢复。
+- 这次沿用了数据表工具栏弹窗同一类的滚动锁思路，只补了最小行为，不改原来的弹窗结构和定位逻辑。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/search/SearchDialog.test.tsx src/components/editor/PagePropertiesPanel.test.tsx`
+
+## 2026-07-06 同步块与引用块设计文档
+
+提交：未提交
+
+简要描述：
+
+补充了“同步块 / 引用块”第一版设计文档，明确以同步块为底座、引用块为只读实例的整体方案。
+
+详细描述：
+
+- 明确同步单位采用“一组连续块”，不是单块同步。
+- 明确底层采用“共享组 + 实例容器”模型，不拆成两套引用 / 同步存储结构。
+- 明确创建入口、混合编辑模式、删除与取消同步规则。
+- 明确搜索按实例所在页面命中、页面包导入导出重写 `groupId / instanceId`、以及异常恢复边界。
+
+验证情况：
+
+- 已完成设计文档自检：范围、数据结构、导入导出、搜索联动与异常恢复规则已写入 spec
