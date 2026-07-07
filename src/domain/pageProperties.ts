@@ -1,11 +1,25 @@
 import { createId } from '../utils/id'
 import type {
   PagePropertyDefinition,
+  PagePropertyOption,
   PagePropertyType,
   PagePropertyValue,
   PagePropertyValueMap,
   WorkspaceSnapshot,
 } from './types'
+
+const PAGE_PROPERTY_OPTION_COLOR_PLACEHOLDER = '#475569'
+const PAGE_PROPERTY_OPTION_COLOR_PALETTE = [
+  '#7c3aed',
+  '#2563eb',
+  '#0f766e',
+  '#16a34a',
+  '#ca8a04',
+  '#ea580c',
+  '#db2777',
+  '#dc2626',
+  '#475569',
+]
 
 export function createDefaultPagePropertyDefinitions(now: string): PagePropertyDefinition[] {
   return [
@@ -34,7 +48,91 @@ export function createDefinition(
 }
 
 export function normalizePagePropertyDefinitions(value: unknown): PagePropertyDefinition[] {
-  return Array.isArray(value) ? value : []
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.map((definition) => {
+    const pagePropertyDefinition = definition as PagePropertyDefinition
+
+    if (
+      !definition ||
+      typeof definition !== 'object' ||
+      Array.isArray(definition) ||
+      (pagePropertyDefinition.type !== 'select' && pagePropertyDefinition.type !== 'multiSelect')
+    ) {
+      return pagePropertyDefinition
+    }
+
+    const rawOptions = Array.isArray(pagePropertyDefinition.config?.options)
+      ? pagePropertyDefinition.config.options
+      : []
+    const nextOptions = normalizePagePropertyOptions(undefined, rawOptions)
+
+    return {
+      ...pagePropertyDefinition,
+      config: {
+        ...pagePropertyDefinition.config,
+        options: nextOptions,
+      },
+    }
+  })
+}
+
+function getNextPagePropertyOptionColor(usedColors: Set<string>, preferredIndex: number) {
+  for (let offset = 0; offset < PAGE_PROPERTY_OPTION_COLOR_PALETTE.length; offset += 1) {
+    const color =
+      PAGE_PROPERTY_OPTION_COLOR_PALETTE[
+        (preferredIndex + offset) % PAGE_PROPERTY_OPTION_COLOR_PALETTE.length
+      ]
+
+    if (!usedColors.has(color)) {
+      return color
+    }
+  }
+
+  return PAGE_PROPERTY_OPTION_COLOR_PALETTE[
+    preferredIndex % PAGE_PROPERTY_OPTION_COLOR_PALETTE.length
+  ]
+}
+
+export function normalizePagePropertyOptions(
+  previousOptions: PagePropertyOption[] | undefined,
+  nextOptions: PagePropertyOption[],
+) {
+  const previousById = new Map(previousOptions?.map((option) => [option.id, option]) ?? [])
+  const previousByLabel = new Map(previousOptions?.map((option) => [option.label, option]) ?? [])
+  const usedColors = new Set<string>()
+
+  return nextOptions
+    .filter((option) => option && option.label.trim())
+    .map((option, index) => {
+      const normalizedLabel = option.label.trim()
+      const previousOption =
+        previousById.get(option.id) ?? previousByLabel.get(normalizedLabel)
+      const explicitColor =
+        option.color && option.color !== PAGE_PROPERTY_OPTION_COLOR_PLACEHOLDER
+          ? option.color
+          : null
+      const previousColor =
+        previousOption?.color &&
+        previousOption.color !== PAGE_PROPERTY_OPTION_COLOR_PLACEHOLDER
+          ? previousOption.color
+          : null
+      const resolvedColor =
+        explicitColor ??
+        previousColor ??
+        getNextPagePropertyOptionColor(usedColors, index)
+
+      usedColors.add(resolvedColor)
+
+      return {
+        ...option,
+        label: normalizedLabel,
+        id: previousOption?.id ?? option.id,
+        color: resolvedColor,
+      }
+    })
 }
 
 export function normalizePagePropertyValue(

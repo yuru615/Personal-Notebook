@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { BlockType } from '../../domain/types'
 import { uiCopy } from '../../ui/copy'
 import { useFloatingMenuLayout } from './floatingMenu'
-import { getSlashMenuOptions, SlashMenu } from './SlashMenu'
+import { getSlashMenuOptions, SlashMenu, type SlashMenuCommand } from './SlashMenu'
 import { useDismissableLayer } from './useDismissableLayer'
 
 interface EmptyBlockRowProps {
   allowedBlockTypes?: BlockType[]
-  onInsert: (type: BlockType) => void
+  onInsert: (type: SlashMenuCommand) => void
   onInsertParagraph?: (text: string) => void
 }
 
@@ -60,7 +60,7 @@ export function EmptyBlockRow({
     onDismiss: closeMenu,
   })
 
-  function handlePick(type: BlockType) {
+  function handlePick(type: SlashMenuCommand) {
     onInsert(type)
     setValue('')
     setMenuOpen(false)
@@ -69,9 +69,16 @@ export function EmptyBlockRow({
   }
 
   function handleSubmitText() {
+    if (open) {
+      return
+    }
+
     const nextValue = value.trim()
 
-    if (!nextValue || open) {
+    if (!nextValue) {
+      onInsert('paragraph')
+      setValue('')
+      setSlashMenuDismissed(false)
       return
     }
 

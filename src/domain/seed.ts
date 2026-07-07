@@ -2,8 +2,28 @@ import { createDefaultPagePropertyDefinitions } from './pageProperties'
 import { createId } from '../utils/id'
 import type { PageRecord, WorkspaceSnapshot } from './types'
 
-export function createSeedPage(): PageRecord {
-  const now = new Date().toISOString()
+export const INBOX_PAGE_TITLE = '\u6536\u4ef6\u7bb1'
+export const INBOX_PAGE_ICON = '\u{1F4E5}'
+
+export function createInboxPage(now = new Date().toISOString()): PageRecord {
+  return {
+    id: createId('page'),
+    parentId: null,
+    title: INBOX_PAGE_TITLE,
+    icon: INBOX_PAGE_ICON,
+    cover: null,
+    properties: {},
+    isFullWidth: false,
+    isSmallText: false,
+    fontFamily: 'default',
+    showOutline: true,
+    blocks: [],
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+export function createSeedPage(now = new Date().toISOString()): PageRecord {
 
   return {
     id: createId('page'),
@@ -36,16 +56,18 @@ export function createSeedPage(): PageRecord {
 
 export function createSeedWorkspace(): WorkspaceSnapshot {
   const now = new Date().toISOString()
-  const page = createSeedPage()
+  const inboxPage = createInboxPage(now)
+  const page = createSeedPage(now)
 
   return {
     boards: [],
     dataTables: [],
     mindmaps: [],
-    pages: [page],
+    pages: [inboxPage, page],
     pageProperties: createDefaultPagePropertyDefinitions(now),
     settings: {
       lastOpenedPageId: page.id,
+      inboxPageId: inboxPage.id,
       sidebarLayout: 'compact',
     },
   }

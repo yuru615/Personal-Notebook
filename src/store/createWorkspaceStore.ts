@@ -5,6 +5,7 @@ import { getTextBlockStyle, isTextStyleableBlock } from '../domain/blockTextStyl
 import {
   createDefaultPagePropertyDefinitions,
   normalizePagePropertyDefinitions,
+  normalizePagePropertyOptions,
   normalizePagePropertyValues,
 } from '../domain/pageProperties'
 import {
@@ -12,7 +13,17 @@ import {
   syncPageRelationTitles,
 } from '../domain/pageRelations'
 import { normalizeRichText, richTextFromPlainText } from '../domain/richText'
-import { createSeedWorkspace } from '../domain/seed'
+import {
+  createInboxPage,
+  createSeedWorkspace,
+  INBOX_PAGE_ICON,
+  INBOX_PAGE_TITLE,
+} from '../domain/seed'
+import {
+  cloneBlocksForUnsync,
+  reconcileSyncedBlockGroups,
+  validateSyncedGroupBlocks,
+} from '../domain/syncedBlocks'
 import type {
   BlockRecord,
   BlockType,
@@ -28,6 +39,9 @@ import type {
   RichTextSegment,
   SaveStatus,
   SidebarPinnedItem,
+  SyncedBlockGroupRecord,
+  SyncedBlockInstanceBlock,
+  SyncedBlockMode,
   WorkspaceSnapshot,
   WorkspaceSettings,
 } from '../domain/types'
@@ -39,6 +53,7 @@ import {
   createDataTableRecord,
   createMindmapBlock,
   createMindmapRecord,
+  createSyncedBlockInstanceBlock,
   createWhiteboardBlock,
 } from '../utils/blockFactory'
 import { createId } from '../utils/id'
@@ -58,12 +73,14 @@ export interface WorkspaceState {
   boards: BoardRecord[]
   dataTables: DataTableRecord[]
   mindmaps: MindmapRecord[]
+  syncedBlockGroups: SyncedBlockGroupRecord[]
   pages: PageRecord[]
   pageProperties: PagePropertyDefinition[]
   settings: WorkspaceSettings
   currentPageId: PageId | null
   saveStatus: SaveStatus
   bootstrap: () => Promise<void>
+  ensureInboxPage: () => Promise<PageRecord>
   createPage: (parentId?: PageId, options?: CreatePageOptions) => Promise<PageRecord>
   setCurrentPage: (pageId: PageId) => Promise<void>
   setSidebarLayout: (layout: NonNullable<WorkspaceSettings['sidebarLayout']>) => Promise<void>
@@ -101,6 +118,30 @@ export interface WorkspaceState {
   renamePage: (pageId: PageId, title: string) => Promise<void>
   duplicatePage: (pageId: PageId) => Promise<PageRecord | null>
   deletePage: (pageId: PageId) => Promise<void>
+  createSyncedBlockFromRange: (
+    pageId: PageId,
+    startBlockId: string,
+    endBlockId: string,
+  ) => Promise<SyncedBlockInstanceBlock | null>
+  createSyncedBlockFromExistingBlock: (
+    sourcePageId: PageId,
+    sourceBlockId: string,
+    targetPageId: PageId,
+    targetBlockId: string,
+    mode: SyncedBlockMode,
+  ) => Promise<SyncedBlockInstanceBlock | null>
+  replaceBlockWithSyncedInstance: (
+    pageId: PageId,
+    blockId: string,
+    groupId: string,
+    mode: SyncedBlockMode,
+  ) => Promise<SyncedBlockInstanceBlock | null>
+  updateSyncedGroupBlock: (
+    groupId: string,
+    blockId: string,
+    nextBlock: BlockRecord,
+  ) => Promise<void>
+  unsyncBlockInstance: (pageId: PageId, blockId: string) => Promise<void>
   updateBlock: (pageId: PageId, blockId: string, nextBlock: BlockRecord) => Promise<void>
   flushPendingSaves: () => Promise<void>
   insertBlock: (pageId: PageId, type: BlockType) => Promise<BlockRecord | null>
@@ -134,10 +175,12 @@ function createEmptyState(): WorkspaceState {
     boards: [],
     dataTables: [],
     mindmaps: [],
+    syncedBlockGroups: [],
     pages: [],
     pageProperties: [],
     settings: {
       lastOpenedPageId: null,
+      inboxPageId: null,
       sidebarLayout: 'compact',
       sidebarWidth: 272,
       pinnedSidebarItems: [],
@@ -145,6 +188,9 @@ function createEmptyState(): WorkspaceState {
     currentPageId: null,
     saveStatus: 'idle',
     bootstrap: async () => undefined,
+    ensureInboxPage: async () => {
+      throw new Error('not implemented')
+    },
     createPage: async (_parentId?: PageId, _options?: CreatePageOptions) => {
       throw new Error('not implemented')
     },
@@ -244,6 +290,21 @@ function createEmptyState(): WorkspaceState {
     deletePage: async () => {
       throw new Error('not implemented')
     },
+    createSyncedBlockFromRange: async () => {
+      throw new Error('not implemented')
+    },
+    createSyncedBlockFromExistingBlock: async () => {
+      throw new Error('not implemented')
+    },
+    replaceBlockWithSyncedInstance: async () => {
+      throw new Error('not implemented')
+    },
+    updateSyncedGroupBlock: async () => {
+      throw new Error('not implemented')
+    },
+    unsyncBlockInstance: async () => {
+      throw new Error('not implemented')
+    },
     updateBlock: async () => {
       throw new Error('not implemented')
     },
@@ -310,9 +371,11 @@ function createSettings(
   sidebarLayout: NonNullable<WorkspaceSettings['sidebarLayout']> = 'compact',
   sidebarWidth = 272,
   pinnedSidebarItems: SidebarPinnedItem[] = [],
+  inboxPageId: PageId | null = null,
 ): WorkspaceSettings {
   return {
     lastOpenedPageId,
+    inboxPageId,
     sidebarLayout,
     sidebarWidth,
     pinnedSidebarItems,
@@ -329,7 +392,9 @@ function normalizeSettings(settings: WorkspaceSettings): {
       ? Math.round(settings.sidebarWidth)
       : 272
   const pinnedSidebarItems = normalizePinnedSidebarItems(settings.pinnedSidebarItems)
+  const inboxPageId = typeof settings.inboxPageId === 'string' ? settings.inboxPageId : null
   const didChange =
+    settings.inboxPageId !== inboxPageId ||
     settings.sidebarLayout !== sidebarLayout ||
     settings.sidebarWidth !== sidebarWidth ||
     JSON.stringify(settings.pinnedSidebarItems ?? []) !== JSON.stringify(pinnedSidebarItems)
@@ -337,11 +402,58 @@ function normalizeSettings(settings: WorkspaceSettings): {
   return {
     settings: {
       lastOpenedPageId: settings.lastOpenedPageId,
+      inboxPageId,
       sidebarLayout,
       sidebarWidth,
       pinnedSidebarItems,
     },
     didChange,
+  }
+}
+
+function ensureInboxPageInSnapshot(snapshot: WorkspaceSnapshot): {
+  snapshot: WorkspaceSnapshot
+  didChange: boolean
+} {
+  const inboxPageId = snapshot.settings.inboxPageId
+  const existingInbox =
+    inboxPageId !== null && inboxPageId !== undefined
+      ? snapshot.pages.find((page) => page.id === inboxPageId)
+      : null
+
+  if (existingInbox) {
+    return { snapshot, didChange: false }
+  }
+
+  const reusableInbox = snapshot.pages.find(
+    (page) => page.parentId === null && page.title === INBOX_PAGE_TITLE && page.icon === INBOX_PAGE_ICON,
+  )
+
+  if (reusableInbox) {
+    return {
+      snapshot: {
+        ...snapshot,
+        settings: {
+          ...snapshot.settings,
+          inboxPageId: reusableInbox.id,
+        },
+      },
+      didChange: true,
+    }
+  }
+
+  const inboxPage = createInboxPage()
+
+  return {
+    snapshot: {
+      ...snapshot,
+      pages: [inboxPage, ...snapshot.pages],
+      settings: {
+        ...snapshot.settings,
+        inboxPageId: inboxPage.id,
+      },
+    },
+    didChange: true,
   }
 }
 
@@ -583,11 +695,17 @@ function normalizeWorkspaceSnapshot(snapshot: WorkspaceSnapshot) {
   )
     ? snapshot.mindmaps
     : []
+  const rawSyncedBlockGroups = Array.isArray(
+    (snapshot as WorkspaceSnapshot & { syncedBlockGroups?: SyncedBlockGroupRecord[] }).syncedBlockGroups,
+  )
+    ? snapshot.syncedBlockGroups
+    : []
   const normalizedBoards = normalizeBoards(rawBoards)
   const boards = normalizedBoards.boards
   const normalizedDataTables = normalizeDataTables(rawDataTables)
   const dataTables = normalizedDataTables.dataTables
   const mindmaps = structuredClone(rawMindmaps)
+  const syncedBlockGroups = structuredClone(rawSyncedBlockGroups)
 
   if (normalizedBoards.didChange) {
     didChange = true
@@ -600,6 +718,13 @@ function normalizeWorkspaceSnapshot(snapshot: WorkspaceSnapshot) {
     didChange = true
   }
   if (!Array.isArray((snapshot as WorkspaceSnapshot & { mindmaps?: MindmapRecord[] }).mindmaps)) {
+    didChange = true
+  }
+  if (
+    !Array.isArray(
+      (snapshot as WorkspaceSnapshot & { syncedBlockGroups?: SyncedBlockGroupRecord[] }).syncedBlockGroups,
+    )
+  ) {
     didChange = true
   }
 
@@ -639,6 +764,7 @@ function normalizeWorkspaceSnapshot(snapshot: WorkspaceSnapshot) {
     'whiteboard',
     'data_table',
     'mindmap',
+    'synced_block',
   ])
 
   const pages = snapshot.pages.map((page) => {
@@ -672,11 +798,14 @@ function normalizeWorkspaceSnapshot(snapshot: WorkspaceSnapshot) {
     }
   })
 
+  const nextSnapshot = didChange
+    ? { boards, dataTables, mindmaps, syncedBlockGroups, pages, pageProperties, settings }
+    : { ...snapshot, boards, dataTables, mindmaps, syncedBlockGroups, pages, pageProperties, settings }
+  const ensuredInbox = ensureInboxPageInSnapshot(nextSnapshot)
+
   return {
-    snapshot: didChange
-      ? { boards, dataTables, mindmaps, pages, pageProperties, settings }
-      : { ...snapshot, boards, dataTables, mindmaps, pages, pageProperties, settings },
-    didChange,
+    snapshot: ensuredInbox.snapshot,
+    didChange: didChange || ensuredInbox.didChange,
   }
 }
 
@@ -712,6 +841,7 @@ function getPlainTextFromBlock(block: BlockRecord): string {
     case 'whiteboard':
     case 'data_table':
     case 'mindmap':
+    case 'synced_block':
       return ''
   }
 }
@@ -742,6 +872,7 @@ function preserveBlockContent(nextBlock: BlockRecord, currentBlock: BlockRecord)
     case 'whiteboard':
     case 'data_table':
     case 'mindmap':
+    case 'synced_block':
       return nextBlock
   }
 }
@@ -857,7 +988,10 @@ function mergeEditableBlockRichText(
   ])
 }
 
-function collectReferencedBoardIds(pages: PageRecord[]) {
+function collectReferencedBoardIds(
+  pages: PageRecord[],
+  syncedBlockGroups: SyncedBlockGroupRecord[] = [],
+) {
   const referencedBoardIds = new Set<string>()
 
   for (const page of pages) {
@@ -868,10 +1002,21 @@ function collectReferencedBoardIds(pages: PageRecord[]) {
     }
   }
 
+  for (const group of syncedBlockGroups) {
+    for (const block of group.blocks) {
+      if (block.type === 'whiteboard') {
+        referencedBoardIds.add(block.boardId)
+      }
+    }
+  }
+
   return referencedBoardIds
 }
 
-function collectReferencedDataTableIds(pages: PageRecord[]) {
+function collectReferencedDataTableIds(
+  pages: PageRecord[],
+  syncedBlockGroups: SyncedBlockGroupRecord[] = [],
+) {
   const referencedDataTableIds = new Set<string>()
 
   for (const page of pages) {
@@ -882,10 +1027,21 @@ function collectReferencedDataTableIds(pages: PageRecord[]) {
     }
   }
 
+  for (const group of syncedBlockGroups) {
+    for (const block of group.blocks) {
+      if (block.type === 'data_table') {
+        referencedDataTableIds.add(block.databaseId)
+      }
+    }
+  }
+
   return referencedDataTableIds
 }
 
-function collectReferencedMindmapIds(pages: PageRecord[]) {
+function collectReferencedMindmapIds(
+  pages: PageRecord[],
+  syncedBlockGroups: SyncedBlockGroupRecord[] = [],
+) {
   const referencedMindmapIds = new Set<string>()
 
   for (const page of pages) {
@@ -896,16 +1052,24 @@ function collectReferencedMindmapIds(pages: PageRecord[]) {
     }
   }
 
+  for (const group of syncedBlockGroups) {
+    for (const block of group.blocks) {
+      if (block.type === 'mindmap') {
+        referencedMindmapIds.add(block.mindmapId)
+      }
+    }
+  }
+
   return referencedMindmapIds
 }
 
 function filterResourcesReferencedByPages(
-  state: Pick<WorkspaceState, 'boards' | 'dataTables' | 'mindmaps'>,
+  state: Pick<WorkspaceState, 'boards' | 'dataTables' | 'mindmaps' | 'syncedBlockGroups'>,
   pages: PageRecord[],
 ) {
-  const referencedBoardIds = collectReferencedBoardIds(pages)
-  const referencedDataTableIds = collectReferencedDataTableIds(pages)
-  const referencedMindmapIds = collectReferencedMindmapIds(pages)
+  const referencedBoardIds = collectReferencedBoardIds(pages, state.syncedBlockGroups)
+  const referencedDataTableIds = collectReferencedDataTableIds(pages, state.syncedBlockGroups)
+  const referencedMindmapIds = collectReferencedMindmapIds(pages, state.syncedBlockGroups)
 
   return {
     boards: state.boards.filter((board) => referencedBoardIds.has(board.id)),
@@ -952,13 +1116,14 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
   function createSnapshotFromState(
     state: Pick<
       WorkspaceState,
-      'boards' | 'dataTables' | 'mindmaps' | 'pages' | 'pageProperties' | 'settings'
+      'boards' | 'dataTables' | 'mindmaps' | 'syncedBlockGroups' | 'pages' | 'pageProperties' | 'settings'
     >,
   ): WorkspaceSnapshot {
     return structuredClone({
       boards: state.boards,
       dataTables: state.dataTables,
       mindmaps: state.mindmaps,
+      syncedBlockGroups: state.syncedBlockGroups,
       pages: state.pages,
       pageProperties: state.pageProperties,
       settings: state.settings,
@@ -968,7 +1133,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
   function pushUndoSnapshot(
     state: Pick<
       WorkspaceState,
-      'boards' | 'dataTables' | 'mindmaps' | 'pages' | 'pageProperties' | 'settings'
+      'boards' | 'dataTables' | 'mindmaps' | 'syncedBlockGroups' | 'pages' | 'pageProperties' | 'settings'
     >,
   ) {
     undoStack.push(createSnapshotFromState(state))
@@ -976,6 +1141,44 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
     if (undoStack.length > 100) {
       undoStack.shift()
+    }
+  }
+
+  function removeSyncedInstanceFromSnapshot(
+    snapshot: WorkspaceSnapshot,
+    pageId: PageId,
+    blockId: string,
+  ): WorkspaceSnapshot {
+    const page = snapshot.pages.find((item) => item.id === pageId)
+    const container = page?.blocks.find(
+      (block): block is SyncedBlockInstanceBlock =>
+        block.id === blockId && block.type === 'synced_block',
+    )
+
+    if (!page || !container) {
+      return snapshot
+    }
+
+    const now = new Date().toISOString()
+    const nextPages = snapshot.pages.map((currentPage) =>
+      currentPage.id === pageId
+        ? {
+            ...currentPage,
+            updatedAt: now,
+            blocks: currentPage.blocks.filter((block) => block.id !== blockId),
+          }
+        : currentPage,
+    )
+
+    return {
+      ...snapshot,
+      pages: nextPages,
+      syncedBlockGroups: reconcileSyncedBlockGroups(
+        nextPages,
+        snapshot.syncedBlockGroups ?? [],
+        new Set([container.groupId]),
+        now,
+      ),
     }
   }
 
@@ -998,6 +1201,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
             boards: latestState.boards,
             dataTables: latestState.dataTables,
             mindmaps: latestState.mindmaps,
+            syncedBlockGroups: latestState.syncedBlockGroups,
             pages: latestState.pages,
             pageProperties: latestState.pageProperties,
             settings: latestState.settings,
@@ -1082,6 +1286,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           boards: nextBoards,
           dataTables: nextDataTables,
           mindmaps: nextMindmaps,
+          syncedBlockGroups: latestState.syncedBlockGroups,
           pages: latestState.pages,
           pageProperties: latestState.pageProperties,
           settings: latestState.settings,
@@ -1128,6 +1333,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           boards: snapshot.boards,
           dataTables: snapshot.dataTables ?? [],
           mindmaps: snapshot.mindmaps ?? [],
+          syncedBlockGroups: snapshot.syncedBlockGroups ?? [],
           pages: snapshot.pages,
           pageProperties: snapshot.pageProperties ?? [],
           settings: createSettings(
@@ -1135,6 +1341,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
             snapshot.settings.sidebarLayout ?? 'compact',
             snapshot.settings.sidebarWidth ?? 272,
             snapshot.settings.pinnedSidebarItems ?? [],
+            snapshot.settings.inboxPageId ?? null,
           ),
           currentPageId,
           saveStatus: 'saved',
@@ -1148,6 +1355,49 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       }
     },
 
+    ensureInboxPage: async () => {
+      const state = get()
+      const existingInbox =
+        state.settings.inboxPageId !== null && state.settings.inboxPageId !== undefined
+          ? state.pages.find((page) => page.id === state.settings.inboxPageId)
+          : null
+
+      if (existingInbox) {
+        return existingInbox
+      }
+
+      const inboxPage = createInboxPage()
+      const nextSettings = createSettings(
+        state.settings.lastOpenedPageId,
+        state.settings.sidebarLayout ?? 'compact',
+        state.settings.sidebarWidth ?? 272,
+        state.settings.pinnedSidebarItems ?? [],
+        inboxPage.id,
+      )
+      const nextSnapshot = createSnapshotFromState({
+        ...state,
+        pages: [inboxPage, ...state.pages],
+        settings: nextSettings,
+      })
+
+      pushUndoSnapshot(state)
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save(nextSnapshot)
+        set({
+          pages: nextSnapshot.pages,
+          settings: nextSettings,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to recreate inbox page')
+      }
+
+      return inboxPage
+    },
+
     createPage: async (parentId?: PageId, options?: CreatePageOptions) => {
       const state = get()
       const page = createPageRecord(parentId, options?.title)
@@ -1157,6 +1407,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         state.settings.sidebarLayout ?? 'compact',
         state.settings.sidebarWidth ?? 272,
         state.settings.pinnedSidebarItems ?? [],
+        state.settings.inboxPageId ?? null,
       )
       const nextSnapshot = createSnapshotFromState({
         ...state,
@@ -1201,6 +1452,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         state.settings.sidebarLayout ?? 'compact',
         state.settings.sidebarWidth ?? 272,
         state.settings.pinnedSidebarItems ?? [],
+        state.settings.inboxPageId ?? null,
       )
       const nextSnapshot = createSnapshotFromState({
         ...state,
@@ -1235,6 +1487,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         layout,
         state.settings.sidebarWidth ?? 272,
         state.settings.pinnedSidebarItems ?? [],
+        state.settings.inboxPageId ?? null,
       )
       const nextSnapshot = createSnapshotFromState({
         ...state,
@@ -1268,6 +1521,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         state.settings.sidebarLayout ?? 'compact',
         nextWidth,
         state.settings.pinnedSidebarItems ?? [],
+        state.settings.inboxPageId ?? null,
       )
       const nextSnapshot = createSnapshotFromState({
         ...state,
@@ -1302,6 +1556,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         state.settings.sidebarLayout ?? 'compact',
         state.settings.sidebarWidth ?? 272,
         nextPinnedSidebarItems,
+        state.settings.inboxPageId ?? null,
       )
       const nextSnapshot = createSnapshotFromState({
         ...state,
@@ -1608,7 +1863,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
               ...definition,
               config: {
                 ...definition.config,
-                options: structuredClone(options),
+                options: normalizePagePropertyOptions(definition.config.options, options),
               },
               updatedAt: now,
             }
@@ -1833,7 +2088,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
     cleanupOrphanBoards: async () => {
       const state = get()
-      const referencedBoardIds = collectReferencedBoardIds(state.pages)
+      const referencedBoardIds = collectReferencedBoardIds(state.pages, state.syncedBlockGroups)
       const nextBoards = state.boards.filter((board) => referencedBoardIds.has(board.id))
 
       if (nextBoards.length === state.boards.length) {
@@ -1850,7 +2105,10 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
     cleanupOrphanDataTables: async () => {
       const state = get()
-      const referencedDataTableIds = collectReferencedDataTableIds(state.pages)
+      const referencedDataTableIds = collectReferencedDataTableIds(
+        state.pages,
+        state.syncedBlockGroups,
+      )
       const nextDataTables = state.dataTables.filter((dataTable) =>
         referencedDataTableIds.has(dataTable.id),
       )
@@ -2021,6 +2279,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         await repository.save({
           boards: state.boards,
           dataTables: nextDataTables,
+          syncedBlockGroups: state.syncedBlockGroups,
           pages: nextPages,
           settings: state.settings,
         })
@@ -2079,6 +2338,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         await repository.save({
           boards: state.boards,
           dataTables: nextDataTables,
+          syncedBlockGroups: state.syncedBlockGroups,
           pages: nextPages,
           settings: state.settings,
         })
@@ -2315,6 +2575,14 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
               return createMindmapBlock(nextMindmapId ?? block.mindmapId)
             }
 
+            if (block.type === 'synced_block') {
+              return {
+                ...structuredClone(block),
+                id: createId('block'),
+                instanceId: createId('instance'),
+              }
+            }
+
             return remapBlockPageRelationTargets(
               {
                 ...structuredClone(block),
@@ -2349,6 +2617,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           boards: nextBoards,
           dataTables: nextDataTables,
           mindmaps: nextMindmaps,
+          syncedBlockGroups: state.syncedBlockGroups,
           pages: nextPages,
           settings: state.settings,
         })
@@ -2369,11 +2638,25 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
     deletePage: async (pageId: PageId) => {
       const state = get()
-      const deletedPageIds = new Set(collectPageBranch(state.pages, pageId).map((page) => page.id))
+      const deletedBranch = collectPageBranch(state.pages, pageId)
+      const deletedPageIds = new Set(deletedBranch.map((page) => page.id))
+      const affectedSyncedGroupIds = new Set(
+        deletedBranch.flatMap((page) =>
+          page.blocks.flatMap((block) =>
+            block.type === 'synced_block' ? [block.groupId] : [],
+          ),
+        ),
+      )
       const updatedAt = new Date().toISOString()
       const nextPages = touchPagesWithChangedBlocks(
         state.pages,
         stripDeletedPageRelations(deletePageBranch(state.pages, pageId), deletedPageIds),
+        updatedAt,
+      )
+      const nextSyncedBlockGroups = reconcileSyncedBlockGroups(
+        nextPages,
+        state.syncedBlockGroups,
+        affectedSyncedGroupIds,
         updatedAt,
       )
       const nextResources = filterResourcesReferencedByPages(state, nextPages)
@@ -2384,11 +2667,18 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       const nextPinnedSidebarItems = (state.settings.pinnedSidebarItems ?? []).filter((item) =>
         nextPageIds.has(item.pageId),
       )
+      const nextInboxPageId =
+        state.settings.inboxPageId !== null &&
+        state.settings.inboxPageId !== undefined &&
+        nextPageIds.has(state.settings.inboxPageId)
+          ? state.settings.inboxPageId
+          : null
       const nextSettings = createSettings(
         nextCurrentPageId,
         state.settings.sidebarLayout ?? 'compact',
         state.settings.sidebarWidth ?? 272,
         nextPinnedSidebarItems,
+        nextInboxPageId,
       )
 
       pushUndoSnapshot(state)
@@ -2399,6 +2689,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           boards: nextResources.boards,
           dataTables: nextResources.dataTables,
           mindmaps: nextResources.mindmaps,
+          syncedBlockGroups: nextSyncedBlockGroups,
           pages: nextPages,
           settings: nextSettings,
         })
@@ -2407,6 +2698,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           boards: nextResources.boards,
           dataTables: nextResources.dataTables,
           mindmaps: nextResources.mindmaps,
+          syncedBlockGroups: nextSyncedBlockGroups,
           pages: nextPages,
           currentPageId: nextCurrentPageId,
           settings: nextSettings,
@@ -2418,17 +2710,364 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       }
     },
 
-    updateBlock: async (pageId: PageId, blockId: string, nextBlock: BlockRecord) => {
+    createSyncedBlockFromRange: async (pageId: PageId, startBlockId: string, endBlockId: string) => {
       const state = get()
-      const nextPages = state.pages.map((page) =>
-        page.id === pageId
+      const page = state.pages.find((item) => item.id === pageId)
+
+      if (!page) {
+        return null
+      }
+
+      const startIndex = page.blocks.findIndex((block) => block.id === startBlockId)
+      const endIndex = page.blocks.findIndex((block) => block.id === endBlockId)
+
+      if (startIndex < 0 || endIndex < 0) {
+        return null
+      }
+
+      const from = Math.min(startIndex, endIndex)
+      const to = Math.max(startIndex, endIndex)
+      const selectedBlocks = page.blocks.slice(from, to + 1)
+      const validation = validateSyncedGroupBlocks(selectedBlocks)
+
+      if (!validation.ok) {
+        return null
+      }
+
+      const now = new Date().toISOString()
+      const groupId = createId('group')
+      const instanceId = createId('instance')
+      const container = createSyncedBlockInstanceBlock(groupId, instanceId, 'sync')
+      const nextPages = state.pages.map((currentPage) =>
+        currentPage.id === pageId
+          ? {
+              ...currentPage,
+              updatedAt: now,
+              blocks: [
+                ...currentPage.blocks.slice(0, from),
+                container,
+                ...currentPage.blocks.slice(to + 1),
+              ],
+            }
+          : currentPage,
+      )
+      const nextSnapshot = createSnapshotFromState({
+        ...state,
+        pages: nextPages,
+        syncedBlockGroups: [
+          ...state.syncedBlockGroups,
+          {
+            id: groupId,
+            blocks: structuredClone(selectedBlocks),
+            primaryInstanceId: instanceId,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      })
+
+      pushUndoSnapshot(state)
+      set({
+        pages: nextSnapshot.pages,
+        syncedBlockGroups: nextSnapshot.syncedBlockGroups ?? [],
+        saveStatus: 'saving',
+      })
+
+      try {
+        await repository.save(nextSnapshot)
+        set({
+          pages: nextSnapshot.pages,
+          syncedBlockGroups: nextSnapshot.syncedBlockGroups ?? [],
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to create synced block')
+      }
+
+      return container
+    },
+
+    createSyncedBlockFromExistingBlock: async (
+      sourcePageId: PageId,
+      sourceBlockId: string,
+      targetPageId: PageId,
+      targetBlockId: string,
+      mode: SyncedBlockMode,
+    ) => {
+      const state = get()
+      const sourcePage = state.pages.find((page) => page.id === sourcePageId)
+      const targetPage = state.pages.find((page) => page.id === targetPageId)
+      const sourceBlock = sourcePage?.blocks.find((block) => block.id === sourceBlockId)
+      const targetBlock = targetPage?.blocks.find((block) => block.id === targetBlockId)
+
+      if (
+        !sourcePage ||
+        !targetPage ||
+        !sourceBlock ||
+        !targetBlock ||
+        sourceBlock.type === 'synced_block'
+      ) {
+        return null
+      }
+
+      const now = new Date().toISOString()
+      const groupId = createId('group')
+      const primaryInstanceId = createId('instance')
+      const primaryContainer = {
+        ...createSyncedBlockInstanceBlock(groupId, primaryInstanceId, 'sync'),
+        id: sourceBlockId,
+      }
+      const isSameLocation = sourcePageId === targetPageId && sourceBlockId === targetBlockId
+      const insertedContainer = isSameLocation
+        ? primaryContainer
+        : {
+            ...createSyncedBlockInstanceBlock(groupId, createId('instance'), mode),
+            id: targetBlockId,
+          }
+
+      const nextPages = state.pages.map((page) => {
+        if (page.id !== sourcePageId && page.id !== targetPageId) {
+          return page
+        }
+
+        let didChange = false
+        const blocks = page.blocks.map((block) => {
+          if (page.id === sourcePageId && block.id === sourceBlockId) {
+            didChange = true
+            return primaryContainer
+          }
+
+          if (!isSameLocation && page.id === targetPageId && block.id === targetBlockId) {
+            didChange = true
+            return insertedContainer
+          }
+
+          return block
+        })
+
+        return didChange
+          ? {
+              ...page,
+              updatedAt: now,
+              blocks,
+            }
+          : page
+      })
+
+      const nextSnapshot = createSnapshotFromState({
+        ...state,
+        pages: nextPages,
+        syncedBlockGroups: [
+          ...state.syncedBlockGroups,
+          {
+            id: groupId,
+            blocks: [structuredClone(sourceBlock)],
+            primaryInstanceId,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      })
+
+      pushUndoSnapshot(state)
+      set({
+        pages: nextSnapshot.pages,
+        syncedBlockGroups: nextSnapshot.syncedBlockGroups ?? [],
+        saveStatus: 'saving',
+      })
+
+      try {
+        await repository.save(nextSnapshot)
+        set({
+          pages: nextSnapshot.pages,
+          syncedBlockGroups: nextSnapshot.syncedBlockGroups ?? [],
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to create synced block from existing block')
+      }
+
+      return insertedContainer
+    },
+
+    replaceBlockWithSyncedInstance: async (
+      pageId: PageId,
+      blockId: string,
+      groupId: string,
+      mode: SyncedBlockMode,
+    ) => {
+      const state = get()
+
+      if (!state.syncedBlockGroups.some((group) => group.id === groupId)) {
+        return null
+      }
+
+      const container = createSyncedBlockInstanceBlock(groupId, createId('instance'), mode)
+      let didReplace = false
+      const nextPages = state.pages.map((page) => {
+        if (page.id !== pageId) {
+          return page
+        }
+
+        const blocks = page.blocks.map((block) => {
+          if (block.id !== blockId) {
+            return block
+          }
+
+          didReplace = true
+          return { ...container, id: blockId }
+        })
+
+        return didReplace
           ? {
               ...page,
               updatedAt: new Date().toISOString(),
-              blocks: page.blocks.map((block) => (block.id === blockId ? nextBlock : block)),
+              blocks,
             }
-          : page,
+          : page
+      })
+
+      if (!didReplace) {
+        return null
+      }
+
+      const nextSnapshot = createSnapshotFromState({ ...state, pages: nextPages })
+
+      pushUndoSnapshot(state)
+      set({
+        pages: nextPages,
+        saveStatus: 'saving',
+      })
+
+      try {
+        await repository.save(nextSnapshot)
+        set({
+          pages: nextPages,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to insert synced block')
+      }
+
+      return { ...container, id: blockId }
+    },
+
+    updateSyncedGroupBlock: async (groupId: string, blockId: string, nextBlock: BlockRecord) => {
+      const state = get()
+      const nextSyncedBlockGroups = state.syncedBlockGroups.map((group) =>
+        group.id === groupId
+          ? {
+              ...group,
+              updatedAt: new Date().toISOString(),
+              blocks: group.blocks.map((block) => (block.id === blockId ? nextBlock : block)),
+            }
+          : group,
       )
+
+      pushUndoSnapshot(state)
+      set({
+        syncedBlockGroups: nextSyncedBlockGroups,
+        saveStatus: 'saving',
+      })
+      scheduleBlockSave()
+    },
+
+    unsyncBlockInstance: async (pageId: PageId, blockId: string) => {
+      const state = get()
+      const page = state.pages.find((item) => item.id === pageId)
+      const containerIndex =
+        page?.blocks.findIndex((block) => block.id === blockId && block.type === 'synced_block') ?? -1
+      const container =
+        containerIndex >= 0 ? (page?.blocks[containerIndex] as SyncedBlockInstanceBlock) : null
+      const group = state.syncedBlockGroups.find((item) => item.id === container?.groupId)
+
+      if (!page || !container || !group || containerIndex < 0) {
+        return
+      }
+
+      const localBlocks = cloneBlocksForUnsync(group.blocks, () => createId('block'))
+      const nextSnapshotWithoutInstance = removeSyncedInstanceFromSnapshot(
+        createSnapshotFromState(state),
+        pageId,
+        blockId,
+      )
+      const now = new Date().toISOString()
+      const nextPages = nextSnapshotWithoutInstance.pages.map((currentPage) => {
+        if (currentPage.id !== pageId) {
+          return currentPage
+        }
+
+        const blocks = [...currentPage.blocks]
+        blocks.splice(containerIndex, 0, ...localBlocks)
+
+        return {
+          ...currentPage,
+          updatedAt: now,
+          blocks,
+        }
+      })
+      const nextSnapshot = {
+        ...nextSnapshotWithoutInstance,
+        pages: nextPages,
+      }
+
+      pushUndoSnapshot(state)
+      set({
+        pages: nextSnapshot.pages,
+        syncedBlockGroups: nextSnapshot.syncedBlockGroups ?? [],
+        saveStatus: 'saving',
+      })
+
+      try {
+        await repository.save(nextSnapshot)
+        set({
+          pages: nextSnapshot.pages,
+          syncedBlockGroups: nextSnapshot.syncedBlockGroups ?? [],
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to unsync block instance')
+      }
+    },
+
+    updateBlock: async (pageId: PageId, blockId: string, nextBlock: BlockRecord) => {
+      const state = get()
+      const now = new Date().toISOString()
+      let didUpdate = false
+      const nextPages = state.pages.map((page) => {
+        if (page.id !== pageId) {
+          return page
+        }
+
+        const blocks = page.blocks.map((block) => {
+          if (block.id !== blockId) {
+            return block
+          }
+
+          if (block.type !== nextBlock.type) {
+            return block
+          }
+
+          didUpdate = true
+          return nextBlock
+        })
+
+        return didUpdate
+          ? {
+              ...page,
+              updatedAt: now,
+              blocks,
+            }
+          : page
+      })
+
+      if (!didUpdate) {
+        return
+      }
 
       pushUndoSnapshot(state)
       set({
@@ -2550,6 +3189,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           boards: nextBoards,
           dataTables: nextDataTables,
           mindmaps: nextMindmaps,
+          syncedBlockGroups: state.syncedBlockGroups,
           pages: snapshotPages,
           settings: state.settings,
         })
@@ -2692,6 +3332,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           boards: nextBoards,
           dataTables: nextDataTables,
           mindmaps: nextMindmaps,
+          syncedBlockGroups: state.syncedBlockGroups,
           pages: snapshotPages,
           settings: state.settings,
         })
@@ -2773,6 +3414,38 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
     deleteBlock: async (pageId: PageId, blockId: string) => {
       const state = get()
+      const syncedContainer = state.pages
+        .find((page) => page.id === pageId)
+        ?.blocks.find(
+          (block): block is SyncedBlockInstanceBlock =>
+            block.id === blockId && block.type === 'synced_block',
+        )
+
+      if (syncedContainer) {
+        const nextSnapshot = removeSyncedInstanceFromSnapshot(createSnapshotFromState(state), pageId, blockId)
+
+        pushUndoSnapshot(state)
+        set({
+          pages: nextSnapshot.pages,
+          syncedBlockGroups: nextSnapshot.syncedBlockGroups ?? [],
+          saveStatus: 'saving',
+        })
+
+        try {
+          await repository.save(nextSnapshot)
+          set({
+            pages: nextSnapshot.pages,
+            syncedBlockGroups: nextSnapshot.syncedBlockGroups ?? [],
+            saveStatus: 'saved',
+          })
+        } catch {
+          set({ saveStatus: 'error' })
+          throw new Error('Failed to delete block')
+        }
+
+        return
+      }
+
       const nextPages = state.pages.map((page) =>
         page.id === pageId
           ? {
@@ -2945,6 +3618,21 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           }
         }
 
+        if (source.type === 'synced_block') {
+          const clone = {
+            ...structuredClone(source),
+            id: createId('block'),
+            instanceId: createId('instance'),
+          }
+          blocks.splice(index + 1, 0, clone)
+
+          return {
+            ...page,
+            updatedAt: now,
+            blocks,
+          }
+        }
+
         const clone = { ...structuredClone(source), id: createId('block') }
         blocks.splice(index + 1, 0, clone)
 
@@ -2963,6 +3651,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           boards: nextBoards,
           dataTables: nextDataTables,
           mindmaps: nextMindmaps,
+          syncedBlockGroups: state.syncedBlockGroups,
           pages: nextPages,
           settings: state.settings,
         })
@@ -3035,6 +3724,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           boards: nextBoards,
           dataTables: nextDataTables,
           mindmaps: nextMindmaps,
+          syncedBlockGroups: state.syncedBlockGroups,
           pages: nextPages,
           settings: state.settings,
         })
@@ -3073,6 +3763,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           boards: snapshot.boards,
           dataTables: snapshot.dataTables ?? [],
           mindmaps: snapshot.mindmaps ?? [],
+          syncedBlockGroups: snapshot.syncedBlockGroups ?? [],
           pages: snapshot.pages,
           pageProperties: snapshot.pageProperties ?? [],
           settings: snapshot.settings,
@@ -3109,6 +3800,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
           boards: snapshot.boards,
           dataTables: snapshot.dataTables ?? [],
           mindmaps: snapshot.mindmaps ?? [],
+          syncedBlockGroups: snapshot.syncedBlockGroups ?? [],
           pages: snapshot.pages,
           pageProperties: snapshot.pageProperties ?? [],
           settings: snapshot.settings,

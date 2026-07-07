@@ -8,6 +8,8 @@ interface ParagraphBlockProps {
   richText?: RichTextSegment[]
   variant?: 'paragraph' | 'heading_1' | 'heading_2' | 'heading_3'
   style?: CSSProperties
+  placeholder?: string
+  insertMode?: boolean
   onChange: (next: RichTextEditableChange) => void
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>
   relationPages?: PageRelationAutocompleteItem[]
@@ -20,6 +22,8 @@ export function ParagraphBlock({
   richText,
   variant = 'paragraph',
   style,
+  placeholder = '输入正文',
+  insertMode = false,
   onChange,
   onKeyDown,
   relationPages,
@@ -32,7 +36,7 @@ export function ParagraphBlock({
   return (
     <RichTextEditable
       ariaLabel="输入正文"
-      className={`block-input ${blockClassName}`}
+      className={`block-input ${blockClassName}${insertMode ? ' block-input-insert' : ''}`}
       value={value}
       richText={richText}
       style={style}
@@ -41,7 +45,7 @@ export function ParagraphBlock({
       relationPages={relationPages}
       onOpenPageRelation={onOpenPageRelation}
       onCreatePageRelation={onCreatePageRelation}
-      placeholder="输入正文"
+      placeholder={placeholder}
     />
   )
 }

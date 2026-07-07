@@ -7,6 +7,7 @@ import type {
   MindmapRecord,
   PagePropertyDefinition,
   PageRecord,
+  SyncedBlockGroupRecord,
 } from '../../domain/types'
 import {
   searchBoards,
@@ -24,6 +25,7 @@ interface SearchDialogProps {
   boards?: BoardRecord[]
   dataTables?: DataTableRecord[]
   mindmaps?: MindmapRecord[]
+  syncedBlockGroups?: SyncedBlockGroupRecord[]
   onSearch?: (query: string) => Promise<AsyncSearchResult[]>
   onClose: () => void
   onOpenPage: (pageId: string, blockId?: string) => void
@@ -32,7 +34,15 @@ interface SearchDialogProps {
   onOpenDataTable?: (pageId: string, databaseId: string, recordId?: string) => void
 }
 
-type SearchFilter = 'all' | 'page' | 'whiteboard' | 'mindmap' | 'data_table' | 'tags' | 'status'
+type SearchFilter =
+  | 'all'
+  | 'page'
+  | 'media'
+  | 'whiteboard'
+  | 'mindmap'
+  | 'data_table'
+  | 'tags'
+  | 'status'
 type AsyncSearchResult = Omit<SearchResult, 'matchSource' | 'sourceLabel'> & {
   matchSource?: SearchResult['matchSource']
   matchKey?: string
@@ -51,6 +61,7 @@ export function SearchDialog({
   boards = [],
   dataTables = [],
   mindmaps = [],
+  syncedBlockGroups = [],
   onSearch,
   onClose,
   onOpenPage,
@@ -65,12 +76,12 @@ export function SearchDialog({
   const inputRef = useRef<HTMLInputElement | null>(null)
   const localResults = useMemo(
     () => [
-      ...searchPages(pages, pageProperties, query),
+      ...searchPages(pages, pageProperties, syncedBlockGroups, query),
       ...searchBoards(pages, boards, query),
       ...searchMindmaps(pages, mindmaps, query),
       ...searchDataTables(pages, dataTables, query),
     ],
-    [boards, dataTables, mindmaps, pageProperties, pages, query],
+    [boards, dataTables, mindmaps, pageProperties, pages, query, syncedBlockGroups],
   )
   const results = onSearch ? asyncResults : localResults
   const filteredResults = useMemo(() => {
@@ -88,15 +99,26 @@ export function SearchDialog({
       )
     }
 
+    if (activeFilter === 'media') {
+      return results.filter((result) => result.matchSource === 'media')
+    }
+
     return results.filter((result) => result.kind === activeFilter)
   }, [activeFilter, results])
   const groupedResults = useMemo(
     () =>
       [
         {
+          key: 'media',
+          label: '媒体',
+          results: filteredResults.filter((result) => result.matchSource === 'media'),
+        },
+        {
           key: 'page',
           label: uiCopy.search.groups.page,
-          results: filteredResults.filter((result) => result.kind === 'page'),
+          results: filteredResults.filter(
+            (result) => result.kind === 'page' && result.matchSource !== 'media',
+          ),
         },
         {
           key: 'whiteboard',
@@ -184,6 +206,20 @@ export function SearchDialog({
       openResult(selectedResult)
     }
   }
+
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+
+    const root = document.documentElement
+    const previousOverflow = root.style.overflow
+    root.style.overflow = 'hidden'
+
+    return () => {
+      root.style.overflow = previousOverflow
+    }
+  }, [open])
 
   useEffect(() => {
     if (!open) {
@@ -470,6 +506,7 @@ function getFilterOptions(): Array<{ key: SearchFilter; label: string }> {
   return [
     { key: 'all', label: uiCopy.search.filters.all },
     { key: 'page', label: uiCopy.search.filters.page },
+    { key: 'media', label: '媒体' },
     { key: 'whiteboard', label: uiCopy.search.filters.whiteboard },
     { key: 'mindmap', label: uiCopy.search.filters.mindmap },
     { key: 'data_table', label: uiCopy.search.filters.dataTable },

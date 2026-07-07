@@ -45,4 +45,16 @@ describe('EmptyBlockRow', () => {
     expect(onInsert).toHaveBeenCalledWith('heading_1')
     expect(screen.queryByRole('button', { name: '标题 1' })).not.toBeInTheDocument()
   })
+
+  it('inserts an empty paragraph when pressing Enter on an empty row', async () => {
+    const user = userEvent.setup()
+    const onInsert = vi.fn()
+
+    render(<EmptyBlockRow onInsert={onInsert} />)
+
+    await user.click(screen.getByRole('textbox'))
+    await user.keyboard('{Enter}')
+
+    expect(onInsert).toHaveBeenCalledWith('paragraph')
+  })
 })

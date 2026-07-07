@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { normalizeWorkspaceSnapshot as normalizePagePropertiesWorkspaceSnapshot } from '../domain/pageProperties'
 import { createSeedWorkspace } from '../domain/seed'
 import type { DataTableRecord, MindmapRecord, WorkspaceSnapshot } from '../domain/types'
 import type { WorkspaceStorageClient } from './storageClient'
@@ -113,6 +114,7 @@ function createSnapshot(): WorkspaceSnapshot {
       },
     ],
     pageProperties: [],
+    syncedBlockGroups: [],
     pages: [
       {
         id: 'page_1',
@@ -140,6 +142,13 @@ function createSnapshot(): WorkspaceSnapshot {
   }
 }
 
+function normalizeExpectedSnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
+  return {
+    ...normalizePagePropertiesWorkspaceSnapshot(snapshot),
+    syncedBlockGroups: snapshot.syncedBlockGroups ?? [],
+  }
+}
+
 describe('createStorageWorkspaceRepository', () => {
   it('uses browser local storage when Tauri is unavailable', async () => {
     Reflect.deleteProperty(globalThis, '__TAURI_INTERNALS__')
@@ -163,7 +172,7 @@ describe('createStorageWorkspaceRepository', () => {
     expect(JSON.parse(window.localStorage.getItem('zhixi.workspace.snapshot.v1') ?? 'null')).toEqual(
       nextSnapshot,
     )
-    await expect(repository.load()).resolves.toEqual(nextSnapshot)
+    await expect(repository.load()).resolves.toEqual(normalizeExpectedSnapshot(nextSnapshot))
   })
 
   it('seeds empty storage through the bootstrap helper', async () => {
@@ -175,7 +184,7 @@ describe('createStorageWorkspaceRepository', () => {
     const snapshot = await ensureSnapshot(repository, seed)
 
     expect(snapshot).toEqual(seed)
-    expect(await repository.load()).toEqual(seed)
+    expect(await repository.load()).toEqual(normalizeExpectedSnapshot(seed))
   })
 
   it('preserves an explicitly empty persisted workspace', async () => {
@@ -195,7 +204,7 @@ describe('createStorageWorkspaceRepository', () => {
 
     await repository.save(emptySnapshot)
 
-    expect(await repository.load()).toEqual(emptySnapshot)
+    expect(await repository.load()).toEqual(normalizeExpectedSnapshot(emptySnapshot))
   })
 
   it('replaces stored data and removes records that no longer exist', async () => {
@@ -220,7 +229,7 @@ describe('createStorageWorkspaceRepository', () => {
     await repository.save(original)
     await repository.replace(next)
 
-    expect(await repository.load()).toEqual(next)
+    expect(await repository.load()).toEqual(normalizeExpectedSnapshot(next))
   })
 
   it('preserves page order when data is loaded back from SQLite', async () => {
@@ -261,6 +270,7 @@ describe('createStorageWorkspaceRepository', () => {
     await expect(repository.load()).resolves.toEqual({
       ...legacySnapshot,
       pageProperties: [],
+      syncedBlockGroups: [],
       pages: [
         {
           ...legacySnapshot.pages[0],
@@ -268,6 +278,112 @@ describe('createStorageWorkspaceRepository', () => {
         },
       ],
     })
+  })
+
+  it('fills missing syncedBlockGroups for legacy snapshots', async () => {
+    const { repository } = createRepository()
+    const legacySnapshot: WorkspaceSnapshot = {
+      ...createSnapshot(),
+      syncedBlockGroups: undefined,
+    }
+
+    await repository.replace(legacySnapshot)
+
+    await expect(repository.load()).resolves.toEqual({
+      ...legacySnapshot,
+      syncedBlockGroups: [],
+    })
+  })
+
+  it('repairs malformed synced groups when loading a snapshot', async () => {
+    const { repository } = createRepository()
+    const snapshot: WorkspaceSnapshot = {
+      ...createSnapshot(),
+      syncedBlockGroups: [
+        {
+          id: 'group_keep',
+          blocks: [{ id: 'group_block_1', type: 'paragraph', text: 'Shared keep' }],
+          primaryInstanceId: 'instance_missing',
+          createdAt: '2026-07-07T00:00:00.000Z',
+          updatedAt: '2026-07-07T00:00:00.000Z',
+        },
+        {
+          id: 'group_drop',
+          blocks: [{ id: 'group_block_2', type: 'paragraph', text: 'Shared drop' }],
+          primaryInstanceId: 'instance_drop',
+          createdAt: '2026-07-07T00:00:00.000Z',
+          updatedAt: '2026-07-07T00:00:00.000Z',
+        },
+      ],
+      pages: [
+        {
+          ...createSnapshot().pages[0],
+          blocks: [
+            {
+              id: 'container_1',
+              type: 'synced_block',
+              groupId: 'group_keep',
+              instanceId: 'instance_2',
+              mode: 'sync',
+            },
+          ],
+        },
+      ],
+    }
+
+    await repository.replace(snapshot)
+
+    await expect(repository.load()).resolves.toMatchObject({
+      syncedBlockGroups: [
+        {
+          id: 'group_keep',
+          primaryInstanceId: 'instance_2',
+        },
+      ],
+    })
+  })
+
+  it('recovers orphan synced groups into a recovery page during load', async () => {
+    const { calls, repository } = createRepository()
+    const snapshot: WorkspaceSnapshot = {
+      ...createSnapshot(),
+      syncedBlockGroups: [
+        {
+          id: 'group_orphan',
+          blocks: [{ id: 'group_block_1', type: 'paragraph', text: 'Recovered shared block' }],
+          primaryInstanceId: 'instance_missing',
+          createdAt: '2026-07-07T00:00:00.000Z',
+          updatedAt: '2026-07-07T00:00:00.000Z',
+        },
+      ],
+      pages: [
+        {
+          ...createSnapshot().pages[0],
+          blocks: [{ id: 'block_plain', type: 'paragraph', text: 'Existing page content' }],
+        },
+      ],
+    }
+
+    await repository.replace(snapshot)
+    calls.length = 0
+    const loaded = await repository.load()
+    const recoveryPage = loaded?.pages.find((page) => page.title === '同步块恢复')
+    const recoveryBlock = recoveryPage?.blocks[0]
+
+    expect(recoveryBlock).toEqual(
+      expect.objectContaining({
+        type: 'synced_block',
+        groupId: 'group_orphan',
+        mode: 'sync',
+      }),
+    )
+    expect(loaded?.syncedBlockGroups).toEqual([
+      expect.objectContaining({
+        id: 'group_orphan',
+        primaryInstanceId: (recoveryBlock as { instanceId: string }).instanceId,
+      }),
+    ])
+    expect(calls).toEqual(['replaceWorkspaceBackup'])
   })
 
   it('preserves persisted data tables and mindmaps when saving a legacy snapshot', async () => {
@@ -291,11 +407,11 @@ describe('createStorageWorkspaceRepository', () => {
 
     await repository.save(nextSnapshot)
 
-    await expect(repository.load()).resolves.toEqual({
+    await expect(repository.load()).resolves.toEqual(normalizeExpectedSnapshot({
       ...nextSnapshot,
       dataTables: [persistedDataTable],
       mindmaps: [persistedMindmap],
-    })
+    }))
   })
 
   it('persists page property definition changes instead of skipping incremental save', async () => {
@@ -310,6 +426,46 @@ describe('createStorageWorkspaceRepository', () => {
           name: '状态',
           type: 'select',
           config: {},
+          createdAt: '2026-06-15T00:00:00.000Z',
+          updatedAt: '2026-06-15T00:00:00.000Z',
+        },
+      ],
+    }
+
+    await repository.replace(original)
+    calls.length = 0
+    await repository.save(next)
+
+    expect(calls).toEqual(['replaceWorkspaceBackup'])
+    await expect(repository.load()).resolves.toEqual(normalizeExpectedSnapshot(next))
+  })
+
+  it('falls back to a full replace when only syncedBlockGroups change', async () => {
+    const { calls, repository } = createRepository()
+    const original: WorkspaceSnapshot = {
+      ...createSnapshot(),
+      pages: [
+        {
+          ...createSnapshot().pages[0],
+          blocks: [
+            {
+              id: 'container_1',
+              type: 'synced_block',
+              groupId: 'group_1',
+              instanceId: 'instance_1',
+              mode: 'sync',
+            },
+          ],
+        },
+      ],
+    }
+    const next: WorkspaceSnapshot = {
+      ...original,
+      syncedBlockGroups: [
+        {
+          id: 'group_1',
+          blocks: [{ id: 'block_synced_1', type: 'paragraph', text: 'Shared' }],
+          primaryInstanceId: 'instance_1',
           createdAt: '2026-06-15T00:00:00.000Z',
           updatedAt: '2026-06-15T00:00:00.000Z',
         },

@@ -3,8 +3,10 @@ import { useEffect } from 'react'
 import type { BlockType } from '../../domain/types'
 import type { FloatingMenuPlacement } from './floatingMenu'
 
+export type SlashMenuCommand = BlockType | 'synced_block_sync' | 'synced_block_reference'
+
 interface SlashMenuOption {
-  type: BlockType
+  type: SlashMenuCommand
   label: string
   description: string
   icon: string
@@ -131,6 +133,20 @@ const options: SlashMenuOption[] = [
     icon: '▦',
     group: 'page_data',
   },
+  {
+    type: 'synced_block_sync',
+    label: '同步块',
+    description: '插入一个可联动编辑的共享内容块',
+    icon: '⇄',
+    group: 'page_data',
+  },
+  {
+    type: 'synced_block_reference',
+    label: '引用块',
+    description: '插入一个只读的同步内容引用',
+    icon: '↗',
+    group: 'page_data',
+  },
 ]
 
 const groups: Array<{
@@ -145,12 +161,12 @@ const groups: Array<{
 
 interface SlashMenuProps {
   query: string
-  activeType?: BlockType | null
+  activeType?: SlashMenuCommand | null
   allowedBlockTypes?: BlockType[]
   menuRef?: RefObject<HTMLDivElement | null>
   placement?: FloatingMenuPlacement
   maxHeight?: number
-  onPick: (type: BlockType) => void
+  onPick: (type: SlashMenuCommand) => void
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
@@ -158,13 +174,19 @@ export function getSlashMenuOptions(query: string, allowedBlockTypes?: BlockType
   const keyword = query.replace('/', '').trim()
   const allowedTypes = allowedBlockTypes ? new Set(allowedBlockTypes) : null
 
-  return options.filter(
-    (option) =>
-      (!allowedTypes || allowedTypes.has(option.type)) &&
-      (keyword.length === 0 ||
-        option.label.includes(keyword) ||
-        option.description.includes(keyword)),
-  )
+  return options.filter((option) => {
+    const typeAllowed = !allowedTypes
+      ? true
+      : isNativeBlockTypeCommand(option.type)
+        ? allowedTypes.has(option.type)
+        : allowedTypes.has('synced_block')
+    const keywordMatched =
+      keyword.length === 0 ||
+      option.label.includes(keyword) ||
+      option.description.includes(keyword)
+
+    return typeAllowed && keywordMatched
+  })
 }
 
 export function SlashMenu({
@@ -248,4 +270,8 @@ export function SlashMenu({
       )}
     </div>
   )
+}
+
+function isNativeBlockTypeCommand(command: SlashMenuCommand): command is BlockType {
+  return command !== 'synced_block_sync' && command !== 'synced_block_reference'
 }

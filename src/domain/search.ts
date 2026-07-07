@@ -8,6 +8,7 @@ import type {
   MindmapRecord,
   PagePropertyDefinition,
   PageRecord,
+  SyncedBlockGroupRecord,
 } from './types'
 
 export interface SearchResult {
@@ -28,6 +29,8 @@ export interface SearchResult {
     | 'media'
     | 'page_link'
     | 'page_mention'
+    | 'synced_block'
+    | 'reference_block'
     | 'whiteboard'
     | 'whiteboard_title'
     | 'whiteboard_content'
@@ -51,6 +54,7 @@ interface SearchEntry {
 export function searchPages(
   pages: PageRecord[],
   definitions: PagePropertyDefinition[],
+  syncedBlockGroups: SyncedBlockGroupRecord[],
   query: string,
 ): SearchResult[] {
   const normalizedQuery = normalizeSearchText(query)
@@ -60,13 +64,16 @@ export function searchPages(
   }
 
   const pageTitleById = new Map(pages.map((page) => [page.id, page.title]))
+  const syncedGroupMap = new Map(syncedBlockGroups.map((group) => [group.id, group]))
   const results: SearchResult[] = []
 
   for (const page of pages) {
     const entries: SearchEntry[] = [
       createSearchEntry(page.title, 'title', '标题'),
       ...getPropertySearchEntries(page, definitions),
-      ...page.blocks.flatMap((block) => getBlockSearchEntries(block, pageTitleById)),
+      ...page.blocks.flatMap((block) =>
+        getBlockSearchEntries(block, pageTitleById, syncedGroupMap),
+      ),
     ].flatMap((entry) => (entry ? [entry] : []))
 
     for (const entry of entries) {
@@ -132,7 +139,7 @@ export function searchBoards(
         pageId,
         boardId: board.id,
         title: board.title,
-        icon: '◻',
+        icon: '◌',
         excerpt: titleExcerpt,
         matchSource: titleEntry.matchSource,
         sourceLabel: titleEntry.sourceLabel,
@@ -151,7 +158,7 @@ export function searchBoards(
         pageId,
         boardId: board.id,
         title: board.title,
-        icon: '◻',
+        icon: '◌',
         excerpt: entry.excerpt,
         matchSource: entry.matchSource,
         sourceLabel: entry.sourceLabel,
@@ -208,7 +215,7 @@ export function searchMindmaps(
         pageId,
         mindmapId: mindmap.id,
         title: displayTitle,
-        icon: '🧭',
+        icon: '🧠',
         excerpt: titleExcerpt,
         matchSource: 'mindmap_title',
         sourceLabel: '导图标题',
@@ -231,7 +238,7 @@ export function searchMindmaps(
         pageId,
         mindmapId: mindmap.id,
         title: displayTitle,
-        icon: '🧭',
+        icon: '🧠',
         excerpt: entry.excerpt,
         matchSource: entry.matchSource,
         sourceLabel: entry.sourceLabel,
@@ -346,7 +353,29 @@ function getPropertySearchEntries(
 function getBlockSearchEntries(
   block: BlockRecord,
   pageTitleById: Map<string, string>,
+  syncedGroupMap: Map<string, SyncedBlockGroupRecord>,
 ): SearchEntry[] {
+  if (block.type === 'synced_block') {
+    const group = syncedGroupMap.get(block.groupId)
+
+    if (!group) {
+      return []
+    }
+
+    return group.blocks.flatMap((innerBlock) => {
+      if (innerBlock.type === 'synced_block') {
+        return []
+      }
+
+      return getBlockSearchEntries(innerBlock, pageTitleById, syncedGroupMap).map((entry) => ({
+        ...entry,
+        blockId: block.id,
+        matchSource: block.mode === 'reference' ? 'reference_block' : 'synced_block',
+        sourceLabel: block.mode === 'reference' ? '引用块内容' : '同步块内容',
+      }))
+    })
+  }
+
   const relationEntries = getRichTextRelationEntries(block)
   const bodyEntry = getBlockSearchEntry(block, pageTitleById)
 
@@ -394,6 +423,7 @@ function getBlockSearchEntry(
     case 'heading_2':
     case 'heading_3':
     case 'todo':
+      return createSearchEntry(getVisibleTextBlockContent(block), 'body', '正文', block.id)
     case 'code':
       return createSearchEntry(block.text, 'body', '正文', block.id)
     case 'bulleted_list':
@@ -414,12 +444,26 @@ function getBlockSearchEntry(
       return createSearchEntry('数据表格', 'data_table', '数据表格', block.id)
     case 'mindmap':
       return createSearchEntry('导图', 'body', '导图', block.id)
+    case 'synced_block':
+      return null
   }
+}
+
+function getVisibleTextBlockContent(
+  block: Extract<BlockRecord, { type: 'paragraph' | 'heading_1' | 'heading_2' | 'heading_3' | 'todo' }>,
+) {
+  const richTextContent = richTextToPlainText(
+    normalizeRichText(block.richText ?? [{ text: block.text }]),
+  ).trim()
+
+  return richTextContent || block.text
 }
 
 function createMediaSearchEntry(parts: string[], blockId?: string) {
   const trimmedParts = parts.map((part) => part.trim()).filter(Boolean)
-  const excerpt = trimmedParts[0] ?? ''
+  const fileName = trimmedParts[0] ?? ''
+  const description = Array.from(new Set(trimmedParts.slice(1))).join(' / ')
+  const excerpt = description ? `${fileName} / ${description}` : fileName
 
   if (!excerpt) {
     return null
@@ -429,7 +473,7 @@ function createMediaSearchEntry(parts: string[], blockId?: string) {
     excerpt,
     searchText: buildSearchText([
       ...trimmedParts,
-      ...buildFileNameSearchAliases(trimmedParts[0] ?? ''),
+      ...buildFileNameSearchAliases(fileName),
     ]),
     matchSource: 'media' as const,
     sourceLabel: '媒体',

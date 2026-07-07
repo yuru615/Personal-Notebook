@@ -84,6 +84,18 @@ describe('app shell layout', () => {
     expect(utilityMenuPopover).toContain('z-index: 64;')
   })
 
+  it('lets sidebar popovers shrink and scroll inside small app windows', () => {
+    const pageMenuPopover = cssRule('.sidebar-tree-page-menu-popover')
+    const utilityMenuPopover = cssRule('.sidebar-utility-menu-popover')
+
+    expect(pageMenuPopover).toContain('width: min(176px, calc(100vw - 24px));')
+    expect(pageMenuPopover).toContain('max-height:')
+    expect(pageMenuPopover).toContain('overflow: auto;')
+    expect(utilityMenuPopover).toContain('width: min(164px, calc(100vw - 24px));')
+    expect(utilityMenuPopover).toContain('max-height:')
+    expect(utilityMenuPopover).toContain('overflow: auto;')
+  })
+
   it('uses the small body text size for sidebar tree links', () => {
     const sidebarLink = cssRule('.sidebar-link')
 

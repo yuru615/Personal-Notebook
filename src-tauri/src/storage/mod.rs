@@ -26,7 +26,8 @@ pub use models::PagePackageImportResult;
 pub use models::{
     AssetMeta, BoardRecord, BootstrapPayload, DataTableRecord, DeleteResult, ImportAssetFileInput,
     LoadedPage, MindmapRecord, PageMeta, PagePackageManifest, PagePropertyDefinition, PageRecord,
-    SaveResult, SearchResult, WorkspaceSettings, WorkspaceSnapshot, WriteAssetInput,
+    SaveResult, SearchResult, SyncedBlockGroupRecord, WorkspaceSettings, WorkspaceSnapshot,
+    WriteAssetInput,
 };
 
 const DATABASE_FILE_NAME: &str = "zhixi.db";
@@ -174,6 +175,7 @@ impl Storage {
             boards: self.load_boards()?,
             data_tables: self.load_data_tables()?,
             mindmaps: self.load_mindmaps()?,
+            synced_block_groups: self.load_synced_block_groups()?,
             settings: self.load_settings()?,
         })
     }
@@ -187,6 +189,7 @@ impl Storage {
             boards: self.load_boards()?,
             data_tables: self.load_data_tables()?,
             mindmaps: self.load_mindmaps()?,
+            synced_block_groups: self.load_synced_block_groups()?,
             pages: self.load_pages()?,
             page_properties: self.load_page_properties()?,
             settings,
@@ -219,7 +222,10 @@ impl Storage {
             for (position, mindmap) in snapshot.mindmaps.iter().enumerate() {
                 self.insert_mindmap(mindmap, position)?;
             }
-            self.rebuild_resource_search_documents()?;
+            for group in &snapshot.synced_block_groups {
+                self.insert_synced_block_group(group)?;
+            }
+            self.rebuild_search_documents()?;
 
             Ok(())
         })
@@ -446,9 +452,37 @@ impl Storage {
         if let Some(root_page) = pages.iter_mut().find(|page| page.id == page_id) {
             root_page.parent_id = None;
         }
-        let board_ids = collect_ref_ids_from_pages(&pages, "board");
-        let data_table_ids = collect_ref_ids_from_pages(&pages, "data_table");
-        let mindmap_ids = collect_ref_ids_from_pages(&pages, "mindmap");
+        let synced_group_ids = collect_synced_group_ids_from_pages(&pages);
+        let synced_block_groups = normalize_exported_synced_block_groups(
+            self.load_synced_block_groups()?
+                .into_iter()
+                .filter(|group| synced_group_ids.iter().any(|id| id == &group.id))
+                .collect::<Vec<_>>(),
+            &pages,
+        );
+        ensure_resource_ids_exist(
+            &synced_group_ids,
+            synced_block_groups.iter().map(|group| group.id.as_str()),
+            "synced block group",
+        )?;
+        let mut board_ids = collect_ref_ids_from_pages(&pages, "board");
+        for board_id in collect_ref_ids_from_synced_groups(&synced_block_groups, "board") {
+            if !board_ids.iter().any(|existing| existing == &board_id) {
+                board_ids.push(board_id);
+            }
+        }
+        let mut data_table_ids = collect_ref_ids_from_pages(&pages, "data_table");
+        for data_table_id in collect_ref_ids_from_synced_groups(&synced_block_groups, "data_table") {
+            if !data_table_ids.iter().any(|existing| existing == &data_table_id) {
+                data_table_ids.push(data_table_id);
+            }
+        }
+        let mut mindmap_ids = collect_ref_ids_from_pages(&pages, "mindmap");
+        for mindmap_id in collect_ref_ids_from_synced_groups(&synced_block_groups, "mindmap") {
+            if !mindmap_ids.iter().any(|existing| existing == &mindmap_id) {
+                mindmap_ids.push(mindmap_id);
+            }
+        }
         let boards = self
             .load_boards()?
             .into_iter()
@@ -480,6 +514,11 @@ impl Storage {
             "mindmap",
         )?;
         let mut asset_ids = collect_asset_ids_from_pages(&pages);
+        for asset_id in collect_asset_ids_from_synced_groups(&synced_block_groups) {
+            if !asset_ids.iter().any(|existing| existing == &asset_id) {
+                asset_ids.push(asset_id);
+            }
+        }
         for asset_id in collect_asset_ids_from_data_tables(&data_tables) {
             if !asset_ids.iter().any(|existing| existing == &asset_id) {
                 asset_ids.push(asset_id);
@@ -494,6 +533,7 @@ impl Storage {
             boards,
             data_tables,
             mindmaps,
+            synced_block_groups,
             assets,
         };
 
@@ -698,6 +738,7 @@ impl Storage {
         let mut board_reserved_ids = std::collections::HashSet::new();
         let mut data_table_reserved_ids = std::collections::HashSet::new();
         let mut mindmap_reserved_ids = std::collections::HashSet::new();
+        let mut synced_group_reserved_ids = std::collections::HashSet::new();
         for page in &manifest.pages {
             page_id_map.insert(
                 page.id.clone(),
@@ -725,6 +766,38 @@ impl Storage {
                 mindmap.id.clone(),
                 self.import_record_id("mindmap", "zhixi_mindmaps", &mut mindmap_reserved_ids)?,
             );
+        }
+        let mut synced_group_id_map = std::collections::HashMap::new();
+        for group in &manifest.synced_block_groups {
+            synced_group_id_map.insert(
+                group.id.clone(),
+                self.import_record_id(
+                    "synced_group",
+                    "zhixi_synced_block_groups",
+                    &mut synced_group_reserved_ids,
+                )?,
+            );
+        }
+        let mut synced_instance_id_map = std::collections::HashMap::new();
+        for page in &manifest.pages {
+            for block in &page.blocks {
+                let Some(object) = block.as_object() else {
+                    continue;
+                };
+                if object.get("type").and_then(Value::as_str) != Some("synced_block") {
+                    continue;
+                }
+                let Some(instance_id) = object
+                    .get("instanceId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+                else {
+                    continue;
+                };
+                synced_instance_id_map
+                    .entry(instance_id)
+                    .or_insert_with(|| import_id("instance", &mut counter));
+            }
         }
 
         let root_page_id = page_id_map
@@ -821,6 +894,27 @@ impl Storage {
                 mindmap_position += 1;
             }
 
+            for group in &manifest.synced_block_groups {
+                let mut next_group = group.clone();
+                next_group.id = synced_group_id_map[&group.id].clone();
+                next_group.primary_instance_id = synced_instance_id_map
+                    .get(&group.primary_instance_id)
+                    .cloned()
+                    .unwrap_or_else(|| group.primary_instance_id.clone());
+                rewrite_block_ids_and_refs(
+                    &mut next_group.blocks,
+                    &page_id_map,
+                    &board_id_map,
+                    &data_table_id_map,
+                    &mindmap_id_map,
+                    &asset_id_map,
+                    &synced_group_id_map,
+                    &synced_instance_id_map,
+                    &mut counter,
+                );
+                self.insert_synced_block_group(&next_group)?;
+            }
+
             let mut page_position = self.next_position("zhixi_pages");
             for page in ordered_pages {
                 let mut next_page = page.clone();
@@ -839,6 +933,8 @@ impl Storage {
                     &data_table_id_map,
                     &mindmap_id_map,
                     &asset_id_map,
+                    &synced_group_id_map,
+                    &synced_instance_id_map,
                     &mut counter,
                 );
                 self.insert_page(&next_page, page_position)?;
@@ -911,6 +1007,7 @@ impl Storage {
             "zhixi_mindmaps",
             "zhixi_board_snapshots",
             "zhixi_boards",
+            "zhixi_synced_block_groups",
             "zhixi_block_refs",
             "zhixi_page_contents",
             "zhixi_pages",
@@ -974,6 +1071,7 @@ impl Storage {
 
     fn insert_page(&self, page: &PageRecord, position: usize) -> StorageResult<()> {
         let page_property_definitions = self.load_page_properties()?;
+        let synced_block_groups = self.load_synced_block_groups()?;
         self.connection.execute(
             "INSERT INTO zhixi_pages
               (id, parent_id, title, icon, cover, is_full_width, is_small_text, font_family,
@@ -1018,7 +1116,12 @@ impl Storage {
             ],
         )?;
         self.replace_block_refs(page)?;
-        search::replace_page_document(&self.connection, page, &page_property_definitions)?;
+        search::replace_page_document(
+            &self.connection,
+            page,
+            &page_property_definitions,
+            &synced_block_groups,
+        )?;
         Ok(())
     }
 
@@ -1125,6 +1228,56 @@ impl Storage {
               ON CONFLICT(mindmap_id) DO UPDATE SET snapshot_json = excluded.snapshot_json",
             params![mindmap.id, serde_json::to_string(&mindmap.snapshot)?],
         )?;
+        Ok(())
+    }
+
+    fn insert_synced_block_group(&self, group: &SyncedBlockGroupRecord) -> StorageResult<()> {
+        self.connection.execute(
+            "INSERT INTO zhixi_synced_block_groups
+              (id, blocks_json, primary_instance_id, created_at, updated_at)
+              VALUES (?1, ?2, ?3, ?4, ?5)
+              ON CONFLICT(id) DO UPDATE SET
+                blocks_json = excluded.blocks_json,
+                primary_instance_id = excluded.primary_instance_id,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at",
+            params![
+                group.id,
+                serde_json::to_string(&group.blocks)?,
+                group.primary_instance_id,
+                group.created_at,
+                group.updated_at
+            ],
+        )?;
+        self.replace_synced_block_group_asset_refs(group)?;
+        Ok(())
+    }
+
+    fn replace_synced_block_group_asset_refs(
+        &self,
+        group: &SyncedBlockGroupRecord,
+    ) -> StorageResult<()> {
+        self.connection.execute(
+            "DELETE FROM zhixi_asset_refs WHERE owner_kind = 'synced_block_group' AND owner_id = ?1",
+            [&group.id],
+        )?;
+
+        for block in &group.blocks {
+            let Some(block_type) = block.get("type").and_then(Value::as_str) else {
+                continue;
+            };
+            if matches!(block_type, "image" | "video" | "audio") {
+                if let Some(asset_id) = block.get("assetId").and_then(Value::as_str) {
+                    self.connection.execute(
+                        "INSERT OR IGNORE INTO zhixi_asset_refs (asset_id, owner_kind, owner_id)
+                          SELECT ?1, 'synced_block_group', ?2
+                          WHERE EXISTS (SELECT 1 FROM zhixi_assets WHERE id = ?1)",
+                        params![asset_id, &group.id],
+                    )?;
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -1306,8 +1459,14 @@ impl Storage {
         self.connection.execute("DELETE FROM zhixi_search_documents", [])?;
 
         let page_property_definitions = self.load_page_properties()?;
+        let synced_block_groups = self.load_synced_block_groups()?;
         for page in self.load_pages()? {
-            search::replace_page_document(&self.connection, &page, &page_property_definitions)?;
+            search::replace_page_document(
+                &self.connection,
+                &page,
+                &page_property_definitions,
+                &synced_block_groups,
+            )?;
         }
         self.rebuild_resource_search_documents()
     }
@@ -1490,6 +1649,25 @@ impl Storage {
                 id: row.get(0)?,
                 title: row.get(1)?,
                 snapshot: serde_json::from_str(&snapshot_json).unwrap_or(Value::Null),
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn load_synced_block_groups(&self) -> StorageResult<Vec<SyncedBlockGroupRecord>> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, blocks_json, primary_instance_id, created_at, updated_at
+              FROM zhixi_synced_block_groups
+              ORDER BY rowid ASC",
+        )?;
+        let rows = statement.query_map([], |row| {
+            let blocks_json: String = row.get(1)?;
+            Ok(SyncedBlockGroupRecord {
+                id: row.get(0)?,
+                blocks: serde_json::from_str(&blocks_json).unwrap_or_default(),
+                primary_instance_id: row.get(2)?,
                 created_at: row.get(3)?,
                 updated_at: row.get(4)?,
             })
@@ -1684,6 +1862,14 @@ fn validate_page_package_manifest(manifest: &PagePackageManifest) -> StorageResu
         manifest.mindmaps.len(),
         "duplicate mindmap id in page package",
     )?;
+    let synced_group_ids = collect_unique_manifest_ids(
+        manifest
+            .synced_block_groups
+            .iter()
+            .map(|group| group.id.as_str()),
+        manifest.synced_block_groups.len(),
+        "duplicate synced block group id in page package",
+    )?;
     let asset_ids = collect_unique_manifest_ids(
         manifest.assets.iter().map(|asset| asset.id.as_str()),
         manifest.assets.len(),
@@ -1715,10 +1901,61 @@ fn validate_page_package_manifest(manifest: &PagePackageManifest) -> StorageResu
             validate_json_ref(block, "boardId", &board_ids, "board")?;
             validate_json_ref(block, "databaseId", &data_table_ids, "data table")?;
             validate_json_ref(block, "mindmapId", &mindmap_ids, "mindmap")?;
+            validate_json_ref(block, "groupId", &synced_group_ids, "synced block group")?;
             validate_json_ref(block, "assetId", &asset_ids, "asset")?;
         }
     }
     validate_page_package_tree_connected(manifest)?;
+
+    let mut synced_instances_by_group: std::collections::HashMap<&str, std::collections::HashSet<&str>> =
+        std::collections::HashMap::new();
+    for page in &manifest.pages {
+        for block in &page.blocks {
+            let Some(object) = block.as_object() else {
+                continue;
+            };
+            if object.get("type").and_then(Value::as_str) != Some("synced_block") {
+                continue;
+            }
+            let Some(group_id) = object.get("groupId").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(instance_id) = object.get("instanceId").and_then(Value::as_str) else {
+                continue;
+            };
+            synced_instances_by_group
+                .entry(group_id)
+                .or_default()
+                .insert(instance_id);
+        }
+    }
+
+    for group in &manifest.synced_block_groups {
+        let group_instances = synced_instances_by_group.get(group.id.as_str()).ok_or_else(|| {
+            StorageError::invalid_payload(format!(
+                "synced block group has no page instances in package: {}",
+                group.id
+            ))
+        })?;
+        if !group_instances.contains(group.primary_instance_id.as_str()) {
+            return Err(StorageError::invalid_payload(format!(
+                "synced block group primary instance is missing from package: {}",
+                group.id
+            )));
+        }
+        for block in &group.blocks {
+            if block.get("type").and_then(Value::as_str) == Some("synced_block") {
+                return Err(StorageError::invalid_payload(
+                    "page package synced block group must not contain nested synced_block",
+                ));
+            }
+            validate_json_ref(block, "pageId", &page_ids, "page")?;
+            validate_json_ref(block, "boardId", &board_ids, "board")?;
+            validate_json_ref(block, "databaseId", &data_table_ids, "data table")?;
+            validate_json_ref(block, "mindmapId", &mindmap_ids, "mindmap")?;
+            validate_json_ref(block, "assetId", &asset_ids, "asset")?;
+        }
+    }
 
     for data_table in &manifest.data_tables {
         if let Some(database_id) = data_table
@@ -1891,6 +2128,8 @@ fn rewrite_block_ids_and_refs(
     data_table_id_map: &std::collections::HashMap<String, String>,
     mindmap_id_map: &std::collections::HashMap<String, String>,
     asset_id_map: &std::collections::HashMap<String, String>,
+    synced_group_id_map: &std::collections::HashMap<String, String>,
+    synced_instance_id_map: &std::collections::HashMap<String, String>,
     counter: &mut u64,
 ) {
     for block in blocks {
@@ -1923,6 +2162,16 @@ fn rewrite_block_ids_and_refs(
         if let Some(Value::String(asset_id)) = object.get_mut("assetId") {
             if let Some(next_id) = asset_id_map.get(asset_id) {
                 *asset_id = next_id.clone();
+            }
+        }
+        if let Some(Value::String(group_id)) = object.get_mut("groupId") {
+            if let Some(next_id) = synced_group_id_map.get(group_id) {
+                *group_id = next_id.clone();
+            }
+        }
+        if let Some(Value::String(instance_id)) = object.get_mut("instanceId") {
+            if let Some(next_id) = synced_instance_id_map.get(instance_id) {
+                *instance_id = next_id.clone();
             }
         }
         if let Some(rich_text) = object.get_mut("richText").and_then(Value::as_array_mut) {
@@ -2038,6 +2287,85 @@ fn collect_ref_ids_from_pages(pages: &[PageRecord], ref_kind: &str) -> Vec<Strin
     ids
 }
 
+fn collect_synced_group_ids_from_pages(pages: &[PageRecord]) -> Vec<String> {
+    let mut ids = Vec::new();
+
+    for page in pages {
+        for block in &page.blocks {
+            if block.get("type").and_then(Value::as_str) != Some("synced_block") {
+                continue;
+            }
+            let Some(group_id) = block.get("groupId").and_then(Value::as_str) else {
+                continue;
+            };
+            if !ids.iter().any(|existing| existing == group_id) {
+                ids.push(group_id.to_string());
+            }
+        }
+    }
+
+    ids
+}
+
+fn collect_ref_ids_from_synced_groups(
+    groups: &[SyncedBlockGroupRecord],
+    ref_kind: &str,
+) -> Vec<String> {
+    let pages = groups
+        .iter()
+        .enumerate()
+        .map(|(index, group)| PageRecord {
+            id: format!("group_page_{index}"),
+            parent_id: None,
+            title: String::new(),
+            icon: None,
+            cover: None,
+            properties: None,
+            is_full_width: None,
+            is_small_text: None,
+            font_family: None,
+            show_outline: None,
+            blocks: group.blocks.clone(),
+            created_at: group.created_at.clone(),
+            updated_at: group.updated_at.clone(),
+        })
+        .collect::<Vec<_>>();
+    collect_ref_ids_from_pages(&pages, ref_kind)
+}
+
+fn normalize_exported_synced_block_groups(
+    groups: Vec<SyncedBlockGroupRecord>,
+    pages: &[PageRecord],
+) -> Vec<SyncedBlockGroupRecord> {
+    groups
+        .into_iter()
+        .map(|mut group| {
+            let instance_ids = pages
+                .iter()
+                .flat_map(|page| page.blocks.iter())
+                .filter(|block| {
+                    block.get("type").and_then(Value::as_str) == Some("synced_block")
+                        && block.get("groupId").and_then(Value::as_str) == Some(group.id.as_str())
+                })
+                .filter_map(|block| {
+                    block.get("instanceId")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .collect::<Vec<_>>();
+            if !instance_ids
+                .iter()
+                .any(|instance_id| instance_id == &group.primary_instance_id)
+            {
+                if let Some(next_primary) = instance_ids.first() {
+                    group.primary_instance_id = next_primary.clone();
+                }
+            }
+            group
+        })
+        .collect()
+}
+
 #[allow(dead_code)]
 fn collect_asset_ids_from_pages(pages: &[PageRecord]) -> Vec<String> {
     let mut ids = Vec::new();
@@ -2058,6 +2386,29 @@ fn collect_asset_ids_from_pages(pages: &[PageRecord]) -> Vec<String> {
     }
 
     ids
+}
+
+fn collect_asset_ids_from_synced_groups(groups: &[SyncedBlockGroupRecord]) -> Vec<String> {
+    let pages = groups
+        .iter()
+        .enumerate()
+        .map(|(index, group)| PageRecord {
+            id: format!("group_page_{index}"),
+            parent_id: None,
+            title: String::new(),
+            icon: None,
+            cover: None,
+            properties: None,
+            is_full_width: None,
+            is_small_text: None,
+            font_family: None,
+            show_outline: None,
+            blocks: group.blocks.clone(),
+            created_at: group.created_at.clone(),
+            updated_at: group.updated_at.clone(),
+        })
+        .collect::<Vec<_>>();
+    collect_asset_ids_from_pages(&pages)
 }
 
 #[allow(dead_code)]
@@ -2288,6 +2639,7 @@ mod tests {
                 created_at: "2026-06-30T00:00:00.000Z".to_string(),
                 updated_at: "2026-06-30T00:00:00.000Z".to_string(),
             }],
+            synced_block_groups: Vec::new(),
             pages: vec![PageRecord {
                 id: "page_1".to_string(),
                 parent_id: None,
@@ -2311,8 +2663,325 @@ mod tests {
             page_properties: Vec::new(),
             settings: WorkspaceSettings {
                 last_opened_page_id: Some("page_1".to_string()),
+                ..WorkspaceSettings::default()
             },
         }
+    }
+
+    #[test]
+    fn workspace_backup_and_bootstrap_include_synced_block_groups() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let mut snapshot_value = serde_json::to_value(sample_snapshot()).expect("serialize snapshot");
+        snapshot_value["syncedBlockGroups"] = json!([
+            {
+                "id": "group_1",
+                "blocks": [
+                    {
+                        "id": "group_block_1",
+                        "type": "paragraph",
+                        "text": "Shared alpha note"
+                    }
+                ],
+                "primaryInstanceId": "instance_1",
+                "createdAt": "2026-07-06T00:00:00.000Z",
+                "updatedAt": "2026-07-06T00:00:00.000Z"
+            }
+        ]);
+        let snapshot: WorkspaceSnapshot =
+            serde_json::from_value(snapshot_value).expect("deserialize snapshot");
+
+        storage
+            .replace_workspace_backup(snapshot)
+            .expect("replace workspace");
+
+        let exported = serde_json::to_value(
+            storage
+                .export_workspace_backup()
+                .expect("export workspace backup"),
+        )
+        .expect("serialize exported workspace");
+        assert_eq!(
+            exported.pointer("/syncedBlockGroups/0/id").and_then(Value::as_str),
+            Some("group_1")
+        );
+
+        let bootstrap = serde_json::to_value(storage.bootstrap_workspace().expect("bootstrap"))
+            .expect("serialize bootstrap");
+        assert_eq!(
+            bootstrap.pointer("/syncedBlockGroups/0/id").and_then(Value::as_str),
+            Some("group_1")
+        );
+    }
+
+    #[test]
+    fn preserves_extended_workspace_settings_fields_when_loading_and_saving() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let mut snapshot = sample_snapshot();
+        snapshot.settings = WorkspaceSettings {
+            last_opened_page_id: Some("page_1".to_string()),
+            inbox_page_id: Some("page_inbox".to_string()),
+            sidebar_layout: Some("compact".to_string()),
+            sidebar_width: Some(272),
+            pinned_sidebar_items: vec![json!({
+                "kind": "page",
+                "pageId": "page_1"
+            })],
+            clipboard_capture_mode: Some("off".to_string()),
+        };
+
+        storage
+            .replace_workspace_backup(snapshot.clone())
+            .expect("replace workspace");
+
+        let exported = storage
+            .export_workspace_backup()
+            .expect("export workspace backup");
+
+        assert_eq!(exported.settings, snapshot.settings);
+    }
+
+    #[test]
+    fn page_package_export_includes_referenced_synced_groups_resources_and_assets() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let asset = storage
+            .write_asset(WriteAssetInput {
+                name: "shared-image.png".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes: b"shared image".to_vec(),
+            })
+            .expect("write asset");
+        let mut snapshot_value = serde_json::to_value(sample_snapshot()).expect("serialize snapshot");
+        snapshot_value["pages"] = json!([
+            {
+                "id": "page_sync",
+                "parentId": null,
+                "title": "Synced Root",
+                "icon": null,
+                "cover": null,
+                "properties": {},
+                "blocks": [
+                    {
+                        "id": "block_sync",
+                        "type": "synced_block",
+                        "groupId": "group_1",
+                        "instanceId": "instance_1",
+                        "mode": "sync"
+                    }
+                ],
+                "createdAt": "2026-07-06T00:00:00.000Z",
+                "updatedAt": "2026-07-06T00:00:00.000Z"
+            }
+        ]);
+        snapshot_value["syncedBlockGroups"] = json!([
+            {
+                "id": "group_1",
+                "blocks": [
+                    {
+                        "id": "group_block_1",
+                        "type": "whiteboard",
+                        "boardId": "board_1"
+                    },
+                    {
+                        "id": "group_block_2",
+                        "type": "data_table",
+                        "databaseId": "database_1"
+                    },
+                    {
+                        "id": "group_block_3",
+                        "type": "mindmap",
+                        "mindmapId": "mindmap_1"
+                    },
+                    {
+                        "id": "group_block_4",
+                        "type": "image",
+                        "assetId": asset.id,
+                        "name": "shared-image.png",
+                        "mimeType": "image/png"
+                    }
+                ],
+                "primaryInstanceId": "instance_outside_package",
+                "createdAt": "2026-07-06T00:00:00.000Z",
+                "updatedAt": "2026-07-06T00:00:00.000Z"
+            }
+        ]);
+        let snapshot: WorkspaceSnapshot =
+            serde_json::from_value(snapshot_value).expect("deserialize snapshot");
+        storage
+            .replace_workspace_backup(snapshot)
+            .expect("replace workspace");
+
+        let archive = storage
+            .export_page_package("page_sync")
+            .expect("export page package");
+        let mut archive = zip::ZipArchive::new(Cursor::new(archive)).expect("read archive");
+        let manifest: Value = {
+            let mut entry = archive
+                .by_name(PAGE_PACKAGE_MANIFEST_ENTRY)
+                .expect("page package manifest");
+            serde_json::from_reader(&mut entry).expect("parse manifest")
+        };
+
+        assert_eq!(
+            manifest
+                .pointer("/syncedBlockGroups/0/id")
+                .and_then(Value::as_str),
+            Some("group_1")
+        );
+        assert_eq!(
+            manifest
+                .pointer("/syncedBlockGroups/0/primaryInstanceId")
+                .and_then(Value::as_str),
+            Some("instance_1")
+        );
+        assert_eq!(
+            manifest.pointer("/boards/0/id").and_then(Value::as_str),
+            Some("board_1")
+        );
+        assert_eq!(
+            manifest
+                .pointer("/dataTables/0/id")
+                .and_then(Value::as_str),
+            Some("database_1")
+        );
+        assert_eq!(
+            manifest.pointer("/mindmaps/0/id").and_then(Value::as_str),
+            Some("mindmap_1")
+        );
+        assert_eq!(
+            manifest.pointer("/assets/0/id").and_then(Value::as_str),
+            Some(asset.id.as_str())
+        );
+    }
+
+    #[test]
+    fn page_package_import_rewrites_synced_group_and_instance_ids() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        let mut snapshot_value = serde_json::to_value(sample_snapshot()).expect("serialize snapshot");
+        snapshot_value["pages"] = json!([
+            {
+                "id": "page_sync_root",
+                "parentId": null,
+                "title": "Synced Root",
+                "icon": null,
+                "cover": null,
+                "properties": {},
+                "blocks": [
+                    {
+                        "id": "block_sync_root",
+                        "type": "synced_block",
+                        "groupId": "group_1",
+                        "instanceId": "instance_1",
+                        "mode": "sync"
+                    }
+                ],
+                "createdAt": "2026-07-06T00:00:00.000Z",
+                "updatedAt": "2026-07-06T00:00:00.000Z"
+            },
+            {
+                "id": "page_sync_child",
+                "parentId": "page_sync_root",
+                "title": "Synced Child",
+                "icon": null,
+                "cover": null,
+                "properties": {},
+                "blocks": [
+                    {
+                        "id": "block_sync_child",
+                        "type": "synced_block",
+                        "groupId": "group_1",
+                        "instanceId": "instance_2",
+                        "mode": "reference"
+                    }
+                ],
+                "createdAt": "2026-07-06T00:01:00.000Z",
+                "updatedAt": "2026-07-06T00:01:00.000Z"
+            }
+        ]);
+        snapshot_value["syncedBlockGroups"] = json!([
+            {
+                "id": "group_1",
+                "blocks": [
+                    {
+                        "id": "group_block_1",
+                        "type": "paragraph",
+                        "text": "Shared alpha note"
+                    }
+                ],
+                "primaryInstanceId": "instance_1",
+                "createdAt": "2026-07-06T00:00:00.000Z",
+                "updatedAt": "2026-07-06T00:00:00.000Z"
+            }
+        ]);
+        let snapshot: WorkspaceSnapshot =
+            serde_json::from_value(snapshot_value).expect("deserialize snapshot");
+        source
+            .replace_workspace_backup(snapshot)
+            .expect("replace source workspace");
+        let archive = source
+            .export_page_package("page_sync_root")
+            .expect("export page package");
+
+        let target = Storage::open_in_memory_for_tests().expect("target opens");
+        target
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed target");
+        target
+            .import_page_package(archive)
+            .expect("import page package");
+
+        let imported = serde_json::to_value(
+            target
+                .export_workspace_backup()
+                .expect("export imported workspace"),
+        )
+        .expect("serialize imported workspace");
+        let imported_group = imported
+            .pointer("/syncedBlockGroups/0")
+            .and_then(Value::as_object)
+            .expect("imported synced group");
+        let imported_group_id = imported_group
+            .get("id")
+            .and_then(Value::as_str)
+            .expect("imported group id");
+        let imported_primary_instance_id = imported_group
+            .get("primaryInstanceId")
+            .and_then(Value::as_str)
+            .expect("imported primary instance id");
+
+        assert_ne!(imported_group_id, "group_1");
+        assert_ne!(imported_primary_instance_id, "instance_1");
+
+        let pages = imported
+            .get("pages")
+            .and_then(Value::as_array)
+            .expect("imported pages");
+        let synced_blocks = pages
+            .iter()
+            .filter_map(|page| page.get("blocks").and_then(Value::as_array))
+            .flatten()
+            .filter(|block| {
+                block.get("type").and_then(Value::as_str) == Some("synced_block")
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(synced_blocks.len(), 2);
+        for block in &synced_blocks {
+            assert_eq!(
+                block.get("groupId").and_then(Value::as_str),
+                Some(imported_group_id)
+            );
+            assert_ne!(
+                block.get("instanceId").and_then(Value::as_str),
+                Some("instance_1")
+            );
+            assert_ne!(
+                block.get("instanceId").and_then(Value::as_str),
+                Some("instance_2")
+            );
+        }
+        assert!(synced_blocks.iter().any(|block| {
+            block.get("instanceId").and_then(Value::as_str) == Some(imported_primary_instance_id)
+        }));
     }
 
     fn rewrite_page_package_manifest(
@@ -2506,12 +3175,70 @@ mod tests {
     }
 
     #[test]
+    fn search_workspace_keeps_media_file_names_and_descriptions_in_excerpts() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages = vec![PageRecord {
+            id: "page_media".to_string(),
+            parent_id: None,
+            title: "Media Library".to_string(),
+            icon: None,
+            cover: None,
+            properties: Some(json!({})),
+            is_full_width: None,
+            is_small_text: None,
+            font_family: None,
+            show_outline: None,
+            blocks: vec![
+                json!({
+                    "id": "block_image",
+                    "type": "image",
+                    "name": "Capture001.png",
+                    "mimeType": "image/png",
+                    "caption": "首页截图",
+                    "alt": "搜索弹窗"
+                }),
+                json!({
+                    "id": "block_audio",
+                    "type": "audio",
+                    "name": "meeting.mp3",
+                    "mimeType": "audio/mpeg",
+                    "caption": "访谈录音"
+                }),
+            ],
+            created_at: "2026-07-06T00:00:00.000Z".to_string(),
+            updated_at: "2026-07-06T00:00:00.000Z".to_string(),
+        }];
+
+        storage
+            .replace_workspace_backup(snapshot)
+            .expect("replace snapshot");
+
+        let image_results = storage.search_workspace("首页截图", 10).expect("search image");
+        assert!(image_results.iter().any(|result| {
+            result.page_id == "page_media"
+                && result.block_id.as_deref() == Some("block_image")
+                && result.match_source == "media"
+                && result.excerpt == "Capture001.png / 首页截图 / 搜索弹窗"
+        }));
+
+        let audio_results = storage.search_workspace("访谈录音", 10).expect("search audio");
+        assert!(audio_results.iter().any(|result| {
+            result.page_id == "page_media"
+                && result.block_id.as_deref() == Some("block_audio")
+                && result.match_source == "media"
+                && result.excerpt == "meeting.mp3 / 访谈录音"
+        }));
+    }
+
+    #[test]
     fn search_workspace_returns_relation_hits_with_block_ids() {
         let storage = Storage::open_in_memory_for_tests().expect("storage opens");
         let snapshot = WorkspaceSnapshot {
             boards: vec![],
             data_tables: vec![],
             mindmaps: vec![],
+            synced_block_groups: vec![],
             page_properties: vec![],
             pages: vec![
                 PageRecord {
@@ -2555,6 +3282,7 @@ mod tests {
             ],
             settings: WorkspaceSettings {
                 last_opened_page_id: Some("page_source".to_string()),
+                ..WorkspaceSettings::default()
             },
         };
 
@@ -2568,6 +3296,173 @@ mod tests {
                 && result.block_id.as_deref() == Some("block_relation")
                 && result.match_source == "page_link"
         }));
+    }
+
+    #[test]
+    fn search_workspace_expands_synced_and_reference_instances_per_page() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let snapshot = WorkspaceSnapshot {
+            boards: vec![],
+            data_tables: vec![],
+            mindmaps: vec![],
+            synced_block_groups: vec![SyncedBlockGroupRecord {
+                id: "group_1".to_string(),
+                blocks: vec![json!({
+                    "id": "group_block_1",
+                    "type": "paragraph",
+                    "text": "Shared alpha note"
+                })],
+                primary_instance_id: "instance_sync".to_string(),
+                created_at: "2026-07-06T00:00:00.000Z".to_string(),
+                updated_at: "2026-07-06T00:00:00.000Z".to_string(),
+            }],
+            page_properties: vec![],
+            pages: vec![
+                PageRecord {
+                    id: "page_sync".to_string(),
+                    parent_id: None,
+                    title: "Sync Page".to_string(),
+                    icon: None,
+                    cover: None,
+                    properties: Some(json!({})),
+                    is_full_width: None,
+                    is_small_text: None,
+                    font_family: None,
+                    show_outline: None,
+                    blocks: vec![json!({
+                        "id": "container_sync",
+                        "type": "synced_block",
+                        "groupId": "group_1",
+                        "instanceId": "instance_sync",
+                        "mode": "sync"
+                    })],
+                    created_at: "2026-07-06T00:00:00.000Z".to_string(),
+                    updated_at: "2026-07-06T00:00:00.000Z".to_string(),
+                },
+                PageRecord {
+                    id: "page_reference".to_string(),
+                    parent_id: None,
+                    title: "Reference Page".to_string(),
+                    icon: None,
+                    cover: None,
+                    properties: Some(json!({})),
+                    is_full_width: None,
+                    is_small_text: None,
+                    font_family: None,
+                    show_outline: None,
+                    blocks: vec![json!({
+                        "id": "container_reference",
+                        "type": "synced_block",
+                        "groupId": "group_1",
+                        "instanceId": "instance_reference",
+                        "mode": "reference"
+                    })],
+                    created_at: "2026-07-06T00:00:00.000Z".to_string(),
+                    updated_at: "2026-07-06T00:00:00.000Z".to_string(),
+                },
+            ],
+            settings: WorkspaceSettings {
+                last_opened_page_id: Some("page_sync".to_string()),
+                ..WorkspaceSettings::default()
+            },
+        };
+
+        storage
+            .replace_workspace_backup(snapshot)
+            .expect("replace snapshot");
+
+        let results = storage
+            .search_workspace("Shared alpha note", 20)
+            .expect("search");
+
+        assert!(results.iter().any(|result| {
+            result.page_id == "page_sync"
+                && result.block_id.as_deref() == Some("container_sync")
+                && result.match_source == "synced_block"
+                && result.source_label == "同步块内容"
+        }));
+        assert!(results.iter().any(|result| {
+            result.page_id == "page_reference"
+                && result.block_id.as_deref() == Some("container_reference")
+                && result.match_source == "reference_block"
+                && result.source_label == "引用块内容"
+        }));
+    }
+
+    #[test]
+    fn search_workspace_keeps_multiple_synced_hits_on_same_page() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let snapshot = WorkspaceSnapshot {
+            boards: vec![],
+            data_tables: vec![],
+            mindmaps: vec![],
+            synced_block_groups: vec![SyncedBlockGroupRecord {
+                id: "group_1".to_string(),
+                blocks: vec![json!({
+                    "id": "group_block_1",
+                    "type": "paragraph",
+                    "text": "Shared alpha note"
+                })],
+                primary_instance_id: "instance_sync".to_string(),
+                created_at: "2026-07-06T00:00:00.000Z".to_string(),
+                updated_at: "2026-07-06T00:00:00.000Z".to_string(),
+            }],
+            page_properties: vec![],
+            pages: vec![PageRecord {
+                id: "page_multi".to_string(),
+                parent_id: None,
+                title: "Multi Instance Page".to_string(),
+                icon: None,
+                cover: None,
+                properties: Some(json!({})),
+                is_full_width: None,
+                is_small_text: None,
+                font_family: None,
+                show_outline: None,
+                blocks: vec![
+                    json!({
+                        "id": "container_sync",
+                        "type": "synced_block",
+                        "groupId": "group_1",
+                        "instanceId": "instance_sync",
+                        "mode": "sync"
+                    }),
+                    json!({
+                        "id": "container_reference",
+                        "type": "synced_block",
+                        "groupId": "group_1",
+                        "instanceId": "instance_reference",
+                        "mode": "reference"
+                    })
+                ],
+                created_at: "2026-07-06T00:00:00.000Z".to_string(),
+                updated_at: "2026-07-06T00:00:00.000Z".to_string(),
+            }],
+            settings: WorkspaceSettings {
+                last_opened_page_id: Some("page_multi".to_string()),
+                ..WorkspaceSettings::default()
+            },
+        };
+
+        storage
+            .replace_workspace_backup(snapshot)
+            .expect("replace snapshot");
+
+        let results = storage
+            .search_workspace("Shared alpha note", 20)
+            .expect("search");
+        let instance_hits = results
+            .iter()
+            .filter(|result| {
+                result.page_id == "page_multi"
+                    && matches!(
+                        result.block_id.as_deref(),
+                        Some("container_sync") | Some("container_reference")
+                    )
+            })
+            .count();
+
+        assert_eq!(instance_hits, 2);
     }
 
     #[test]
@@ -3401,6 +4296,7 @@ mod tests {
             boards: vec![],
             data_tables: vec![],
             mindmaps: vec![],
+            synced_block_groups: vec![],
             page_properties: vec![],
             pages: vec![
                 PageRecord {
@@ -3449,6 +4345,7 @@ mod tests {
             ],
             settings: WorkspaceSettings {
                 last_opened_page_id: Some("page_root".to_string()),
+                ..WorkspaceSettings::default()
             },
         };
 
@@ -4377,6 +5274,7 @@ mod tests {
                     boards: Vec::new(),
                     data_tables: Vec::new(),
                     mindmaps: Vec::new(),
+                    synced_block_groups: Vec::new(),
                     assets: Vec::new(),
                 },
             )

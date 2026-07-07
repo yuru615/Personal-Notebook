@@ -1,17 +1,25 @@
 import type { ReactNode } from 'react'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import type { BlockType, TextBlockStyle } from '../../domain/types'
-import { BlockHandleMenu } from './BlockHandleMenu'
+import { uiCopy } from '../../ui/copy'
+import { BlockHandleMenu, type BlockHandleMenuAction } from './BlockHandleMenu'
 import { useFloatingMenuLayout } from './floatingMenu'
+import { SlashMenu, type SlashMenuCommand } from './SlashMenu'
 import { useDismissableLayer } from './useDismissableLayer'
+
+type BlockFrameMenuMode = 'block' | 'insert'
 
 interface BlockFrameProps {
   children: ReactNode
+  badge?: string | null
   textStyle?: TextBlockStyle
   allowedBlockTypes?: BlockType[]
+  menuMode?: BlockFrameMenuMode
+  extraMenuActions?: BlockHandleMenuAction[]
   onDragStart: () => void
   onDragEnd: () => void
   onChangeTextStyle?: (nextStyle: TextBlockStyle) => void
+  onInsertPick?: (type: SlashMenuCommand) => void
   onTurnInto: (type: BlockType) => void
   onDuplicate: () => void
   onDelete: () => void
@@ -19,11 +27,15 @@ interface BlockFrameProps {
 
 export function BlockFrame({
   children,
+  badge = null,
   textStyle,
   allowedBlockTypes,
+  menuMode = 'block',
+  extraMenuActions = [],
   onDragStart,
   onDragEnd,
   onChangeTextStyle,
+  onInsertPick,
   onTurnInto,
   onDuplicate,
   onDelete,
@@ -38,9 +50,10 @@ export function BlockFrame({
   }, [])
   const menuLayout = useFloatingMenuLayout({
     open,
-    anchorRef: frameRef,
+    anchorRef: handleRef,
     menuRef,
   })
+  const isInsertMenu = menuMode === 'insert'
 
   useDismissableLayer({
     open,
@@ -49,52 +62,84 @@ export function BlockFrame({
   })
 
   return (
-    <div className="block-frame" ref={frameRef}>
-      <button
-        ref={handleRef}
-        type="button"
-        aria-label="拖动块"
-        className="block-handle"
-        draggable
-        onDragStart={(event) => {
-          if (event.dataTransfer) {
-            event.dataTransfer.effectAllowed = 'move'
-          }
-          onDragStart()
-        }}
-        onDragEnd={onDragEnd}
-        onClick={() => setOpen((value) => !value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') {
-            setOpen(false)
-          }
-        }}
-      >
-        ⋮⋮
-      </button>
+    <div className={`block-frame${badge ? ' block-frame-has-badge' : ''}`} ref={frameRef}>
+      <div className="block-frame-handle-anchor">
+        <button
+          ref={handleRef}
+          type="button"
+          aria-label={isInsertMenu ? uiCopy.editor.addBlock : '拖动块'}
+          className="block-handle"
+          draggable={!isInsertMenu}
+          onDragStart={(event) => {
+            if (isInsertMenu) {
+              return
+            }
+
+            if (event.dataTransfer) {
+              event.dataTransfer.effectAllowed = 'move'
+            }
+            onDragStart()
+          }}
+          onDragEnd={() => {
+            if (!isInsertMenu) {
+              onDragEnd()
+            }
+          }}
+          onClick={() => setOpen((value) => !value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              setOpen(false)
+            }
+          }}
+        >
+          {isInsertMenu ? '+' : '⋮⋮'}
+        </button>
+        {open ? (
+          isInsertMenu ? (
+            <SlashMenu
+              query="/"
+              allowedBlockTypes={allowedBlockTypes}
+              menuRef={menuRef}
+              placement={menuLayout.placement}
+              maxHeight={menuLayout.maxHeight}
+              onPick={(type) => {
+                setOpen(false)
+                onInsertPick?.(type)
+              }}
+            />
+          ) : (
+            <BlockHandleMenu
+              menuRef={menuRef}
+              placement={menuLayout.placement}
+              maxHeight={menuLayout.maxHeight}
+              allowedBlockTypes={allowedBlockTypes}
+              extraActions={extraMenuActions.map((action) => ({
+                ...action,
+                onSelect: () => {
+                  setOpen(false)
+                  action.onSelect()
+                },
+              }))}
+              textStyle={textStyle}
+              onChangeTextStyle={onChangeTextStyle}
+              onTurnInto={(type) => {
+                setOpen(false)
+                onTurnInto(type)
+              }}
+              onDuplicate={() => {
+                setOpen(false)
+                onDuplicate()
+              }}
+              onDelete={() => {
+                setOpen(false)
+                onDelete()
+              }}
+            />
+          )
+        ) : null}
+      </div>
       <div className="block-frame-content">{children}</div>
-      {open ? (
-        <BlockHandleMenu
-          menuRef={menuRef}
-          placement={menuLayout.placement}
-          maxHeight={menuLayout.maxHeight}
-          allowedBlockTypes={allowedBlockTypes}
-          textStyle={textStyle}
-          onChangeTextStyle={onChangeTextStyle}
-          onTurnInto={(type) => {
-            setOpen(false)
-            onTurnInto(type)
-          }}
-          onDuplicate={() => {
-            setOpen(false)
-            onDuplicate()
-          }}
-          onDelete={() => {
-            setOpen(false)
-            onDelete()
-          }}
-        />
-      ) : null}
+      {badge ? <span className="block-frame-badge">{badge}</span> : null}
     </div>
   )
 }

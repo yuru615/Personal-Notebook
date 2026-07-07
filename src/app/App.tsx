@@ -48,6 +48,7 @@ import type {
   PageRecord,
   SaveStatus,
   SidebarPinnedItem,
+  SyncedBlockMode,
   WorkspaceSettings,
   WorkspaceSnapshot,
 } from '../domain/types'
@@ -62,7 +63,10 @@ import {
   importPagePackageFromPath,
   importPagePackage,
 } from '../lib/assets'
-import { registerDesktopPendingSaveFlush } from '../lib/desktopLifecycle'
+import {
+  registerDesktopPendingSaveFlush,
+  registerDesktopTrayActions,
+} from '../lib/desktopLifecycle'
 import {
   isDesktopRuntime,
   openBinaryFile,
@@ -150,6 +154,11 @@ interface CreatePageOptions {
   setCurrent?: boolean
 }
 
+interface DesktopRouteRequest {
+  pageId: string
+  nonce: number
+}
+
 const repositoryStoreCache = new WeakMap<WorkspaceRepository, WorkspaceStore>()
 let defaultWorkspaceStore: WorkspaceStore | null = null
 
@@ -175,16 +184,20 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
   const [isBootstrapped, setIsBootstrapped] = useState(false)
   const [bootstrapError, setBootstrapError] = useState<unknown>(null)
   const [archiveTask, setArchiveTask] = useState<ArchiveTaskStatus | null>(null)
+  const [desktopRouteRequest, setDesktopRouteRequest] = useState<DesktopRouteRequest | null>(null)
   const bootstrapPromiseRef = useRef<Promise<void> | null>(null)
   const archiveTaskClearTimerRef = useRef<number | null>(null)
   const setCurrentPage = store.getState().setCurrentPage
 
+  function ensureBootstrap() {
+    bootstrapPromiseRef.current ??= store.getState().bootstrap()
+    return bootstrapPromiseRef.current
+  }
+
   useEffect(() => {
     let isActive = true
 
-    bootstrapPromiseRef.current ??= store.getState().bootstrap()
-
-    void bootstrapPromiseRef.current
+    void ensureBootstrap()
       .then(() => {
         if (isActive) {
           setBootstrapError(null)
@@ -203,6 +216,49 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
 
     return () => {
       isActive = false
+    }
+  }, [store])
+
+  useEffect(() => {
+    let isActive = true
+    let unlistenDesktopTray: (() => void) | null = null
+
+    async function handleDesktopNewNote() {
+      await ensureBootstrap()
+      const page = await store.getState().createPage(undefined, { setCurrent: true })
+
+      if (isActive) {
+        setDesktopRouteRequest({ pageId: page.id, nonce: Date.now() })
+      }
+    }
+
+    async function handleDesktopOpenInbox() {
+      await ensureBootstrap()
+      const page = await store.getState().ensureInboxPage()
+      await store.getState().setCurrentPage(page.id)
+
+      if (isActive) {
+        setDesktopRouteRequest({ pageId: page.id, nonce: Date.now() })
+      }
+    }
+
+    void registerDesktopTrayActions({
+      onNewNote: handleDesktopNewNote,
+      onOpenInbox: handleDesktopOpenInbox,
+    })
+      .then((unlisten) => {
+        if (isActive) {
+          unlistenDesktopTray = unlisten
+          return
+        }
+
+        unlisten()
+      })
+      .catch(() => undefined)
+
+    return () => {
+      isActive = false
+      unlistenDesktopTray?.()
     }
   }, [store])
 
@@ -403,9 +459,13 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       boards={state.boards}
       dataTables={state.dataTables}
       mindmaps={state.mindmaps}
+      syncedBlockGroups={state.syncedBlockGroups}
       pages={state.pages}
       pageProperties={state.pageProperties}
       currentPageId={state.currentPageId}
+      inboxPageId={state.settings.inboxPageId ?? null}
+      desktopRouteRequest={desktopRouteRequest}
+      onDesktopRouteRequestHandled={() => setDesktopRouteRequest(null)}
       sidebarLayout={state.settings.sidebarLayout ?? 'compact'}
       sidebarWidth={state.settings.sidebarWidth ?? 272}
       pinnedSidebarItems={state.settings.pinnedSidebarItems ?? []}
@@ -450,6 +510,35 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       }
       onUpdateMindmapSnapshot={(mindmapId, snapshot) =>
         store.getState().updateMindmapSnapshot(mindmapId, snapshot)
+      }
+      onUpdateSyncedGroupBlock={(groupId, blockId, nextBlock) =>
+        store.getState().updateSyncedGroupBlock(groupId, blockId, nextBlock)
+      }
+      onCreateSyncedBlockFromRange={(pageId, startBlockId, endBlockId) =>
+        store.getState().createSyncedBlockFromRange(pageId, startBlockId, endBlockId)
+      }
+      onCreateSyncedBlockFromExistingBlock={(
+        sourcePageId,
+        sourceBlockId,
+        targetPageId,
+        targetBlockId,
+        mode,
+      ) =>
+        store
+          .getState()
+          .createSyncedBlockFromExistingBlock(
+            sourcePageId,
+            sourceBlockId,
+            targetPageId,
+            targetBlockId,
+            mode,
+          )
+      }
+      onReplaceBlockWithSyncedInstance={(pageId, blockId, groupId, mode) =>
+        store.getState().replaceBlockWithSyncedInstance(pageId, blockId, groupId, mode)
+      }
+      onUnsyncBlockInstance={(pageId, blockId) =>
+        store.getState().unsyncBlockInstance(pageId, blockId)
       }
 
       onTogglePageFullWidth={(pageId, isFullWidth) =>
@@ -583,9 +672,13 @@ interface AppRoutesProps {
   boards: BoardRecord[]
   dataTables: DataTableRecord[]
   mindmaps: MindmapRecord[]
+  syncedBlockGroups: AppState['syncedBlockGroups']
   pages: AppState['pages']
   pageProperties: PagePropertyDefinition[]
   currentPageId: AppState['currentPageId']
+  inboxPageId: string | null
+  desktopRouteRequest: DesktopRouteRequest | null
+  onDesktopRouteRequestHandled: () => void
   sidebarLayout: NonNullable<WorkspaceSettings['sidebarLayout']>
   sidebarWidth: number
   pinnedSidebarItems: SidebarPinnedItem[]
@@ -613,6 +706,30 @@ interface AppRoutesProps {
   onRestoreMissingDataTable: (pageId: string, databaseId: string) => Promise<DataTableRecord | null>
   onRestoreMissingMindmap: (pageId: string, mindmapId: string) => Promise<MindmapRecord | null>
   onUpdateMindmapSnapshot: (mindmapId: string, snapshot: unknown) => Promise<void>
+  onUpdateSyncedGroupBlock: (
+    groupId: string,
+    blockId: string,
+    nextBlock: PageRecord['blocks'][number],
+  ) => Promise<void>
+  onCreateSyncedBlockFromRange: (
+    pageId: string,
+    startBlockId: string,
+    endBlockId: string,
+  ) => Promise<unknown>
+  onCreateSyncedBlockFromExistingBlock: (
+    sourcePageId: string,
+    sourceBlockId: string,
+    targetPageId: string,
+    targetBlockId: string,
+    mode: SyncedBlockMode,
+  ) => Promise<unknown>
+  onReplaceBlockWithSyncedInstance: (
+    pageId: string,
+    blockId: string,
+    groupId: string,
+    mode: SyncedBlockMode,
+  ) => Promise<unknown>
+  onUnsyncBlockInstance: (pageId: string, blockId: string) => Promise<void>
 
   onTogglePageFullWidth: (pageId: string, isFullWidth: boolean) => Promise<void>
   onTogglePageSmallText: (pageId: string, isSmallText: boolean) => Promise<void>
@@ -677,9 +794,13 @@ function AppRoutes({
   boards,
   dataTables,
   mindmaps,
+  syncedBlockGroups,
   pages,
   pageProperties,
   currentPageId,
+  inboxPageId,
+  desktopRouteRequest,
+  onDesktopRouteRequestHandled,
   sidebarLayout,
   sidebarWidth,
   pinnedSidebarItems,
@@ -704,6 +825,11 @@ function AppRoutes({
   onRestoreMissingDataTable,
   onRestoreMissingMindmap,
   onUpdateMindmapSnapshot,
+  onUpdateSyncedGroupBlock,
+  onCreateSyncedBlockFromRange,
+  onCreateSyncedBlockFromExistingBlock,
+  onReplaceBlockWithSyncedInstance,
+  onUnsyncBlockInstance,
 
   onTogglePageFullWidth,
   onTogglePageSmallText,
@@ -738,6 +864,15 @@ function AppRoutes({
   const [isSearchOpen, setIsSearchOpen] = useState(false)
   const [pendingDeletePageId, setPendingDeletePageId] = useState<string | null>(null)
   const pendingDeletePage = pages.find((page) => page.id === pendingDeletePageId) ?? null
+
+  useEffect(() => {
+    if (!desktopRouteRequest) {
+      return
+    }
+
+    navigate(`/pages/${desktopRouteRequest.pageId}`)
+    onDesktopRouteRequestHandled()
+  }, [desktopRouteRequest, navigate, onDesktopRouteRequestHandled])
 
   async function handleCreatePage() {
     const page = await onCreatePage()
@@ -823,6 +958,7 @@ function AppRoutes({
           pages={pages}
           dataTables={dataTables}
           currentPageId={currentPageId}
+          inboxPageId={inboxPageId}
           layout={sidebarLayout}
           pinnedSidebarItems={pinnedSidebarItems}
           onCreatePage={() => {
@@ -866,6 +1002,7 @@ function AppRoutes({
         boards={boards}
         dataTables={dataTables}
         mindmaps={mindmaps}
+        syncedBlockGroups={syncedBlockGroups}
         onClose={() => setIsSearchOpen(false)}
         onOpenPage={(pageId, blockId) =>
           navigate(`/pages/${pageId}`, blockId ? { state: { focusBlockId: blockId } } : undefined)
@@ -899,6 +1036,7 @@ function AppRoutes({
                 boards={boards}
                 dataTables={dataTables}
                 mindmaps={mindmaps}
+                syncedBlockGroups={syncedBlockGroups}
                 pages={pages}
                 pageProperties={pageProperties}
                 currentPageId={currentPageId}
@@ -935,6 +1073,11 @@ function AppRoutes({
                 onRestoreMissingBoard={onRestoreMissingBoard}
                 onRestoreMissingDataTable={onRestoreMissingDataTable}
                 onRestoreMissingMindmap={onRestoreMissingMindmap}
+                onUpdateSyncedGroupBlock={onUpdateSyncedGroupBlock}
+                onCreateSyncedBlockFromRange={onCreateSyncedBlockFromRange}
+                onCreateSyncedBlockFromExistingBlock={onCreateSyncedBlockFromExistingBlock}
+                onReplaceBlockWithSyncedInstance={onReplaceBlockWithSyncedInstance}
+                onUnsyncBlockInstance={onUnsyncBlockInstance}
               />
             }
           />
@@ -1046,6 +1189,7 @@ interface PageRouteProps {
   boards: BoardRecord[]
   dataTables: DataTableRecord[]
   mindmaps: MindmapRecord[]
+  syncedBlockGroups: AppState['syncedBlockGroups']
   pages: PageRecord[]
   pageProperties: PagePropertyDefinition[]
   currentPageId: string | null
@@ -1109,12 +1253,37 @@ interface PageRouteProps {
   onRestoreMissingBoard: (pageId: string, boardId: string) => Promise<BoardRecord | null>
   onRestoreMissingDataTable: (pageId: string, databaseId: string) => Promise<DataTableRecord | null>
   onRestoreMissingMindmap: (pageId: string, mindmapId: string) => Promise<MindmapRecord | null>
+  onUpdateSyncedGroupBlock: (
+    groupId: string,
+    blockId: string,
+    nextBlock: PageRecord['blocks'][number],
+  ) => Promise<void>
+  onCreateSyncedBlockFromRange: (
+    pageId: string,
+    startBlockId: string,
+    endBlockId: string,
+  ) => Promise<unknown>
+  onCreateSyncedBlockFromExistingBlock: (
+    sourcePageId: string,
+    sourceBlockId: string,
+    targetPageId: string,
+    targetBlockId: string,
+    mode: SyncedBlockMode,
+  ) => Promise<unknown>
+  onReplaceBlockWithSyncedInstance: (
+    pageId: string,
+    blockId: string,
+    groupId: string,
+    mode: SyncedBlockMode,
+  ) => Promise<unknown>
+  onUnsyncBlockInstance: (pageId: string, blockId: string) => Promise<void>
 }
 
 function PageRoute({
   boards,
   dataTables,
   mindmaps,
+  syncedBlockGroups,
   pages,
   pageProperties,
   currentPageId,
@@ -1151,6 +1320,11 @@ function PageRoute({
   onRestoreMissingBoard,
   onRestoreMissingDataTable,
   onRestoreMissingMindmap,
+  onUpdateSyncedGroupBlock,
+  onCreateSyncedBlockFromRange,
+  onCreateSyncedBlockFromExistingBlock,
+  onReplaceBlockWithSyncedInstance,
+  onUnsyncBlockInstance,
 }: PageRouteProps) {
   const { pageId } = useParams()
   const location = useLocation()
@@ -1327,6 +1501,7 @@ function PageRoute({
             boards={boards}
             dataTables={dataTables}
             mindmaps={mindmaps}
+            syncedBlockGroups={syncedBlockGroups}
             onUpdateBlock={(blockId, nextBlock) => {
               void onUpdateBlock(page.id, blockId, nextBlock)
             }}
@@ -1393,6 +1568,33 @@ function PageRoute({
               if (mindmap) {
                 navigate(`/pages/${page.id}/mindmaps/${mindmap.id}`)
               }
+            }}
+            onUpdateSyncedGroupBlock={(groupId, blockId, nextBlock) => {
+              void onUpdateSyncedGroupBlock(groupId, blockId, nextBlock)
+            }}
+            onCreateSyncedBlockFromRange={(startBlockId, endBlockId) => {
+              void onCreateSyncedBlockFromRange(page.id, startBlockId, endBlockId)
+            }}
+            onCreateSyncedBlockFromExistingBlock={(sourcePageId, sourceBlockId, targetBlockId, mode) => {
+              void onCreateSyncedBlockFromExistingBlock(
+                sourcePageId,
+                sourceBlockId,
+                page.id,
+                targetBlockId,
+                mode,
+              )
+            }}
+            onReplaceBlockWithSyncedInstance={(blockId, groupId, mode) => {
+              void onReplaceBlockWithSyncedInstance(page.id, blockId, groupId, mode)
+            }}
+            onUnsyncBlockInstance={(blockId) => {
+              void onUnsyncBlockInstance(page.id, blockId)
+            }}
+            onOpenPrimarySyncedBlock={(targetPageId, targetBlockId) => {
+              navigate(
+                `/pages/${targetPageId}`,
+                targetBlockId ? { state: { focusBlockId: targetBlockId } } : undefined,
+              )
             }}
           />
           <PageRelationsPanel
@@ -1964,6 +2166,7 @@ function createWorkspaceBackupSnapshot(state: AppState): WorkspaceSnapshot {
     boards: structuredClone(state.boards),
     dataTables: structuredClone(state.dataTables),
     mindmaps: structuredClone(state.mindmaps),
+    syncedBlockGroups: structuredClone(state.syncedBlockGroups),
     pages: structuredClone(state.pages),
     pageProperties: structuredClone(state.pageProperties),
     settings: structuredClone(state.settings),

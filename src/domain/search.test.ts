@@ -196,25 +196,25 @@ const mindmaps: MindmapRecord[] = [
 
 describe('searchPages', () => {
   it('returns pages whose title or block content matches the query', () => {
-    expect(searchPages(pages, pagePropertyDefinitions, 'customer')[0]).toMatchObject({
+    expect(searchPages(pages, pagePropertyDefinitions, [], 'customer')[0]).toMatchObject({
       pageId: 'page-a',
       title: 'Product Plan',
       excerpt: 'Core customer goals',
     })
 
-    expect(searchPages(pages, pagePropertyDefinitions, 'search')[0]).toMatchObject({
+    expect(searchPages(pages, pagePropertyDefinitions, [], 'search')[0]).toMatchObject({
       pageId: 'page-b',
       title: 'Tech Notes',
       excerpt: 'Module Status Search Open',
     })
 
-    expect(searchPages(pages, pagePropertyDefinitions, 'layout')[0]).toMatchObject({
+    expect(searchPages(pages, pagePropertyDefinitions, [], 'layout')[0]).toMatchObject({
       pageId: 'page-c',
       title: 'Canvas Structure',
       excerpt: 'Whiteboard layout notes',
     })
 
-    expect(searchPages(pages, pagePropertyDefinitions, '导图')[0]).toMatchObject({
+    expect(searchPages(pages, pagePropertyDefinitions, [], '导图')[0]).toMatchObject({
       pageId: 'page-d',
       title: 'Visual Thinking',
       excerpt: '导图',
@@ -222,7 +222,7 @@ describe('searchPages', () => {
   })
 
   it('returns no results for blank queries', () => {
-    expect(searchPages(pages, pagePropertyDefinitions, '   ')).toEqual([])
+    expect(searchPages(pages, pagePropertyDefinitions, [], '   ')).toEqual([])
   })
 
   it('returns multiple matches from the same page when different blocks match the query', () => {
@@ -242,7 +242,7 @@ describe('searchPages', () => {
       },
     ]
 
-    expect(searchPages(multiMatchPages, pagePropertyDefinitions, 'customer')).toMatchObject([
+    expect(searchPages(multiMatchPages, pagePropertyDefinitions, [], 'customer')).toMatchObject([
       {
         pageId: 'page-multi',
         blockId: 'block-1',
@@ -257,11 +257,41 @@ describe('searchPages', () => {
   })
 
   it('attaches block ids to block-backed page hits so the app can jump to the matched block', () => {
-    expect(searchPages(pages, pagePropertyDefinitions, 'schedule')).toMatchObject([
+    expect(searchPages(pages, pagePropertyDefinitions, [], 'schedule')).toMatchObject([
       {
         pageId: 'page-a',
         blockId: 'block-a2',
         excerpt: 'Schedule customer interviews',
+      },
+    ])
+  })
+
+  it('matches visible rich text content even when legacy text fields are empty', () => {
+    const richTextOnlyPages: PageRecord[] = [
+      {
+        id: 'page-rich-text-only',
+        parentId: null,
+        title: 'Rich text page',
+        icon: null,
+        cover: null,
+        blocks: [
+          {
+            id: 'block-rich-text-only',
+            type: 'paragraph',
+            text: '',
+            richText: [{ text: 'Visible synced search text' }],
+          },
+        ],
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]
+
+    expect(searchPages(richTextOnlyPages, pagePropertyDefinitions, [], 'Visible synced search text')).toMatchObject([
+      {
+        pageId: 'page-rich-text-only',
+        blockId: 'block-rich-text-only',
+        excerpt: 'Visible synced search text',
       },
     ])
   })
@@ -305,6 +335,7 @@ describe('searchPages', () => {
     const relationResults = searchPages(
       relationPages,
       pagePropertyDefinitions,
+      [],
       'product plan',
     ).filter((result) => result.pageId === 'page-source')
 
@@ -370,7 +401,7 @@ describe('searchPages', () => {
       },
     ]
 
-    const results = searchPages([pageWithProperties], definitions, '搜索')
+    const results = searchPages([pageWithProperties], definitions, [], '搜索')
 
     expect(results).toEqual(
       expect.arrayContaining([
@@ -418,14 +449,14 @@ describe('searchPages', () => {
       },
     ]
 
-    expect(searchPages(mediaPages, pagePropertyDefinitions, 'capture001 png')).toMatchObject([
+    expect(searchPages(mediaPages, pagePropertyDefinitions, [], 'capture001 png')).toMatchObject([
       {
         pageId: 'page-media',
         excerpt: 'Capture001.png',
       },
     ])
 
-    expect(searchPages(mediaPages, pagePropertyDefinitions, '20分 mp3')).toMatchObject([
+    expect(searchPages(mediaPages, pagePropertyDefinitions, [], '20分 mp3')).toMatchObject([
       {
         pageId: 'page-media',
         excerpt: '20分.mp3',
@@ -531,6 +562,170 @@ describe('searchPages', () => {
         matchSource: 'mindmap_node',
         sourceLabel: '导图节点',
       },
+    ])
+  })
+  it('includes media file names together with media descriptions in excerpts', () => {
+    const mediaPages: PageRecord[] = [
+      {
+        id: 'page-media-descriptions',
+        parentId: null,
+        title: 'Media Library',
+        icon: null,
+        cover: null,
+        blocks: [
+          {
+            id: 'block-image-description',
+            type: 'image',
+            assetId: 'asset-image-description',
+            name: 'Capture001.png',
+            mimeType: 'image/png',
+            caption: '首页截图',
+            alt: '搜索弹窗',
+          },
+          {
+            id: 'block-audio-description',
+            type: 'audio',
+            assetId: 'asset-audio-description',
+            name: 'meeting.mp3',
+            mimeType: 'audio/mpeg',
+            caption: '访谈录音',
+          },
+        ],
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]
+
+    expect(searchPages(mediaPages, pagePropertyDefinitions, [], '首页截图')).toMatchObject([
+      {
+        pageId: 'page-media-descriptions',
+        blockId: 'block-image-description',
+        excerpt: 'Capture001.png / 首页截图 / 搜索弹窗',
+        matchSource: 'media',
+      },
+    ])
+
+    expect(searchPages(mediaPages, pagePropertyDefinitions, [], '访谈录音')).toMatchObject([
+      {
+        pageId: 'page-media-descriptions',
+        blockId: 'block-audio-description',
+        excerpt: 'meeting.mp3 / 访谈录音',
+        matchSource: 'media',
+      },
+    ])
+  })
+  it('returns synced and reference hits per page instance', () => {
+    const syncedPages: PageRecord[] = [
+      {
+        id: 'page-sync',
+        parentId: null,
+        title: 'Sync page',
+        icon: null,
+        cover: null,
+        blocks: [
+          {
+            id: 'container-sync',
+            type: 'synced_block',
+            groupId: 'group-1',
+            instanceId: 'instance-sync',
+            mode: 'sync',
+          },
+        ],
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: 'page-reference',
+        parentId: null,
+        title: 'Reference page',
+        icon: null,
+        cover: null,
+        blocks: [
+          {
+            id: 'container-reference',
+            type: 'synced_block',
+            groupId: 'group-1',
+            instanceId: 'instance-reference',
+            mode: 'reference',
+          },
+        ],
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]
+    const syncedBlockGroups = [
+      {
+        id: 'group-1',
+        blocks: [{ id: 'group-block-1', type: 'paragraph' as const, text: 'Shared alpha note' }],
+        primaryInstanceId: 'instance-sync',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]
+
+    expect(
+      searchPages(syncedPages, pagePropertyDefinitions, syncedBlockGroups, 'Shared alpha note'),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          pageId: 'page-sync',
+          blockId: 'container-sync',
+          matchSource: 'synced_block',
+          sourceLabel: '同步块内容',
+        }),
+        expect.objectContaining({
+          pageId: 'page-reference',
+          blockId: 'container-reference',
+          matchSource: 'reference_block',
+          sourceLabel: '引用块内容',
+        }),
+      ]),
+    )
+  })
+
+  it('keeps multiple synced hits on the same page when several instances match', () => {
+    const syncedPages: PageRecord[] = [
+      {
+        id: 'page-sync',
+        parentId: null,
+        title: 'Sync page',
+        icon: null,
+        cover: null,
+        blocks: [
+          {
+            id: 'container-1',
+            type: 'synced_block',
+            groupId: 'group-1',
+            instanceId: 'instance-1',
+            mode: 'sync',
+          },
+          {
+            id: 'container-2',
+            type: 'synced_block',
+            groupId: 'group-1',
+            instanceId: 'instance-2',
+            mode: 'sync',
+          },
+        ],
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]
+    const syncedBlockGroups = [
+      {
+        id: 'group-1',
+        blocks: [{ id: 'group-block-1', type: 'paragraph' as const, text: 'Shared alpha note' }],
+        primaryInstanceId: 'instance-1',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]
+
+    expect(
+      searchPages(syncedPages, pagePropertyDefinitions, syncedBlockGroups, 'Shared alpha note'),
+    ).toMatchObject([
+      expect.objectContaining({ pageId: 'page-sync', blockId: 'container-1' }),
+      expect.objectContaining({ pageId: 'page-sync', blockId: 'container-2' }),
     ])
   })
 })

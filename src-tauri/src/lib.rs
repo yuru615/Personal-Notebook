@@ -9,15 +9,19 @@ mod storage;
 
 const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_SHOW_WINDOW_ID: &str = "show-window";
-const TRAY_HIDE_WINDOW_ID: &str = "hide-window";
+const TRAY_NEW_NOTE_ID: &str = "new-note";
+const TRAY_OPEN_INBOX_ID: &str = "open-inbox";
 const TRAY_QUIT_APP_ID: &str = "quit-app";
 const FRONTEND_QUIT_REQUESTED_EVENT: &str = "zhixi://quit-requested";
+const FRONTEND_TRAY_NEW_NOTE_EVENT: &str = "zhixi://tray-new-note";
+const FRONTEND_TRAY_OPEN_INBOX_EVENT: &str = "zhixi://tray-open-inbox";
 const ALLOWED_EXTERNAL_URL_SCHEMES: [&str; 3] = ["http://", "https://", "mailto:"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TrayMenuAction {
     ShowWindow,
-    HideWindow,
+    NewNote,
+    OpenInbox,
     QuitApp,
 }
 
@@ -25,7 +29,8 @@ impl TrayMenuAction {
     fn from_menu_id(id: &str) -> Option<Self> {
         match id {
             TRAY_SHOW_WINDOW_ID => Some(Self::ShowWindow),
-            TRAY_HIDE_WINDOW_ID => Some(Self::HideWindow),
+            TRAY_NEW_NOTE_ID => Some(Self::NewNote),
+            TRAY_OPEN_INBOX_ID => Some(Self::OpenInbox),
             TRAY_QUIT_APP_ID => Some(Self::QuitApp),
             _ => None,
         }
@@ -136,12 +141,13 @@ fn system_open_command(url: &str) -> Command {
 }
 
 fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
-    let show_window = MenuItem::with_id(app, TRAY_SHOW_WINDOW_ID, "显示窗口", true, None::<&str>)?;
-    let hide_window =
-        MenuItem::with_id(app, TRAY_HIDE_WINDOW_ID, "隐藏到托盘", true, None::<&str>)?;
+    let show_window = MenuItem::with_id(app, TRAY_SHOW_WINDOW_ID, "打开知栖", true, None::<&str>)?;
+    let new_note = MenuItem::with_id(app, TRAY_NEW_NOTE_ID, "新建笔记", true, None::<&str>)?;
+    let open_inbox = MenuItem::with_id(app, TRAY_OPEN_INBOX_ID, "打开收件箱", true, None::<&str>)?;
     let quit_app = MenuItem::with_id(app, TRAY_QUIT_APP_ID, "退出", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&show_window, &hide_window, &separator, &quit_app])?;
+    let menu =
+        Menu::with_items(app, &[&show_window, &new_note, &open_inbox, &separator, &quit_app])?;
 
     let mut tray = TrayIconBuilder::with_id("main-tray")
         .menu(&menu)
@@ -170,8 +176,17 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
 fn handle_tray_menu_action<R: tauri::Runtime>(app: &tauri::AppHandle<R>, action: TrayMenuAction) {
     match action {
         TrayMenuAction::ShowWindow => show_main_window(app),
-        TrayMenuAction::HideWindow => hide_main_window(app),
+        TrayMenuAction::NewNote => show_window_and_emit(app, FRONTEND_TRAY_NEW_NOTE_EVENT),
+        TrayMenuAction::OpenInbox => show_window_and_emit(app, FRONTEND_TRAY_OPEN_INBOX_EVENT),
         TrayMenuAction::QuitApp => request_app_quit_after_frontend_flush(app),
+    }
+}
+
+fn show_window_and_emit<R: tauri::Runtime>(app: &tauri::AppHandle<R>, event_name: &str) {
+    show_main_window(app);
+
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        let _ = window.emit(event_name, ());
     }
 }
 
@@ -207,12 +222,6 @@ fn tray_event_should_show_window(event: &TrayIconEvent) -> bool {
             ..
         }
     )
-}
-
-fn hide_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-        let _ = window.hide();
-    }
 }
 
 #[cfg(test)]
@@ -256,8 +265,12 @@ mod tests {
             Some(TrayMenuAction::ShowWindow)
         );
         assert_eq!(
-            TrayMenuAction::from_menu_id("hide-window"),
-            Some(TrayMenuAction::HideWindow)
+            TrayMenuAction::from_menu_id("new-note"),
+            Some(TrayMenuAction::NewNote)
+        );
+        assert_eq!(
+            TrayMenuAction::from_menu_id("open-inbox"),
+            Some(TrayMenuAction::OpenInbox)
         );
         assert_eq!(
             TrayMenuAction::from_menu_id("quit-app"),

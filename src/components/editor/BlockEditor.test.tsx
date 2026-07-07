@@ -411,6 +411,38 @@ describe('BlockEditor', () => {
     })
   })
 
+  it('uses an insert handle for a plain empty paragraph block', async () => {
+    const user = userEvent.setup()
+    const onTurnInto = vi.fn()
+    const textPage = {
+      ...page,
+      blocks: [{ id: 'b1', type: 'paragraph' as const, text: '' }],
+    }
+
+    render(
+      <BlockEditor
+        page={textPage as never}
+        allPages={[textPage as never]}
+        onUpdateBlock={vi.fn()}
+        onTurnInto={onTurnInto}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: '拖动块' })).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '输入正文' })).toHaveAttribute(
+      'data-placeholder',
+      '输入 / 打开命令菜单',
+    )
+
+    await user.click(screen.getByRole('button', { name: '添加块' }))
+    expect(screen.getByRole('button', { name: '文本' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '复制' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '待办列表' }))
+
+    expect(onTurnInto).toHaveBeenCalledWith('b1', 'todo')
+  })
+
   it('opens the slash menu from an empty text block and turns that block into the picked type', async () => {
     const user = userEvent.setup()
     const onTurnInto = vi.fn()
@@ -819,6 +851,25 @@ describe('BlockEditor', () => {
     expect(onInsertParagraph).toHaveBeenCalledWith('First line')
   })
 
+  it('creates a paragraph from the blank row when pressing Enter with no text', async () => {
+    const user = userEvent.setup()
+    const onInsert = vi.fn()
+
+    render(
+      <BlockEditor
+        page={{ ...page, blocks: [] } as never}
+        allPages={[page as never]}
+        onUpdateBlock={vi.fn()}
+        onInsert={onInsert}
+      />,
+    )
+
+    await user.click(screen.getByRole('textbox'))
+    await user.keyboard('{Enter}')
+
+    expect(onInsert).toHaveBeenCalledWith('paragraph')
+  })
+
   it('shows an upper drop indicator while dragging over the upper half of another block', () => {
     const onReorderBlock = vi.fn()
     const { container } = render(
@@ -931,6 +982,78 @@ describe('BlockEditor', () => {
     expect(screen.getByPlaceholderText('输入 / 打开命令菜单')).toHaveFocus()
   })
 
+  it('focuses the blank row when clicking the empty area below the editor content', () => {
+    const getBoundingClientRect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function () {
+        const element = this as HTMLElement
+
+        if (element.classList.contains('empty-block-row')) {
+          return {
+            bottom: 120,
+            height: 24,
+            left: 0,
+            right: 760,
+            top: 96,
+            width: 760,
+            x: 0,
+            y: 96,
+            toJSON: () => ({}),
+          } as DOMRect
+        }
+
+        if (element.classList.contains('editor-row')) {
+          return {
+            bottom: 80,
+            height: 32,
+            left: 0,
+            right: 760,
+            top: 48,
+            width: 760,
+            x: 0,
+            y: 48,
+            toJSON: () => ({}),
+          } as DOMRect
+        }
+
+        return {
+          bottom: 0,
+          height: 0,
+          left: 0,
+          right: 0,
+          top: 0,
+          width: 0,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect
+      })
+    const textPage = {
+      ...page,
+      blocks: [{ id: 'b1', type: 'paragraph' as const, text: '最后一段' }],
+    }
+    try {
+      const { container } = render(
+        <BlockEditor
+          page={textPage as never}
+          allPages={[textPage as never]}
+          onUpdateBlock={vi.fn()}
+        />,
+      )
+
+      const surface = container.querySelector('.editor-surface')
+      if (!(surface instanceof HTMLElement)) {
+        throw new Error('Expected editor surface')
+      }
+
+      fireEvent.pointerDown(surface, { clientY: 180 })
+
+      expect(screen.getByPlaceholderText('输入 / 打开命令菜单')).toHaveFocus()
+    } finally {
+      getBoundingClientRect.mockRestore()
+    }
+  })
+
   it('focuses the blank row when pressing ArrowDown at the end of the final list block', () => {
     const listPage = {
       ...page,
@@ -950,6 +1073,155 @@ describe('BlockEditor', () => {
     fireEvent.keyDown(editor, { key: 'ArrowDown' })
 
     expect(screen.getByPlaceholderText('输入 / 打开命令菜单')).toHaveFocus()
+  })
+
+  it('focuses the trailing insert-mode paragraph when clicking the empty area below it', () => {
+    const getBoundingClientRect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function () {
+        const element = this as HTMLElement
+
+        if (element.classList.contains('editor-row')) {
+          return {
+            bottom: 120,
+            height: 24,
+            left: 0,
+            right: 760,
+            top: 96,
+            width: 760,
+            x: 0,
+            y: 96,
+            toJSON: () => ({}),
+          } as DOMRect
+        }
+
+        return {
+          bottom: 0,
+          height: 0,
+          left: 0,
+          right: 0,
+          top: 0,
+          width: 0,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect
+      })
+    const textPage = {
+      ...page,
+      blocks: [{ id: 'b1', type: 'paragraph' as const, text: '' }],
+    }
+    try {
+      const { container } = render(
+        <BlockEditor
+          page={textPage as never}
+          allPages={[textPage as never]}
+          onUpdateBlock={vi.fn()}
+        />,
+      )
+
+      const surface = container.querySelector('.editor-surface')
+      if (!(surface instanceof HTMLElement)) {
+        throw new Error('Expected editor surface')
+      }
+
+      fireEvent.pointerDown(surface, { clientY: 180 })
+
+      expect(screen.getByRole('textbox', { name: '输入正文' })).toHaveFocus()
+    } finally {
+      getBoundingClientRect.mockRestore()
+    }
+  })
+
+  it('does not jump to the final blank row when clicking a gap between earlier blank rows', () => {
+    const getBoundingClientRect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function () {
+        const element = this as HTMLElement
+
+        if (element.classList.contains('editor-row')) {
+          const blockId = element.dataset.blockId
+
+          if (blockId === 'b1') {
+            return {
+              bottom: 80,
+              height: 24,
+              left: 0,
+              right: 760,
+              top: 56,
+              width: 760,
+              x: 0,
+              y: 56,
+              toJSON: () => ({}),
+            } as DOMRect
+          }
+
+          if (blockId === 'b2') {
+            return {
+              bottom: 160,
+              height: 24,
+              left: 0,
+              right: 760,
+              top: 136,
+              width: 760,
+              x: 0,
+              y: 136,
+              toJSON: () => ({}),
+            } as DOMRect
+          }
+        }
+
+        return {
+          bottom: 0,
+          height: 0,
+          left: 0,
+          right: 0,
+          top: 0,
+          width: 0,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect
+      })
+    const textPage = {
+      ...page,
+      blocks: [
+        { id: 'b1', type: 'paragraph' as const, text: '' },
+        { id: 'b2', type: 'paragraph' as const, text: '' },
+      ],
+    }
+
+    try {
+      const { container } = render(
+        <BlockEditor
+          page={textPage as never}
+          allPages={[textPage as never]}
+          onUpdateBlock={vi.fn()}
+        />,
+      )
+
+      const surface = container.querySelector('.editor-surface')
+      const firstEditor = container.querySelector(
+        '.editor-row[data-block-id="b1"] [role="textbox"]',
+      )
+      const secondEditor = container.querySelector(
+        '.editor-row[data-block-id="b2"] [role="textbox"]',
+      )
+
+      if (!(surface instanceof HTMLElement) || !(firstEditor instanceof HTMLElement) || !(secondEditor instanceof HTMLElement)) {
+        throw new Error('Expected editor elements')
+      }
+
+      firstEditor.focus()
+      expect(firstEditor).toHaveFocus()
+
+      fireEvent.pointerDown(surface, { clientY: 108 })
+
+      expect(firstEditor).toHaveFocus()
+      expect(secondEditor).not.toHaveFocus()
+    } finally {
+      getBoundingClientRect.mockRestore()
+    }
   })
 
   it('scrolls the page when the active text block grows below the viewport while typing', async () => {

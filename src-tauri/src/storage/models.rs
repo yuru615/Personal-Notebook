@@ -9,6 +9,8 @@ pub struct WorkspaceSnapshot {
     pub data_tables: Vec<DataTableRecord>,
     #[serde(default)]
     pub mindmaps: Vec<MindmapRecord>,
+    #[serde(default)]
+    pub synced_block_groups: Vec<SyncedBlockGroupRecord>,
     pub pages: Vec<PageRecord>,
     #[serde(default)]
     pub page_properties: Vec<PagePropertyDefinition>,
@@ -28,10 +30,20 @@ pub struct PagePropertyDefinition {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceSettings {
     pub last_opened_page_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inbox_page_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sidebar_layout: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sidebar_width: Option<i64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pinned_sidebar_items: Vec<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clipboard_capture_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -51,7 +63,19 @@ pub struct PagePackageManifest {
     pub boards: Vec<BoardRecord>,
     pub data_tables: Vec<DataTableRecord>,
     pub mindmaps: Vec<MindmapRecord>,
+    #[serde(default)]
+    pub synced_block_groups: Vec<SyncedBlockGroupRecord>,
     pub assets: Vec<AssetMeta>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncedBlockGroupRecord {
+    pub id: String,
+    pub blocks: Vec<Value>,
+    pub primary_instance_id: String,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -199,6 +223,8 @@ pub struct BootstrapPayload {
     pub boards: Vec<BoardRecord>,
     pub data_tables: Vec<DataTableRecord>,
     pub mindmaps: Vec<MindmapRecord>,
+    #[serde(default)]
+    pub synced_block_groups: Vec<SyncedBlockGroupRecord>,
     pub settings: Option<WorkspaceSettings>,
 }
 

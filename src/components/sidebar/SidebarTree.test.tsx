@@ -165,6 +165,61 @@ describe('SidebarTree', () => {
     expect(screen.queryByText('共享页面')).not.toBeInTheDocument()
   })
 
+  it('renders the inbox page inside a system section', () => {
+    render(
+      <MemoryRouter>
+        <SidebarTree
+          pages={[{ ...pages[0], id: 'page_inbox', title: '收件箱' }, ...pages] as never}
+          currentPageId="page_parent"
+          inboxPageId="page_inbox"
+          onCreatePage={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByText('系统')).toBeInTheDocument()
+    expect(screen.getByLabelText('系统')).toBeInTheDocument()
+    expect(
+      within(screen.getByLabelText('系统')).getByRole('link', { name: '收件箱' }),
+    ).toBeInTheDocument()
+  })
+
+  it('does not render the inbox page again inside my pages', () => {
+    render(
+      <MemoryRouter>
+        <SidebarTree
+          pages={[{ ...pages[0], id: 'page_inbox', title: '收件箱' }, ...pages] as never}
+          currentPageId="page_parent"
+          inboxPageId="page_inbox"
+          onCreatePage={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getAllByRole('link', { name: '收件箱' })).toHaveLength(1)
+  })
+
+  it('lets users collapse and expand the system section', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <MemoryRouter>
+        <SidebarTree
+          pages={[{ ...pages[0], id: 'page_inbox', title: '收件箱' }, ...pages] as never}
+          currentPageId="page_parent"
+          inboxPageId="page_inbox"
+          onCreatePage={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getByRole('button', { name: '收起系统' }))
+    expect(screen.queryByLabelText('系统')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '展开系统' }))
+    expect(screen.getByLabelText('系统')).toBeInTheDocument()
+  })
+
   it('lets users collapse and expand the pinned section', async () => {
     const user = userEvent.setup()
 
@@ -1027,6 +1082,101 @@ describe('SidebarTree', () => {
       position: 'fixed',
       left: '192px',
       top: '208px',
+    })
+
+    rectSpy.mockRestore()
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      writable: true,
+      value: originalInnerWidth,
+    })
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      writable: true,
+      value: originalInnerHeight,
+    })
+  })
+
+  it('flips the page actions menu upward when the trigger is near the viewport bottom', async () => {
+    const user = userEvent.setup()
+    const originalInnerWidth = window.innerWidth
+    const originalInnerHeight = window.innerHeight
+
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      writable: true,
+      value: 1280,
+    })
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      writable: true,
+      value: 520,
+    })
+
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function mockRect() {
+        if (this.classList?.contains('sidebar-tree-more-button')) {
+          return {
+            x: 160,
+            y: 470,
+            top: 470,
+            right: 184,
+            bottom: 494,
+            left: 160,
+            width: 24,
+            height: 24,
+            toJSON: () => ({}),
+          }
+        }
+
+        if (this.classList?.contains('sidebar-tree-page-menu-popover')) {
+          return {
+            x: 0,
+            y: 0,
+            top: 0,
+            right: 176,
+            bottom: 124,
+            left: 0,
+            width: 176,
+            height: 124,
+            toJSON: () => ({}),
+          }
+        }
+
+        return {
+          x: 0,
+          y: 0,
+          top: 0,
+          right: 0,
+          bottom: 0,
+          left: 0,
+          width: 0,
+          height: 0,
+          toJSON: () => ({}),
+        }
+      })
+
+    render(
+      <MemoryRouter>
+        <SidebarTree
+          pages={pages as never}
+          currentPageId="page_parent"
+          onCreatePage={vi.fn()}
+          onRenamePage={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getAllByRole('button', { name: /页面更多操作/ })[0])
+
+    const popover = document.body.querySelector('.sidebar-tree-page-menu-popover')
+
+    expect(popover).not.toBeNull()
+    expect(popover).toHaveStyle({
+      position: 'fixed',
+      left: '192px',
+      top: '374px',
     })
 
     rectSpy.mockRestore()

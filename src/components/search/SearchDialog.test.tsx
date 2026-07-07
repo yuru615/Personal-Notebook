@@ -143,6 +143,20 @@ const mindmaps: MindmapRecord[] = [
 ]
 
 describe('SearchDialog', () => {
+  it('locks page scrolling while the search dialog is open', () => {
+    document.documentElement.style.overflow = 'auto'
+
+    const { rerender } = render(
+      <SearchDialog open pages={pages} onClose={vi.fn()} onOpenPage={vi.fn()} />,
+    )
+
+    expect(document.documentElement.style.overflow).toBe('hidden')
+
+    rerender(<SearchDialog open={false} pages={pages} onClose={vi.fn()} onOpenPage={vi.fn()} />)
+
+    expect(document.documentElement.style.overflow).toBe('auto')
+  })
+
   it('renders the overlay at the document root so it covers the whole app shell', () => {
     const { container } = render(
       <div data-testid="search-host">
@@ -513,5 +527,92 @@ describe('SearchDialog', () => {
 
     expect(screen.getByText('产品数据库')).toBeInTheDocument()
     expect(screen.getByText('路线图记录')).toBeInTheDocument()
+  })
+
+  it('shows synced and reference source labels', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <SearchDialog
+        open
+        pages={[]}
+        onClose={vi.fn()}
+        onOpenPage={vi.fn()}
+        onSearch={vi.fn().mockResolvedValue([
+          {
+            kind: 'page',
+            pageId: 'page-sync',
+            blockId: 'container-sync',
+            title: 'Sync page',
+            icon: null,
+            excerpt: 'Shared alpha note',
+            matchSource: 'synced_block',
+            sourceLabel: '同步块内容',
+          },
+          {
+            kind: 'page',
+            pageId: 'page-reference',
+            blockId: 'container-reference',
+            title: 'Reference page',
+            icon: null,
+            excerpt: 'Shared alpha note',
+            matchSource: 'reference_block',
+            sourceLabel: '引用块内容',
+          },
+        ])}
+      />,
+    )
+
+    await user.type(screen.getByPlaceholderText(searchPlaceholder), 'shared')
+
+    expect(await screen.findByText('同步块内容')).toBeInTheDocument()
+    expect(screen.getByText('引用块内容')).toBeInTheDocument()
+  })
+
+  it('renders a media group and lets the media filter isolate media hits', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <SearchDialog
+        open
+        pages={[]}
+        onClose={vi.fn()}
+        onOpenPage={vi.fn()}
+        onSearch={vi.fn().mockResolvedValue([
+          {
+            kind: 'page',
+            pageId: 'page-media',
+            blockId: 'block-media',
+            title: 'Media Notes',
+            icon: '🖼️',
+            excerpt: 'Capture001.png / 首页截图',
+            matchSource: 'media',
+            sourceLabel: '媒体',
+          },
+          {
+            kind: 'page',
+            pageId: 'page-text',
+            blockId: 'block-text',
+            title: 'Search Notes',
+            icon: '📄',
+            excerpt: 'Search ranking notes',
+            matchSource: 'body',
+            sourceLabel: '正文',
+          },
+        ])}
+      />,
+    )
+
+    await user.type(screen.getByPlaceholderText(searchPlaceholder), 'search')
+
+    expect(await screen.findByRole('heading', { name: '媒体' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '页面' })).toBeInTheDocument()
+    expect(screen.getByText('Capture001.png / 首页截图')).toBeInTheDocument()
+    expect(screen.getByText('Search ranking notes')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '媒体' }))
+
+    expect(screen.getByText('Capture001.png / 首页截图')).toBeInTheDocument()
+    expect(screen.queryByText('Search ranking notes')).not.toBeInTheDocument()
   })
 })

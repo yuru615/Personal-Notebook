@@ -16,6 +16,7 @@ type MediaBlockRecord = ImageBlock | VideoBlock | AudioBlock
 interface MediaBlockProps {
   block: MediaBlockRecord
   onChange: (block: MediaBlockRecord) => void
+  readOnly?: boolean
 }
 
 interface ImagePreviewView {
@@ -149,7 +150,7 @@ function formatPreviewTransform(scale: number, offset: { x: number; y: number })
   return `translate(${offset.x}px, ${offset.y}px) scale(${scale})`
 }
 
-export function MediaBlock({ block, onChange }: MediaBlockProps) {
+export function MediaBlock({ block, onChange, readOnly = false }: MediaBlockProps) {
   const [assetUrl, setAssetUrl] = useState<string | null>(null)
   const [videoPosterUrl, setVideoPosterUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -363,6 +364,15 @@ export function MediaBlock({ block, onChange }: MediaBlockProps) {
 
   function renderPreview() {
     if (!block.assetId) {
+      if (readOnly) {
+        return (
+          <div className="media-block-missing">
+            <Icon size={20} aria-hidden="true" />
+            <span>媒体文件缺失</span>
+          </div>
+        )
+      }
+
       return (
         <button
           type="button"
@@ -460,6 +470,7 @@ export function MediaBlock({ block, onChange }: MediaBlockProps) {
             <span>{block.name || labels.title}</span>
           </div>
           <button
+            hidden={readOnly}
             type="button"
             className="media-block-replace"
             onClick={() => {
@@ -472,7 +483,7 @@ export function MediaBlock({ block, onChange }: MediaBlockProps) {
           </button>
         </div>
         <div className="media-block-preview">{renderPreview()}</div>
-        <figcaption>
+        <figcaption hidden={readOnly}>
           <input
             className="media-block-caption"
             value={block.caption}

@@ -84,6 +84,14 @@ describe('page outline layout', () => {
     expect(cssRule('.page-panel')).toContain('var(--page-outline-gap)')
   })
 
+  it('lets the page menu shrink and scroll inside smaller windows', () => {
+    const pageMenuPopover = cssRule('.page-menu-popover')
+
+    expect(pageMenuPopover).toContain('width: min(248px, calc(100vw - 24px));')
+    expect(pageMenuPopover).toContain('max-height:')
+    expect(pageMenuPopover).toContain('overflow: auto;')
+  })
+
   it('supports an adaptive page content width mode', () => {
     expect(cssRule('.page-content-adaptive')).toContain('max-width: var(--page-content-available-width);')
   })
@@ -127,5 +135,78 @@ describe('page outline layout', () => {
     expect(cssRule('.page-header-external-toolbar .page-header-icon-with-cover')).toContain(
       'margin-top: 4px;',
     )
+  })
+
+  it('renders page property values without a persistent gray pill background', () => {
+    const propertyValue = cssRule('.page-property-value')
+    const propertyValueHover = cssRule('.page-property-value:hover')
+
+    expect(propertyValue).toContain('background: transparent;')
+    expect(propertyValueHover).toContain('background: rgba(55, 53, 47, 0.06);')
+    expect(styles).toContain('.page-property-add {\n  background: #f7f6f3;')
+  })
+
+  it('lets the notes property expand to the page content width while editing', () => {
+    expect(cssRule('.page-property-editor-wide')).toContain('width: 100%;')
+    expect(cssRule('.page-property-editor-wide')).toContain('justify-self: stretch;')
+    expect(cssRule('.page-property-input-wide')).toContain('width: 100%;')
+    expect(cssRule('.page-property-input-wide')).toContain('max-width: 100%;')
+  })
+
+  it('keeps the slash hint visible for insert-mode empty paragraph rows', () => {
+    expect(cssRule(".block-input-insert[contenteditable='true'][data-empty='true']::before")).toContain(
+      'content: attr(data-placeholder);',
+    )
+    expect(cssRule(".editor-row .block-input-insert[contenteditable='true'][data-empty='true']::before")).toContain(
+      "content: '';",
+    )
+    expect(cssRule(".editor-row .block-input-insert[contenteditable='true'][data-empty='true']:focus::before")).toContain(
+      'content: attr(data-placeholder);',
+    )
+  })
+
+  it('shows the trailing empty-row plus only on hover or focus', () => {
+    expect(cssRule('.empty-block-plus')).toContain('opacity: 0;')
+    expect(cssRule('.empty-block-row:hover .empty-block-plus')).toContain('opacity: 1;')
+    expect(cssRule('.empty-block-row:focus-within .empty-block-plus')).toContain('opacity: 1;')
+    expect(styles).not.toContain('.block-frame-insert-mode .block-handle')
+  })
+
+  it('renders reference synced blocks as a lighter callout with a left accent bar', () => {
+    expect(cssRule('.synced-block-container')).toContain('border: 0;')
+    expect(cssRule('.synced-block-container')).toContain('border-left:')
+    expect(cssRule('.synced-block-container')).toContain('background: transparent;')
+    expect(cssRule('.synced-block-container')).toContain('border-radius: 0;')
+    expect(cssRule('.synced-block-container-reference')).toContain('border-left-color:')
+  })
+
+  it('renders synced source blocks with the same lightweight form but a stronger accent bar', () => {
+    expect(cssRule('.synced-block-container-sync')).toContain('border-left-color:')
+    expect(cssRule('.synced-block-container')).toContain('background: transparent;')
+    expect(cssRule('.synced-block-container')).toContain('border-radius: 0;')
+  })
+
+  it('keeps synced block callouts aligned with the standard block handle position', () => {
+    const syncedBlockContainer = cssRule('.synced-block-container')
+
+    expect(syncedBlockContainer).toContain('padding-left: 12px;')
+    expect(syncedBlockContainer).not.toContain('padding: 8px 0 8px 12px;')
+    expect(syncedBlockContainer).not.toContain('padding-top:')
+  })
+
+  it('shows a clear focus state for reference synced blocks', () => {
+    expect(cssRule('.synced-block-container-reference:focus')).toContain('outline: 0;')
+    expect(cssRule('.synced-block-container-reference:focus')).toContain('background:')
+    expect(cssRule('.synced-block-container-reference:focus')).toContain('box-shadow:')
+    expect(cssRule('.synced-block-container-reference:focus')).toContain('border-left-color:')
+    expect(cssRule('.synced-block-container-reference:focus-visible')).toContain('outline: 0;')
+  })
+
+  it('renders missing synced blocks with the same lightweight callout and focus treatment', () => {
+    expect(cssRule('.synced-block-container-missing')).toContain('border-left-color:')
+    expect(cssRule('.synced-block-container-missing')).toContain('min-height:')
+    expect(cssRule('.synced-block-container-missing:focus')).toContain('outline: 0;')
+    expect(cssRule('.synced-block-container-missing:focus')).toContain('background:')
+    expect(cssRule('.synced-block-container-missing:focus')).toContain('box-shadow:')
   })
 })

@@ -11,6 +11,7 @@ export const uiCopy = {
     desktopApp: '桌面端',
     compactMode: '紧凑模式',
     classicMode: '经典模式',
+    systemSection: '系统',
     pageTree: '页面树',
     pinnedSection: '星标置顶',
     sharedSection: '共享页面',

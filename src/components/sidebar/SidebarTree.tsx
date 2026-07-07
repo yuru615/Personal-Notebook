@@ -1,5 +1,5 @@
 import { type ReactNode, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Bell, ChevronRight, Download, MoreHorizontal, Plus, Search } from 'lucide-react'
+import { Bell, ChevronRight, MoreHorizontal, Plus, Search, Upload } from 'lucide-react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useDismissableLayer } from '../editor/useDismissableLayer'
 import { DEFAULT_PAGE_ICON } from '../../domain/pageIcons'
@@ -26,7 +26,7 @@ const SIDEBAR_PAGE_MENU_GAP = 8
 const SIDEBAR_PAGE_MENU_VIEWPORT_PADDING = 12
 
 type SidebarLayout = NonNullable<WorkspaceSettings['sidebarLayout']>
-type SidebarSectionKey = 'pinned' | 'shared' | 'my_pages'
+type SidebarSectionKey = 'system' | 'pinned' | 'shared' | 'my_pages'
 type SidebarMenuItem =
   | {
       kind: 'page'
@@ -52,6 +52,7 @@ interface SidebarTreeProps {
   pages: PageRecord[]
   dataTables?: DataTableRecord[]
   currentPageId: PageId | null
+  inboxPageId?: PageId | null
   pinnedSidebarItems?: SidebarPinnedItem[]
   onCreatePage: () => void
   onSearch?: () => void
@@ -76,6 +77,7 @@ export function SidebarTree({
   pages,
   dataTables = [],
   currentPageId,
+  inboxPageId = null,
   pinnedSidebarItems = [],
   onCreatePage,
   onSearch,
@@ -98,13 +100,18 @@ export function SidebarTree({
   const [utilityMenuPosition, setUtilityMenuPosition] = useState<SidebarPopoverPosition | null>(null)
   const [sidebarScrolled, setSidebarScrolled] = useState(false)
   const [expandedSections, setExpandedSections] = useState<Record<SidebarSectionKey, boolean>>({
+    system: true,
     pinned: true,
     shared: true,
     my_pages: true,
   })
+  const systemInboxPage = useMemo(
+    () => pages.find((page) => page.id === inboxPageId) ?? null,
+    [inboxPageId, pages],
+  )
   const visiblePages = useMemo(
-    () => buildVisiblePageItems(pages, expandedPageIds),
-    [expandedPageIds, pages],
+    () => buildVisiblePageItems(pages.filter((page) => page.id !== inboxPageId), expandedPageIds),
+    [expandedPageIds, inboxPageId, pages],
   )
   const recentBoards: Array<{ board: { id: string; title: string }; pageId: string }> = []
   const dataTablesByPageId = useMemo(
@@ -438,7 +445,7 @@ export function SidebarTree({
               void onImportArchive?.()
             }}
           >
-            <Download size={15} strokeWidth={1.9} />
+            <Upload size={15} strokeWidth={1.9} />
           </button>
           <button
             type="button"
@@ -540,6 +547,25 @@ export function SidebarTree({
       ) : null}
 
       {renderSidebarSection({
+        sectionKey: 'system',
+        title: uiCopy.sidebar.systemSection,
+        hidden: systemInboxPage === null,
+        children: systemInboxPage ? (
+          <div className="sidebar-tree" aria-label={uiCopy.sidebar.systemSection}>
+            <NavLink
+              to={`/pages/${systemInboxPage.id}`}
+              className={({ isActive }) => getSidebarItemClassName(isActive)}
+            >
+              <span className="sidebar-tree-icon" aria-hidden="true">
+                {systemInboxPage.icon ?? DEFAULT_PAGE_ICON}
+              </span>
+              <span className="sidebar-tree-label">{systemInboxPage.title}</span>
+            </NavLink>
+          </div>
+        ) : null,
+      })}
+
+      {renderSidebarSection({
         sectionKey: 'pinned',
         title: uiCopy.sidebar.pinnedSection,
         hidden: pinnedItemEntries.length === 0,
@@ -599,10 +625,7 @@ export function SidebarTree({
                   </NavLink>
                   {onTogglePinnedSidebarItem ? (
                     <div className="sidebar-tree-actions">
-                      <div
-                        className="page-menu sidebar-tree-page-menu"
-                        ref={isMenuOpen ? menuRef : null}
-                      >
+                      <div className="page-menu sidebar-tree-page-menu">
                         <button
                           type="button"
                           className="sidebar-tree-more-button"
@@ -736,10 +759,7 @@ export function SidebarTree({
                 </NavLink>
                 {onRenamePage || onTogglePinnedSidebarItem || onExportPage || onDuplicatePage || onDeletePage ? (
                   <div className="sidebar-tree-actions">
-                    <div
-                      className="page-menu sidebar-tree-page-menu"
-                      ref={isMenuOpen ? menuRef : null}
-                    >
+                    <div className="page-menu sidebar-tree-page-menu">
                       <button
                         type="button"
                         className="sidebar-tree-more-button"
@@ -820,10 +840,7 @@ export function SidebarTree({
                     </NavLink>
                     {onTogglePinnedSidebarItem ? (
                       <div className="sidebar-tree-actions">
-                        <div
-                          className="page-menu sidebar-tree-page-menu"
-                          ref={isDataTableMenuOpen ? menuRef : null}
-                        >
+                        <div className="page-menu sidebar-tree-page-menu">
                           <button
                             type="button"
                             className="sidebar-tree-more-button"
@@ -898,13 +915,20 @@ function resolveSidebarPopoverPosition({
   const left = preferredLeft <= maxLeft
     ? preferredLeft
     : Math.max(SIDEBAR_PAGE_MENU_VIEWPORT_PADDING, fallbackLeft)
-  const top = Math.min(
-    Math.max(SIDEBAR_PAGE_MENU_VIEWPORT_PADDING, anchorRect.top - 4),
-    Math.max(
-      SIDEBAR_PAGE_MENU_VIEWPORT_PADDING,
-      viewportHeight - menuRect.height - SIDEBAR_PAGE_MENU_VIEWPORT_PADDING,
-    ),
+  const minTop = SIDEBAR_PAGE_MENU_VIEWPORT_PADDING
+  const maxTop = Math.max(
+    minTop,
+    viewportHeight - menuRect.height - SIDEBAR_PAGE_MENU_VIEWPORT_PADDING,
   )
+  const preferredTop = anchorRect.top - 4
+  let top = preferredTop
+
+  if (menuRect.height > 0 && preferredTop + menuRect.height > viewportHeight - minTop) {
+    const flippedTop = anchorRect.bottom - menuRect.height + 4
+    top = flippedTop >= minTop ? flippedTop : maxTop
+  }
+
+  top = Math.min(Math.max(minTop, top), maxTop)
 
   return {
     left: Math.round(left),

@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
 const host = process.env.TAURI_DEV_HOST
@@ -19,7 +19,7 @@ export default defineConfig({
         }
       : undefined,
     watch: {
-      ignored: ['**/src-tauri/**'],
+      ignored: ['**/src-tauri/**', '**/.worktrees/**'],
     },
   },
   envPrefix: ['VITE_', 'TAURI_ENV_*'],
@@ -30,6 +30,7 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    exclude: [...configDefaults.exclude, '**/.worktrees/**'],
     environmentOptions: {
       jsdom: {
         url: 'http://localhost/',

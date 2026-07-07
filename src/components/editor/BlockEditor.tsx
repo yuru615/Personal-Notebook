@@ -9,8 +9,15 @@ import type {
   DataTableRecord,
   MindmapRecord,
   PageRecord,
+  SyncedBlockGroupRecord,
+  SyncedBlockMode,
   TextBlockStyle,
 } from '../../domain/types'
+import {
+  buildSyncedPickerItems,
+  collectSyncedGroupInstances,
+  findPrimaryInstanceLocation,
+} from '../../domain/syncedBlocks'
 import { uiCopy } from '../../ui/copy'
 import { buildMindmapPreviewSvgDataUrl } from '../mindmap/mindmapPreview'
 import { buildWhiteboardPreviewSvgDataUrl } from '../whiteboard/whiteboardPreview'
@@ -24,12 +31,14 @@ import { CodeBlock } from './blocks/CodeBlock'
 import { DataTableBlock } from './blocks/DataTableBlock'
 import { ListBlock } from './blocks/ListBlock'
 import { ParagraphBlock } from './blocks/ParagraphBlock'
+import { SyncedBlockContainer } from './blocks/SyncedBlockContainer'
 import { TableBlock } from './blocks/TableBlock'
 import { TodoBlock } from './blocks/TodoBlock'
 import { MediaBlock } from './blocks/MediaBlock'
 import { MindmapBlock } from './blocks/MindmapBlock'
 import { WhiteboardBlock } from './blocks/WhiteboardBlock'
-import { getSlashMenuOptions, SlashMenu } from './SlashMenu'
+import { SyncedBlockPickerDialog } from './SyncedBlockPickerDialog'
+import { getSlashMenuOptions, SlashMenu, type SlashMenuCommand } from './SlashMenu'
 import type { ReorderPosition } from '../../utils/reorder'
 import type { PageRelationAutocompleteItem } from './PageRelationAutocomplete'
 
@@ -53,12 +62,29 @@ interface BlockSlashCommand {
   activeOptionIndex: number
 }
 
+interface PendingSyncedPicker {
+  mode: SyncedBlockMode
+  target: { kind: 'replace'; blockId: string } | { kind: 'append' }
+}
+
+function isPlainEmptyParagraphBlock(block: BlockRecord) {
+  return (
+    block.type === 'paragraph' &&
+    block.text.trim().length === 0 &&
+    (!block.richText || block.richText.every((segment) => segment.text.length === 0)) &&
+    !block.textColor &&
+    !block.backgroundColor &&
+    !block.textAlign
+  )
+}
+
 interface BlockEditorProps {
   page: PageRecord
   allPages: PageRecord[]
   boards?: BoardRecord[]
   dataTables?: DataTableRecord[]
   mindmaps?: MindmapRecord[]
+  syncedBlockGroups?: SyncedBlockGroupRecord[]
   allowedBlockTypes?: BlockType[]
   onUpdateBlock: (blockId: string, nextBlock: BlockRecord) => void
   onInsert?: (type: BlockType) => Promise<string | null> | string | null | void
@@ -82,6 +108,24 @@ interface BlockEditorProps {
   onOpenMindmap?: (mindmapId: string) => void
   onRestoreMindmap?: (mindmapId: string) => void
   onCreatePageRelation?: (title: string) => Promise<PageRelationAutocompleteItem>
+  onCreateSyncedBlockFromRange?: (
+    startBlockId: string,
+    endBlockId: string,
+  ) => Promise<unknown> | unknown
+  onCreateSyncedBlockFromExistingBlock?: (
+    sourcePageId: string,
+    sourceBlockId: string,
+    targetBlockId: string,
+    mode: SyncedBlockMode,
+  ) => Promise<unknown> | unknown
+  onReplaceBlockWithSyncedInstance?: (
+    blockId: string,
+    groupId: string,
+    mode: SyncedBlockMode,
+  ) => Promise<unknown> | unknown
+  onUpdateSyncedGroupBlock?: (groupId: string, blockId: string, nextBlock: BlockRecord) => void
+  onUnsyncBlockInstance?: (blockId: string) => void
+  onOpenPrimarySyncedBlock?: (pageId: string, blockId: string) => void
 }
 
 export function BlockEditor({
@@ -90,6 +134,7 @@ export function BlockEditor({
   boards = [],
   dataTables = [],
   mindmaps = [],
+  syncedBlockGroups = [],
   allowedBlockTypes,
   onUpdateBlock,
   onInsert,
@@ -109,6 +154,12 @@ export function BlockEditor({
   onOpenMindmap,
   onRestoreMindmap,
   onCreatePageRelation,
+  onCreateSyncedBlockFromRange,
+  onCreateSyncedBlockFromExistingBlock,
+  onReplaceBlockWithSyncedInstance,
+  onUpdateSyncedGroupBlock,
+  onUnsyncBlockInstance,
+  onOpenPrimarySyncedBlock,
 }: BlockEditorProps) {
   const pageById = new Map(allPages.map((item) => [item.id, item]))
   const relationPages = allPages.map(({ id, title, icon, parentId }) => ({
@@ -122,6 +173,7 @@ export function BlockEditor({
   const boardMap = new Map(boards.map((board) => [board.id, board]))
   const dataTableMap = new Map(dataTables.map((dataTable) => [dataTable.id, dataTable]))
   const mindmapMap = new Map(mindmaps.map((mindmap) => [mindmap.id, mindmap]))
+  const syncedBlockGroupMap = new Map(syncedBlockGroups.map((group) => [group.id, group]))
   const draggingBlockId = useRef<string | null>(null)
   const pendingFocusBlockId = useRef<FocusRequest | null>(null)
   const scrollFrameId = useRef<number | null>(null)
@@ -130,6 +182,8 @@ export function BlockEditor({
   const [draggingVisualBlockId, setDraggingVisualBlockId] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
   const [blockSlashCommand, setBlockSlashCommand] = useState<BlockSlashCommand | null>(null)
+  const [syncedRangeStartBlockId, setSyncedRangeStartBlockId] = useState<string | null>(null)
+  const [pendingSyncedPicker, setPendingSyncedPicker] = useState<PendingSyncedPicker | null>(null)
   const [focusRequestVersion, setFocusRequestVersion] = useState(0)
   const blockSlashMenuOptions = blockSlashCommand
     ? getSlashMenuOptions(blockSlashCommand.query, allowedBlockTypes)
@@ -145,6 +199,8 @@ export function BlockEditor({
     anchorRef: slashMenuAnchorRef,
     menuRef: slashMenuRef,
   })
+  const trailingBlock = page.blocks.length > 0 ? page.blocks[page.blocks.length - 1] : null
+  const syncedPickerItems = buildSyncedPickerItems(allPages, syncedBlockGroups)
 
   useEffect(() => {
     const focusRequest = pendingFocusBlockId.current
@@ -186,6 +242,12 @@ export function BlockEditor({
     [],
   )
 
+  useEffect(() => {
+    setSyncedRangeStartBlockId(null)
+    setPendingSyncedPicker(null)
+    setBlockSlashCommand(null)
+  }, [page.id])
+
   function clearDragState() {
     draggingBlockId.current = null
     setDraggingVisualBlockId(null)
@@ -221,9 +283,18 @@ export function BlockEditor({
     })
   }
 
-  function renderBlockRow(block: BlockRecord, children: ReactNode) {
+  function renderBlockRow(
+    block: BlockRecord,
+    children: ReactNode,
+    options: {
+      menuAllowedBlockTypes?: BlockType[]
+      extraMenuActions?: Array<{ key: string; label: string; danger?: boolean; onSelect: () => void }>
+      badge?: string | null
+    } = {},
+  ) {
     const blockId = block.id
     const textStyleableBlock = isTextStyleableBlock(block) ? block : null
+    const isInsertMenuBlock = isPlainEmptyParagraphBlock(block)
     const textStyle = textStyleableBlock ? getTextBlockStyle(textStyleableBlock) : undefined
     const content = textStyle ? (
       <div className="block-style-surface" style={getTextBackgroundStyle(textStyle)}>
@@ -240,7 +311,8 @@ export function BlockEditor({
         : block.type === 'child_page' ||
             block.type === 'whiteboard' ||
             block.type === 'mindmap' ||
-            block.type === 'data_table'
+            block.type === 'data_table' ||
+            block.type === 'synced_block'
           ? 'editor-row-kind-feature-card'
           : ''
     const rowClassName = [
@@ -252,6 +324,40 @@ export function BlockEditor({
     ]
       .filter(Boolean)
       .join(' ')
+    const syncSelectionActions =
+      block.type !== 'synced_block' && onCreateSyncedBlockFromRange
+        ? syncedRangeStartBlockId
+          ? [
+              {
+                key: 'finish-sync-range',
+                label: '同步到这里',
+                onSelect: () => {
+                  void finishSyncedRange(blockId)
+                },
+              },
+              ...(syncedRangeStartBlockId === blockId
+                ? [
+                    {
+                      key: 'cancel-sync-range',
+                      label: '取消同步选区',
+                      onSelect: () => {
+                        setSyncedRangeStartBlockId(null)
+                      },
+                    },
+                  ]
+                : []),
+            ]
+          : [
+              {
+                key: 'start-sync-range',
+                label: '开始同步选区',
+                onSelect: () => {
+                  setSyncedRangeStartBlockId(blockId)
+                },
+              },
+            ]
+        : []
+    const extraMenuActions = [...syncSelectionActions, ...(options.extraMenuActions ?? [])]
 
     return (
       <div
@@ -298,8 +404,11 @@ export function BlockEditor({
         }}
       >
         <BlockFrame
+          badge={options.badge ?? null}
           textStyle={textStyle}
-          allowedBlockTypes={allowedBlockTypes}
+          allowedBlockTypes={options.menuAllowedBlockTypes ?? allowedBlockTypes}
+          menuMode={isInsertMenuBlock ? 'insert' : 'block'}
+          extraMenuActions={extraMenuActions}
           onDragStart={() => {
             draggingBlockId.current = blockId
             setDraggingVisualBlockId(blockId)
@@ -311,6 +420,9 @@ export function BlockEditor({
               ? (nextStyle) => handleChangeTextStyle(textStyleableBlock, nextStyle)
               : undefined
           }
+          onInsertPick={(type) => {
+            void handleInsertMenuCommand(blockId, type)
+          }}
           onTurnInto={(type) => {
             void turnBlockInto(blockId, type)
           }}
@@ -391,7 +503,39 @@ export function BlockEditor({
     requestBlockFocus(blockId, getFocusModeForBlockType(type))
   }
 
-  async function pickBlockSlashCommand(type: BlockType) {
+  function openSyncedPicker(mode: SyncedBlockMode, target: PendingSyncedPicker['target']) {
+    setPendingSyncedPicker({ mode, target })
+  }
+
+  async function handleInsertMenuCommand(blockId: string, command: SlashMenuCommand) {
+    if (command === 'synced_block_sync') {
+      openSyncedPicker('sync', { kind: 'replace', blockId })
+      return
+    }
+
+    if (command === 'synced_block_reference') {
+      openSyncedPicker('reference', { kind: 'replace', blockId })
+      return
+    }
+
+    await turnBlockInto(blockId, command)
+  }
+
+  async function handleAppendSlashCommand(command: SlashMenuCommand) {
+    if (command === 'synced_block_sync') {
+      openSyncedPicker('sync', { kind: 'append' })
+      return
+    }
+
+    if (command === 'synced_block_reference') {
+      openSyncedPicker('reference', { kind: 'append' })
+      return
+    }
+
+    await insertBlock(command)
+  }
+
+  async function pickBlockSlashCommand(type: SlashMenuCommand) {
     const command = blockSlashCommand
 
     if (!command) {
@@ -399,7 +543,67 @@ export function BlockEditor({
     }
 
     setBlockSlashCommand(null)
-    await turnBlockInto(command.blockId, type)
+    await handleInsertMenuCommand(command.blockId, type)
+  }
+
+  async function handlePickSyncedItem(itemId: string) {
+    const picker = pendingSyncedPicker
+
+    if (!picker) {
+      return
+    }
+
+    setPendingSyncedPicker(null)
+
+    if (itemId.startsWith('block:')) {
+      const [, sourcePageId, sourceBlockId] = itemId.split(':')
+      if (!sourcePageId || !sourceBlockId) {
+        return
+      }
+
+      if (picker.target.kind === 'replace') {
+        await onCreateSyncedBlockFromExistingBlock?.(
+          sourcePageId,
+          sourceBlockId,
+          picker.target.blockId,
+          picker.mode,
+        )
+        return
+      }
+
+      const placeholderBlockId = await onInsert?.('paragraph')
+      if (placeholderBlockId) {
+        await onCreateSyncedBlockFromExistingBlock?.(
+          sourcePageId,
+          sourceBlockId,
+          placeholderBlockId,
+          picker.mode,
+        )
+      }
+      return
+    }
+
+    const groupId = itemId.startsWith('group:') ? itemId.slice('group:'.length) : itemId
+    if (picker.target.kind === 'replace') {
+      await onReplaceBlockWithSyncedInstance?.(picker.target.blockId, groupId, picker.mode)
+      return
+    }
+
+    const placeholderBlockId = await onInsert?.('paragraph')
+    if (placeholderBlockId) {
+      await onReplaceBlockWithSyncedInstance?.(placeholderBlockId, groupId, picker.mode)
+    }
+  }
+
+  async function finishSyncedRange(endBlockId: string) {
+    const startBlockId = syncedRangeStartBlockId
+
+    if (!startBlockId) {
+      return
+    }
+
+    setSyncedRangeStartBlockId(null)
+    await onCreateSyncedBlockFromRange?.(startBlockId, endBlockId)
   }
 
   function focusPreviousBlockAfterDelete(blockId: string) {
@@ -461,11 +665,36 @@ export function BlockEditor({
 
   function focusEmptyBlockRow() {
     const input = document.querySelector<HTMLInputElement>('.empty-block-input')
-    input?.focus()
+    focusEditorTargetAtEnd(input)
 
     if (input) {
       scheduleInputScroll(input)
     }
+  }
+
+  function focusTrailingInsertTarget() {
+    if (trailingBlock && isPlainEmptyParagraphBlock(trailingBlock)) {
+      const targetRow = document.querySelector<HTMLElement>(`.editor-row[data-block-id="${trailingBlock.id}"]`)
+      const targetInput = targetRow ? getFocusTargetForMode(targetRow, 'rich_text') : null
+
+      if (targetInput) {
+        focusEditorTargetAtEnd(targetInput)
+        scheduleInputScroll(targetInput)
+        return
+      }
+    }
+
+    focusEmptyBlockRow()
+  }
+
+  function isPointerInTrailingSurfaceGap(surface: HTMLElement, clientY: number) {
+    const lastChild = surface.lastElementChild
+
+    if (!(lastChild instanceof HTMLElement)) {
+      return true
+    }
+
+    return clientY >= lastChild.getBoundingClientRect().bottom
   }
 
   function isFinalBlock(blockId: string) {
@@ -731,19 +960,27 @@ export function BlockEditor({
       className="editor-surface"
       onInput={keepInputInView}
       onPointerDownCapture={(event) => {
-        if (!blockSlashCommand || !(event.target instanceof Element)) {
+        if (!(event.target instanceof Element)) {
           return
         }
 
-        const targetRow = event.target.closest<HTMLElement>('.editor-row')
+        if (blockSlashCommand) {
+          const targetRow = event.target.closest<HTMLElement>('.editor-row')
+          if (
+            !slashMenuRef.current?.contains(event.target) &&
+            targetRow?.dataset.blockId !== blockSlashCommand.blockId
+          ) {
+            setBlockSlashCommand(null)
+          }
+        }
+
         if (
-          slashMenuRef.current?.contains(event.target) ||
-          targetRow?.dataset.blockId === blockSlashCommand.blockId
+          event.target === event.currentTarget &&
+          isPointerInTrailingSurfaceGap(event.currentTarget, event.clientY)
         ) {
-          return
+          event.preventDefault()
+          focusTrailingInsertTarget()
         }
-
-        setBlockSlashCommand(null)
       }}
     >
       {page.blocks.map((block) => {
@@ -753,6 +990,8 @@ export function BlockEditor({
           case 'heading_2':
           case 'heading_3': {
             const textStyle = getTextBlockStyle(block)
+            const isInsertPlaceholderBlock =
+              block.type === 'paragraph' && isPlainEmptyParagraphBlock(block)
             return renderBlockRow(
               block,
               <ParagraphBlock
@@ -760,6 +999,8 @@ export function BlockEditor({
                 value={block.text}
                 richText={block.richText}
                 style={getTextInputStyle(textStyle)}
+                placeholder={isInsertPlaceholderBlock ? uiCopy.page.typeSlash : '输入正文'}
+                insertMode={isInsertPlaceholderBlock}
                 relationPages={relationPages}
                 onOpenPageRelation={onOpenChildPage}
                 onCreatePageRelation={onCreatePageRelation}
@@ -922,19 +1163,106 @@ export function BlockEditor({
               />,
             )
           }
+          case 'synced_block': {
+            const group = syncedBlockGroupMap.get(block.groupId) ?? null
+            const isPrimaryInstance = group?.primaryInstanceId === block.instanceId
+            const primaryLocation = group ? findPrimaryInstanceLocation(allPages, group) : null
+            const canOpenPrimary =
+              primaryLocation !== null &&
+              (block.mode === 'reference' || group?.primaryInstanceId !== block.instanceId)
+            const usageCount =
+              group && isPrimaryInstance
+                ? Math.max(
+                    0,
+                    collectSyncedGroupInstances(allPages, group.id).filter(
+                      (instance) => instance.instanceId !== group.primaryInstanceId,
+                    ).length,
+                  )
+                : 0
+
+            return renderBlockRow(
+              block,
+              <SyncedBlockContainer
+                containerBlock={block}
+                group={group}
+                isPrimary={isPrimaryInstance}
+                canOpenPrimary={canOpenPrimary}
+                allPages={allPages}
+                relationPages={relationPages}
+                onOpenPageRelation={onOpenChildPage}
+                onCreatePageRelation={onCreatePageRelation}
+                onUpdateGroupBlock={(groupId, blockId, nextBlock) => {
+                  onUpdateSyncedGroupBlock?.(groupId, blockId, nextBlock)
+                }}
+                onUnsync={() => {
+                  onUnsyncBlockInstance?.(block.id)
+                }}
+                onOpenPrimary={() => {
+                  if (primaryLocation) {
+                    onOpenPrimarySyncedBlock?.(
+                      primaryLocation.pageId,
+                      primaryLocation.containerBlockId,
+                    )
+                  }
+                }}
+                onDeleteContainer={() => {
+                  focusPreviousBlockAfterDelete(block.id)
+                  onDeleteBlock?.(block.id)
+                }}
+              />,
+              {
+                badge: usageCount > 0 ? formatSyncedUsageBadge(usageCount) : null,
+                menuAllowedBlockTypes: [],
+                extraMenuActions: [
+                  ...(canOpenPrimary
+                    ? [
+                        {
+                          key: 'open-primary',
+                          label: '前往原位置',
+                          onSelect: () => {
+                            onOpenPrimarySyncedBlock?.(
+                              primaryLocation.pageId,
+                              primaryLocation.containerBlockId,
+                            )
+                          },
+                        },
+                      ]
+                    : []),
+                  {
+                    key: 'unsync',
+                    label: '取消同步',
+                    onSelect: () => {
+                      onUnsyncBlockInstance?.(block.id)
+                    },
+                  },
+                ],
+              },
+            )
+          }
 
           default:
             return null
         }
       })}
-      <EmptyBlockRow
-        allowedBlockTypes={allowedBlockTypes}
-        onInsert={(type) => {
-          void insertBlock(type)
+      {!trailingBlock || !isPlainEmptyParagraphBlock(trailingBlock) ? (
+        <EmptyBlockRow
+          allowedBlockTypes={allowedBlockTypes}
+          onInsert={(type) => {
+            void handleAppendSlashCommand(type)
+          }}
+          onInsertParagraph={(text) => {
+            onInsertParagraph?.(text)
+          }}
+        />
+      ) : null}
+      <SyncedBlockPickerDialog
+        open={pendingSyncedPicker !== null}
+        mode={pendingSyncedPicker?.mode ?? 'sync'}
+        items={syncedPickerItems}
+        onPick={(itemId) => {
+          void handlePickSyncedItem(itemId)
         }}
-        onInsertParagraph={(text) => {
-          onInsertParagraph?.(text)
-        }}
+        onClose={() => setPendingSyncedPicker(null)}
       />
     </section>
   )
@@ -951,6 +1279,25 @@ function getFocusTargetForMode(row: HTMLElement, mode: FocusRequest['mode']) {
         '.block-frame-content [contenteditable="true"], .block-frame-content textarea, .block-frame-content input:not([type="checkbox"])',
       )
   }
+}
+
+function focusEditorTargetAtEnd(targetInput: HTMLElement | null) {
+  if (!targetInput) {
+    return
+  }
+
+  targetInput.focus()
+
+  if (targetInput instanceof HTMLInputElement || targetInput instanceof HTMLTextAreaElement) {
+    targetInput.setSelectionRange(targetInput.value.length, targetInput.value.length)
+    return
+  }
+
+  const range = document.createRange()
+  range.selectNodeContents(targetInput)
+  range.collapse(false)
+  window.getSelection()?.removeAllRanges()
+  window.getSelection()?.addRange(range)
 }
 
 function getFocusModeForBlockType(type: BlockType): FocusRequest['mode'] {
@@ -1060,6 +1407,10 @@ function formatDataTableMeta(dataTable: DataTableRecord) {
   }
 
   return `${Object.keys(records).length} 条记录 · ${Object.keys(properties).length} 个字段 · ${updatedLabel}`
+}
+
+function formatSyncedUsageBadge(count: number) {
+  return count > 99 ? '99+' : String(count)
 }
 
 function getDataTableRecordTitles(dataTable: DataTableRecord) {

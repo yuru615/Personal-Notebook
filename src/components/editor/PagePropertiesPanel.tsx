@@ -7,6 +7,7 @@ import type {
   PagePropertyValue,
   PagePropertyValueMap,
 } from '../../domain/types'
+import { normalizePagePropertyOptions } from '../../domain/pageProperties'
 import { DateCalendarPanel } from '../shared/DateCalendarPanel'
 import { CreatableOptionPicker } from '../shared/CreatableOptionPicker'
 import { uiCopy } from '../../ui/copy'
@@ -107,6 +108,10 @@ function findPropertyOption(definition: PagePropertyDefinition, label: string) {
   return (definition.config.options ?? []).find((option) => option.label === label)
 }
 
+function isWideTextProperty(definition: PagePropertyDefinition) {
+  return definition.key === 'notes'
+}
+
 export function PagePropertiesPanel({
   definitions,
   values,
@@ -130,6 +135,22 @@ export function PagePropertiesPanel({
   const dateTriggerRef = useRef<HTMLButtonElement | null>(null)
   const datePopoverRef = useRef<HTMLDivElement | null>(null)
   const nextMissingPropertyKey = getNextMissingPropertyKey(definitions)
+  const hasFloatingPopover =
+    editing?.type === 'select' || editing?.type === 'multiSelect' || editing?.type === 'date'
+
+  useEffect(() => {
+    if (!hasFloatingPopover) {
+      return
+    }
+
+    const root = document.documentElement
+    const previousOverflow = root.style.overflow
+    root.style.overflow = 'hidden'
+
+    return () => {
+      root.style.overflow = previousOverflow
+    }
+  }, [hasFloatingPopover])
 
   const updateOptionPopoverPosition = useCallback(() => {
     if (
@@ -387,11 +408,14 @@ export function PagePropertiesPanel({
     }
 
     return (
-      <div className="page-property-editor" onBlur={handleEditorBlur}>
+      <div
+        className={isWideTextProperty(definition) ? 'page-property-editor page-property-editor-wide' : 'page-property-editor'}
+        onBlur={handleEditorBlur}
+      >
         <input
           autoFocus
           type="text"
-          className="page-property-input"
+          className={isWideTextProperty(definition) ? 'page-property-input page-property-input-wide' : 'page-property-input'}
           value={editing.draft}
           onChange={(event) => updateDraft(event.target.value)}
           onKeyDown={handleEditorKeyDown}
@@ -475,7 +499,7 @@ export function PagePropertiesPanel({
                   return
                 }
 
-                onSetOptions(definition.id, [
+                const nextOptions = normalizePagePropertyOptions(definition.config.options, [
                   ...options,
                   {
                     id: createId('page_property_option'),
@@ -483,6 +507,8 @@ export function PagePropertiesPanel({
                     color: newPagePropertyOptionColor,
                   },
                 ])
+
+                onSetOptions(definition.id, nextOptions)
 
                 if (editing.type === 'select') {
                   onSetValue(definition.id, label)

@@ -55,6 +55,9 @@ export type BlockType =
   | 'data_table'
   | 'data_table_inline'
   | 'mindmap'
+  | 'synced_block'
+
+export type SyncedBlockMode = 'sync' | 'reference'
 
 export type TextColor = 'gray' | 'brown' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'pink' | 'red'
 export type PageRelationKind = 'link' | 'mention'
@@ -203,6 +206,13 @@ export interface MindmapBlock extends BlockBase {
   mindmapId: MindmapId
 }
 
+export interface SyncedBlockInstanceBlock extends BlockBase {
+  type: 'synced_block'
+  groupId: string
+  instanceId: string
+  mode: SyncedBlockMode
+}
+
 export type PageFontFamily = 'default' | 'serif' | 'mono'
 
 export type BlockRecord =
@@ -222,6 +232,15 @@ export type BlockRecord =
   | WhiteboardBlock
   | DataTableBlock
   | MindmapBlock
+  | SyncedBlockInstanceBlock
+
+export interface SyncedBlockGroupRecord {
+  id: string
+  blocks: BlockRecord[]
+  primaryInstanceId: string
+  createdAt: string
+  updatedAt: string
+}
 
 export interface BoardRecord {
   id: BoardId
@@ -267,6 +286,7 @@ export interface PageRecord {
 
 export interface WorkspaceSettings {
   lastOpenedPageId: PageId | null
+  inboxPageId?: PageId | null
   sidebarLayout?: 'compact' | 'classic'
   sidebarWidth?: number
   pinnedSidebarItems?: SidebarPinnedItem[]
@@ -276,6 +296,7 @@ export interface WorkspaceSnapshot {
   boards: BoardRecord[]
   dataTables?: DataTableRecord[]
   mindmaps?: MindmapRecord[]
+  syncedBlockGroups?: SyncedBlockGroupRecord[]
   pages: PageRecord[]
   pageProperties?: PagePropertyDefinition[]
   settings: WorkspaceSettings

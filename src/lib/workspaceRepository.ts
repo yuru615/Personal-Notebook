@@ -1,6 +1,8 @@
 import { normalizeWorkspaceSnapshot } from '../domain/pageProperties'
 import { createSeedWorkspace } from '../domain/seed'
-import type { WorkspaceSnapshot } from '../domain/types'
+import { reconcileSyncedBlockGroups } from '../domain/syncedBlocks'
+import type { SyncedBlockGroupRecord, WorkspaceSnapshot } from '../domain/types'
+import { createId } from '../utils/id'
 import { isDesktopRuntime } from './fileAccess'
 import { createTauriStorageClient, type WorkspaceStorageClient } from './storageClient'
 
@@ -30,6 +32,28 @@ interface CreateStorageWorkspaceRepositoryOptions {
 }
 
 const BROWSER_WORKSPACE_STORAGE_KEY = 'zhixi.workspace.snapshot.v1'
+const ORPHAN_SYNCED_BLOCK_RECOVERY_PAGE_TITLE = '同步块恢复'
+
+function normalizeRepositorySnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
+  const normalized = normalizeWorkspaceSnapshot(snapshot)
+  const syncedBlockGroups: SyncedBlockGroupRecord[] = Array.isArray(
+    (normalized as WorkspaceSnapshot & { syncedBlockGroups?: SyncedBlockGroupRecord[] }).syncedBlockGroups,
+  )
+    ? (normalized.syncedBlockGroups ?? [])
+    : []
+  const repairedSnapshot = recoverOrphanSyncedBlockGroups({
+    ...normalized,
+    syncedBlockGroups,
+  })
+
+  return {
+    ...repairedSnapshot,
+    syncedBlockGroups: reconcileSyncedBlockGroups(
+      repairedSnapshot.pages,
+      repairedSnapshot.syncedBlockGroups ?? [],
+    ),
+  }
+}
 
 export function createStorageWorkspaceRepository({
   client,
@@ -51,7 +75,16 @@ export function createStorageWorkspaceRepository({
     async load() {
       await writeQueue
       const snapshot = await client.exportWorkspaceBackup()
-      return snapshot ? normalizeWorkspaceSnapshot(snapshot) : null
+      if (!snapshot) {
+        return null
+      }
+
+      const normalizedSnapshot = normalizeRepositorySnapshot(snapshot)
+      if (JSON.stringify(snapshot) !== JSON.stringify(normalizedSnapshot)) {
+        await client.replaceWorkspaceBackup(normalizedSnapshot)
+      }
+
+      return normalizedSnapshot
     },
 
     async save(snapshot) {
@@ -61,6 +94,8 @@ export function createStorageWorkspaceRepository({
           ...snapshot,
           dataTables: snapshot.dataTables ?? persistedSnapshot?.dataTables ?? [],
           mindmaps: snapshot.mindmaps ?? persistedSnapshot?.mindmaps ?? [],
+          syncedBlockGroups:
+            snapshot.syncedBlockGroups ?? persistedSnapshot?.syncedBlockGroups ?? [],
           pageProperties: snapshot.pageProperties ?? persistedSnapshot?.pageProperties ?? [],
         }
 
@@ -91,7 +126,20 @@ function createBrowserWorkspaceRepository(): WorkspaceRepository {
   return {
     async load() {
       const value = window.localStorage.getItem(BROWSER_WORKSPACE_STORAGE_KEY)
-      return value ? normalizeWorkspaceSnapshot(JSON.parse(value) as WorkspaceSnapshot) : null
+      if (!value) {
+        return null
+      }
+
+      const snapshot = JSON.parse(value) as WorkspaceSnapshot
+      const normalizedSnapshot = normalizeRepositorySnapshot(snapshot)
+      if (JSON.stringify(snapshot) !== JSON.stringify(normalizedSnapshot)) {
+        window.localStorage.setItem(
+          BROWSER_WORKSPACE_STORAGE_KEY,
+          JSON.stringify(normalizedSnapshot),
+        )
+      }
+
+      return normalizedSnapshot
     },
 
     async save(snapshot) {
@@ -119,8 +167,11 @@ async function saveChangedRecords(
   const changedBoards = changedRecords(previous.boards, next.boards)
   const changedDataTables = changedRecords(previous.dataTables, next.dataTables)
   const changedMindmaps = changedRecords(previous.mindmaps, next.mindmaps)
+  const syncedGroupsChanged =
+    JSON.stringify(previous.syncedBlockGroups) !== JSON.stringify(next.syncedBlockGroups)
   const changeCount =
     (pagePropertiesChanged ? 1 : 0) +
+    (syncedGroupsChanged ? 1 : 0) +
     changedPages.length +
     changedBoards.length +
     changedDataTables.length +
@@ -135,6 +186,10 @@ async function saveChangedRecords(
   }
 
   if (pagePropertiesChanged) {
+    return false
+  }
+
+  if (syncedGroupsChanged) {
     return false
   }
 
@@ -167,6 +222,7 @@ function canSaveIncrementally(
   return (
     Array.isArray(previous.dataTables) &&
     Array.isArray(previous.mindmaps) &&
+    Array.isArray(previous.syncedBlockGroups) &&
     Array.isArray(previous.pageProperties) &&
     sameRecordOrder(previous.pages, next.pages) &&
     sameRecordOrder(previous.boards, next.boards) &&
@@ -189,3 +245,66 @@ function sameRecordOrder(left: { id: string }[], right: { id: string }[]) {
 }
 
 type RequiredWorkspaceSnapshot = Required<WorkspaceSnapshot>
+
+function recoverOrphanSyncedBlockGroups(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
+  const syncedBlockGroups = snapshot.syncedBlockGroups ?? []
+  if (syncedBlockGroups.length === 0) {
+    return snapshot
+  }
+
+  const referencedGroupIds = new Set(
+    snapshot.pages.flatMap((page) =>
+      page.blocks.flatMap((block) =>
+        block.type === 'synced_block' ? [block.groupId] : [],
+      ),
+    ),
+  )
+  const orphanGroups = syncedBlockGroups.filter((group) => !referencedGroupIds.has(group.id))
+
+  if (orphanGroups.length === 0 || referencedGroupIds.size > 0) {
+    return snapshot
+  }
+
+  const now = new Date().toISOString()
+  const recoveredInstanceIds = new Map<string, string>()
+  const recoveryPage = {
+    id: createId('page'),
+    parentId: null,
+    title: ORPHAN_SYNCED_BLOCK_RECOVERY_PAGE_TITLE,
+    icon: null,
+    cover: null,
+    properties: {},
+    isFullWidth: false,
+    isSmallText: false,
+    fontFamily: 'default' as const,
+    showOutline: true,
+    blocks: orphanGroups.map((group) => {
+      const instanceId = createId('instance')
+      recoveredInstanceIds.set(group.id, instanceId)
+      return {
+        id: createId('block'),
+        type: 'synced_block' as const,
+        groupId: group.id,
+        instanceId,
+        mode: 'sync' as const,
+      }
+    }),
+    createdAt: now,
+    updatedAt: now,
+  }
+
+  return {
+    ...snapshot,
+    pages: [...snapshot.pages, recoveryPage],
+    syncedBlockGroups: syncedBlockGroups.map((group) => {
+      const recoveredInstanceId = recoveredInstanceIds.get(group.id)
+      return recoveredInstanceId
+        ? {
+            ...group,
+            primaryInstanceId: recoveredInstanceId,
+            updatedAt: now,
+          }
+        : group
+    }),
+  }
+}

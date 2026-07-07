@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  DESKTOP_TRAY_NEW_NOTE_EVENT,
+  DESKTOP_TRAY_OPEN_INBOX_EVENT,
   DESKTOP_QUIT_REQUESTED_EVENT,
   QUIT_AFTER_PENDING_SAVES_COMMAND,
   registerDesktopPendingSaveFlush,
+  registerDesktopTrayActions,
 } from './desktopLifecycle'
 
 const mocks = vi.hoisted(() => ({
@@ -97,5 +100,41 @@ describe('desktopLifecycle', () => {
 
     expect(mocks.onCloseRequested).not.toHaveBeenCalled()
     expect(mocks.listen).not.toHaveBeenCalled()
+  })
+
+  it('wires the tray new-note event to the provided handler', async () => {
+    const onNewNote = vi.fn(async () => undefined)
+    const onOpenInbox = vi.fn(async () => undefined)
+    let newNoteHandler: (() => Promise<void>) | null = null
+
+    mocks.listen.mockImplementation(async (event, handler) => {
+      if (event === DESKTOP_TRAY_NEW_NOTE_EVENT) {
+        newNoteHandler = handler
+      }
+      return () => undefined
+    })
+
+    await registerDesktopTrayActions({ onNewNote, onOpenInbox })
+    await newNoteHandler?.()
+
+    expect(onNewNote).toHaveBeenCalledTimes(1)
+  })
+
+  it('wires the tray open-inbox event to the provided handler', async () => {
+    const onNewNote = vi.fn(async () => undefined)
+    const onOpenInbox = vi.fn(async () => undefined)
+    let openInboxHandler: (() => Promise<void>) | null = null
+
+    mocks.listen.mockImplementation(async (event, handler) => {
+      if (event === DESKTOP_TRAY_OPEN_INBOX_EVENT) {
+        openInboxHandler = handler
+      }
+      return () => undefined
+    })
+
+    await registerDesktopTrayActions({ onNewNote, onOpenInbox })
+    await openInboxHandler?.()
+
+    expect(onOpenInbox).toHaveBeenCalledTimes(1)
   })
 })

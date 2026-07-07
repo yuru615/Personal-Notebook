@@ -11,6 +11,8 @@ import type {
   MindmapBlock,
   MindmapId,
   MindmapRecord,
+  SyncedBlockInstanceBlock,
+  SyncedBlockMode,
   WhiteboardBlock,
 } from '../domain/types'
 import { createEmptyBoardSnapshot } from '../components/whiteboard/whiteboardModel'
@@ -77,6 +79,20 @@ export function createMindmapBlock(mindmapId: MindmapId): MindmapBlock {
     id: createId('block'),
     type: 'mindmap',
     mindmapId,
+  }
+}
+
+export function createSyncedBlockInstanceBlock(
+  groupId: string,
+  instanceId: string,
+  mode: SyncedBlockMode,
+): SyncedBlockInstanceBlock {
+  return {
+    id: createId('block'),
+    type: 'synced_block',
+    groupId,
+    instanceId,
+    mode,
   }
 }
 
@@ -148,5 +164,7 @@ export function createBlock(
       }
 
       return createMindmapBlock(options.mindmapId)
+    case 'synced_block':
+      throw new Error('Synced block requires group metadata')
   }
 }

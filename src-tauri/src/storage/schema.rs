@@ -2,7 +2,7 @@ use rusqlite::{Connection, OptionalExtension};
 
 use super::error::StorageResult;
 
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
     connection.pragma_update(None, "foreign_keys", "ON")?;
@@ -81,6 +81,14 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
         CREATE TABLE IF NOT EXISTS zhixi_mindmap_snapshots (
           mindmap_id TEXT PRIMARY KEY NOT NULL REFERENCES zhixi_mindmaps(id) ON DELETE CASCADE,
           snapshot_json TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS zhixi_synced_block_groups (
+          id TEXT PRIMARY KEY NOT NULL,
+          blocks_json TEXT NOT NULL,
+          primary_instance_id TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS zhixi_data_tables (
@@ -197,6 +205,10 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
         migrate_to_v3(connection)?;
     }
 
+    if current_version < 4 {
+        migrate_to_v4(connection)?;
+    }
+
     connection.execute(
         "INSERT INTO zhixi_meta (key, value) VALUES ('schema_version', ?1)
           ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -270,6 +282,21 @@ fn migrate_to_v3(connection: &Connection) -> StorageResult<()> {
           body
         );
         DELETE FROM zhixi_search_documents;
+        ",
+    )?;
+    Ok(())
+}
+
+fn migrate_to_v4(connection: &Connection) -> StorageResult<()> {
+    connection.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS zhixi_synced_block_groups (
+          id TEXT PRIMARY KEY NOT NULL,
+          blocks_json TEXT NOT NULL,
+          primary_instance_id TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
         ",
     )?;
     Ok(())

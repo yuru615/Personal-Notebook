@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   createDefaultPagePropertyDefinitions,
+  normalizePagePropertyDefinitions,
   normalizePagePropertyValue,
 } from './pageProperties'
 
@@ -83,5 +84,35 @@ describe('pageProperties', () => {
         ['Alpha', 'Ghost', 1],
       ),
     ).toEqual(['Alpha'])
+  })
+
+  it('reassigns placeholder gray page property option colors to the shared palette on load', () => {
+    expect(
+      normalizePagePropertyDefinitions([
+        {
+          id: 'prop_status',
+          key: 'status',
+          name: 'Status',
+          type: 'select',
+          config: {
+            options: [
+              { id: 'todo', label: 'Todo', color: '#475569' },
+              { id: 'doing', label: 'Doing', color: '#475569' },
+            ],
+          },
+          createdAt: '',
+          updatedAt: '',
+        },
+      ]),
+    ).toEqual([
+      expect.objectContaining({
+        config: {
+          options: [
+            { id: 'todo', label: 'Todo', color: '#7c3aed' },
+            { id: 'doing', label: 'Doing', color: '#2563eb' },
+          ],
+        },
+      }),
+    ])
   })
 })

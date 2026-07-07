@@ -43,6 +43,13 @@ describe('SlashMenu', () => {
     expect(screen.getByRole('button', { name: '音频' })).toBeInTheDocument()
   })
 
+  it('shows synced block commands', () => {
+    render(<SlashMenu query="/同步" onPick={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: '同步块' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '引用块' })).toBeInTheDocument()
+  })
+
   it('filters options by allowed block types', () => {
     const options = getSlashMenuOptions('/', ['paragraph', 'todo'])
 

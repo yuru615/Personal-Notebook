@@ -128,7 +128,10 @@ describe('PagePropertiesPanel', () => {
 
     await user.click(screen.getByRole('button', { name: 'Old note' }))
 
+    const row = screen.getByText('Notes').closest('.page-property-row')
     const input = screen.getByDisplayValue('Old note')
+    expect(row).not.toHaveClass('page-property-row-wide-editor')
+    expect(input).toHaveClass('page-property-input-wide')
     await user.clear(input)
     await user.type(input, 'Fresh note{Enter}')
 
@@ -210,7 +213,7 @@ describe('PagePropertiesPanel', () => {
       expect.objectContaining({
         id: expect.stringMatching(/^page_property_option_/),
         label: 'Beta',
-        color: '#475569',
+        color: '#2563eb',
       }),
     ])
     expect(onSetValue).toHaveBeenCalledWith('prop_tags', ['Alpha', 'Beta'])
@@ -351,6 +354,43 @@ describe('PagePropertiesPanel', () => {
     expect(screen.getByRole('dialog', { name: 'Status 选项' })).toBeInTheDocument()
   })
 
+  it('locks page scrolling while the shared option popover is open', async () => {
+    const user = userEvent.setup()
+
+    document.documentElement.style.overflow = 'auto'
+
+    render(
+      <PagePropertiesPanel
+        definitions={[
+          {
+            id: 'prop_status',
+            key: 'status',
+            name: 'Status',
+            type: 'select',
+            config: {
+              options: [{ id: 'todo', label: 'Todo', color: 'gray' }],
+            },
+            createdAt: '',
+            updatedAt: '',
+          },
+        ]}
+        values={{
+          prop_status: null,
+        }}
+        onSetValue={vi.fn()}
+        onAddDefaultProperty={vi.fn()}
+      />,
+    )
+
+    const trigger = screen.getByRole('button', { name: uiCopy.pageProperties.emptyValue })
+
+    await user.click(trigger)
+    expect(document.documentElement.style.overflow).toBe('hidden')
+
+    await user.click(trigger)
+    expect(document.documentElement.style.overflow).toBe('auto')
+  })
+
   it('creates a single-select option on Enter, selects it, and closes the picker', async () => {
     const user = userEvent.setup()
     const onSetValue = vi.fn()
@@ -390,7 +430,7 @@ describe('PagePropertiesPanel', () => {
       expect.objectContaining({
         id: expect.stringMatching(/^page_property_option_/),
         label: 'Blocked',
-        color: '#475569',
+        color: '#2563eb',
       }),
     ])
     expect(onSetValue).toHaveBeenCalledWith('prop_status', 'Blocked')

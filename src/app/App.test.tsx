@@ -11,6 +11,7 @@ import { App } from './App'
 
 const desktopLifecycle = vi.hoisted(() => ({
   registerDesktopPendingSaveFlush: vi.fn(async () => () => undefined),
+  registerDesktopTrayActions: vi.fn(async () => () => undefined),
 }))
 const fileAccess = vi.hoisted(() => ({
   openBinaryFile: vi.fn(async () => ({
@@ -37,6 +38,7 @@ vi.mock('../lib/desktopLifecycle', async (importOriginal) => {
   return {
     ...actual,
     registerDesktopPendingSaveFlush: desktopLifecycle.registerDesktopPendingSaveFlush,
+    registerDesktopTrayActions: desktopLifecycle.registerDesktopTrayActions,
   }
 })
 
@@ -94,6 +96,7 @@ describe('App', () => {
   beforeEach(() => {
     Reflect.deleteProperty(globalThis, '__TAURI_INTERNALS__')
     desktopLifecycle.registerDesktopPendingSaveFlush.mockResolvedValue(() => undefined)
+    desktopLifecycle.registerDesktopTrayActions.mockResolvedValue(() => undefined)
     fileAccess.openBinaryFile.mockClear()
     fileAccess.openBinaryFile.mockResolvedValue({
       name: '工作区备份.zip',
@@ -216,6 +219,128 @@ describe('App', () => {
     await registeredFlush?.()
 
     expect(flushPendingSaves).toHaveBeenCalledTimes(1)
+  })
+
+  it('creates and opens a new top-level note from the desktop tray action', async () => {
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: 'page_root',
+          parentId: null,
+          title: 'Home',
+          icon: null,
+          cover: null,
+          blocks: [],
+          createdAt: '2026-07-07T00:00:00.000Z',
+          updatedAt: '2026-07-07T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: 'page_root' },
+    }
+
+    render(<App repository={createMemoryRepository(snapshot)} initialEntries={['/pages/page_root']} />)
+
+    await screen.findByDisplayValue('Home')
+    await waitFor(() => {
+      expect(desktopLifecycle.registerDesktopTrayActions).toHaveBeenCalled()
+    })
+
+    const handlers = desktopLifecycle.registerDesktopTrayActions.mock.calls.at(-1)?.[0]
+    await handlers?.onNewNote()
+
+    expect(await screen.findByDisplayValue('未命名')).toBeInTheDocument()
+  })
+
+  it('opens the inbox page from the desktop tray action', async () => {
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: 'page_root',
+          parentId: null,
+          title: 'Home',
+          icon: null,
+          cover: null,
+          blocks: [],
+          createdAt: '2026-07-07T00:00:00.000Z',
+          updatedAt: '2026-07-07T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: 'page_root' },
+    }
+
+    render(<App repository={createMemoryRepository(snapshot)} initialEntries={['/pages/page_root']} />)
+
+    await screen.findByDisplayValue('Home')
+    await waitFor(() => {
+      expect(desktopLifecycle.registerDesktopTrayActions).toHaveBeenCalled()
+    })
+
+    const handlers = desktopLifecycle.registerDesktopTrayActions.mock.calls.at(-1)?.[0]
+    await handlers?.onOpenInbox()
+
+    expect(await screen.findByDisplayValue('收件箱')).toBeInTheDocument()
+  })
+
+  it('lets users navigate away after opening the sidebar page menu on a tray-created note', async () => {
+    const user = userEvent.setup()
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: 'page_home',
+          parentId: null,
+          title: 'Home',
+          icon: null,
+          cover: null,
+          blocks: [],
+          createdAt: '2026-07-07T00:00:00.000Z',
+          updatedAt: '2026-07-07T00:00:00.000Z',
+        },
+        {
+          id: 'page_other',
+          parentId: null,
+          title: 'Other Page',
+          icon: null,
+          cover: null,
+          blocks: [],
+          createdAt: '2026-07-07T00:00:00.000Z',
+          updatedAt: '2026-07-07T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: 'page_home' },
+    }
+
+    render(<App repository={createMemoryRepository(snapshot)} initialEntries={['/pages/page_home']} />)
+
+    await screen.findByDisplayValue('Home')
+    await waitFor(() => {
+      expect(desktopLifecycle.registerDesktopTrayActions).toHaveBeenCalled()
+    })
+
+    const handlers = desktopLifecycle.registerDesktopTrayActions.mock.calls.at(-1)?.[0]
+    await handlers?.onNewNote()
+    await screen.findByDisplayValue('未命名')
+
+    const newPageLink = screen.getByRole('link', { name: '未命名' })
+    const newPageRow = newPageLink.closest('.sidebar-tree-page-row')
+    expect(newPageRow).not.toBeNull()
+
+    await user.click(within(newPageRow as HTMLElement).getByRole('button', { name: '页面更多操作' }))
+    expect(screen.getByRole('button', { name: '重命名页面' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('link', { name: 'Other Page' }))
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Other Page')).toBeInTheDocument()
+    })
   })
 
   it('falls back to local search results outside the desktop runtime', async () => {
@@ -449,7 +574,12 @@ describe('App', () => {
           key: 'tags',
           name: '标签',
           type: 'multiSelect',
-          config: {},
+          config: {
+            options: [
+              { id: 'tag_product', label: '产品', color: '#2563eb' },
+              { id: 'tag_search', label: '搜索', color: '#16a34a' },
+            ],
+          },
           createdAt: '2026-07-05T00:00:00.000Z',
           updatedAt: '2026-07-05T00:00:00.000Z',
         },
@@ -498,6 +628,309 @@ describe('App', () => {
 
     expect(within(pageGroup).getByText('产品 / 搜索')).toBeInTheDocument()
     expect(within(pageGroup).getByText('标签')).toBeInTheDocument()
+  })
+
+  it('wires reference block insertion through the page editor into the workspace store', async () => {
+    const user = userEvent.setup()
+    const pageId = 'page_reference_insert'
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      syncedBlockGroups: [
+        {
+          id: 'group_1',
+          blocks: [{ id: 'block_shared', type: 'paragraph', text: 'Weekly review' }],
+          primaryInstanceId: 'instance_1',
+          createdAt: '2026-07-07T00:00:00.000Z',
+          updatedAt: '2026-07-07T00:00:00.000Z',
+        },
+      ],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: '引用测试',
+          icon: null,
+          cover: null,
+          blocks: [],
+          createdAt: '2026-07-07T00:00:00.000Z',
+          updatedAt: '2026-07-07T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+
+    const { container } = render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={[`/pages/${pageId}`]}
+      />,
+    )
+
+    await screen.findByDisplayValue('引用测试')
+    await user.click(screen.getByRole('button', { name: '添加块' }))
+    await user.click(screen.getByRole('button', { name: '引用块' }))
+    await user.click(screen.getByRole('button', { name: /Weekly review/i }))
+
+    await waitFor(() => {
+      expect(container.querySelector('.synced-block-container-reference')).not.toBeNull()
+    })
+    expect(screen.getByText('Weekly review')).toBeInTheDocument()
+  })
+
+  it('creates a reference block from existing page content through the picker', async () => {
+    const user = userEvent.setup()
+    const pageId = 'page_target_reference_existing'
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      syncedBlockGroups: [],
+      pages: [
+        {
+          id: 'page_source_reference_existing',
+          parentId: null,
+          title: '来源页',
+          icon: null,
+          cover: null,
+          blocks: [{ id: 'source_1', type: 'paragraph', text: 'Existing source note' }],
+          createdAt: '2026-07-07T00:00:00.000Z',
+          updatedAt: '2026-07-07T00:00:00.000Z',
+        },
+        {
+          id: pageId,
+          parentId: null,
+          title: '引用已有内容',
+          icon: null,
+          cover: null,
+          blocks: [],
+          createdAt: '2026-07-07T00:00:00.000Z',
+          updatedAt: '2026-07-07T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+
+    const { container } = render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={[`/pages/${pageId}`]}
+      />,
+    )
+
+    await screen.findByDisplayValue('引用已有内容')
+    await user.click(screen.getByRole('button', { name: '添加块' }))
+    await user.click(screen.getByRole('button', { name: '引用块' }))
+    await user.type(screen.getByPlaceholderText('搜索已有内容'), 'source note')
+    await user.click(screen.getByRole('button', { name: /Existing source note/i }))
+
+    await waitFor(() => {
+      expect(container.querySelector('.synced-block-container-reference')).not.toBeNull()
+    })
+    expect(screen.getByText('Existing source note')).toBeInTheDocument()
+  })
+
+  it('creates a reference block from existing content on the same page', async () => {
+    const user = userEvent.setup()
+    const pageId = 'page_same_page_reference_existing'
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      syncedBlockGroups: [],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: '同页引用',
+          icon: null,
+          cover: null,
+          blocks: [
+            { id: 'source_1', type: 'paragraph', text: 'Existing source note' },
+            { id: 'target_1', type: 'paragraph', text: '' },
+          ],
+          createdAt: '2026-07-07T00:00:00.000Z',
+          updatedAt: '2026-07-07T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+
+    const { container } = render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={[`/pages/${pageId}`]}
+      />,
+    )
+
+    await screen.findByDisplayValue('同页引用')
+    const textboxes = screen.getAllByRole('textbox', { name: '输入正文' })
+    await user.click(textboxes[1])
+    await user.keyboard('/')
+    await user.click(screen.getByRole('button', { name: '引用块' }))
+    await user.type(screen.getByPlaceholderText('搜索已有内容'), 'source note')
+    await user.click(screen.getByRole('button', { name: /Existing source note/i }))
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('.synced-block-container-reference').length).toBe(1)
+    })
+    expect(screen.getAllByText('Existing source note').length).toBeGreaterThan(0)
+  })
+
+  it('creates a reference block from existing content with keyboard selection in the picker', async () => {
+    const user = userEvent.setup()
+    const pageId = 'page_keyboard_reference_existing'
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      syncedBlockGroups: [],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: '键盘引用',
+          icon: null,
+          cover: null,
+          blocks: [
+            { id: 'source_1', type: 'paragraph', text: 'Existing source note' },
+            { id: 'target_1', type: 'paragraph', text: '' },
+          ],
+          createdAt: '2026-07-07T00:00:00.000Z',
+          updatedAt: '2026-07-07T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+
+    const { container } = render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={[`/pages/${pageId}`]}
+      />,
+    )
+
+    await screen.findByDisplayValue('键盘引用')
+    const textboxes = screen.getAllByRole('textbox', { name: '输入正文' })
+    await user.click(textboxes[1])
+    await user.keyboard('/')
+    await user.click(screen.getByRole('button', { name: '引用块' }))
+    await user.type(screen.getByPlaceholderText('搜索已有内容'), 'source note')
+    await user.keyboard('{ArrowDown}{Enter}')
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('.synced-block-container-reference').length).toBe(1)
+    })
+    expect(screen.getAllByText('Existing source note').length).toBeGreaterThan(0)
+  })
+
+  it('wires sync range creation through the page editor into the workspace store', async () => {
+    const user = userEvent.setup()
+    const pageId = 'page_sync_range'
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: '同步测试',
+          icon: null,
+          cover: null,
+          blocks: [
+            { id: 'block_1', type: 'paragraph', text: 'Alpha' },
+            { id: 'block_2', type: 'paragraph', text: 'Beta' },
+          ],
+          createdAt: '2026-07-07T00:00:00.000Z',
+          updatedAt: '2026-07-07T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+
+    const { container } = render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={[`/pages/${pageId}`]}
+      />,
+    )
+
+    await screen.findByDisplayValue('同步测试')
+
+    const handles = screen.getAllByRole('button', { name: '拖动块' })
+    await user.click(handles[0])
+    await user.click(screen.getByRole('button', { name: '开始同步选区' }))
+    await user.click(handles[1])
+    await user.click(screen.getByRole('button', { name: '同步到这里' }))
+
+    await waitFor(() => {
+      expect(container.querySelector('.synced-block-container')).not.toBeNull()
+    })
+    expect(screen.getByText('同步块')).toBeInTheDocument()
+    expect(screen.getByText('Alpha')).toBeInTheDocument()
+    expect(screen.getByText('Beta')).toBeInTheDocument()
+  })
+
+  it('finds freshly edited synced block content in global search', async () => {
+    const user = userEvent.setup()
+    const pageId = 'page_sync_search'
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      syncedBlockGroups: [
+        {
+          id: 'group_1',
+          blocks: [{ id: 'shared_block_1', type: 'paragraph', text: 'Old text' }],
+          primaryInstanceId: 'instance_1',
+          createdAt: '2026-07-07T00:00:00.000Z',
+          updatedAt: '2026-07-07T00:00:00.000Z',
+        },
+      ],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: '同步搜索',
+          icon: null,
+          cover: null,
+          blocks: [
+            {
+              id: 'container_sync',
+              type: 'synced_block',
+              groupId: 'group_1',
+              instanceId: 'instance_1',
+              mode: 'sync',
+            },
+          ],
+          createdAt: '2026-07-07T00:00:00.000Z',
+          updatedAt: '2026-07-07T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+
+    render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={[`/pages/${pageId}`]}
+      />,
+    )
+
+    const editor = await screen.findByRole('textbox', { name: '输入正文' })
+    await user.click(editor)
+    await user.keyboard('{Control>}a{/Control}Fresh shared keyword')
+
+    await user.click(screen.getByRole('button', { name: '搜索' }))
+    await user.type(screen.getByPlaceholderText('搜索页面或内容'), 'Fresh shared keyword')
+
+    expect(
+      await screen.findByRole('button', {
+        name: '打开页面 同步搜索',
+      }),
+    ).toBeInTheDocument()
   })
 
   it('uses workspace undo inside the focused rich text editor after a floating toolbar bold action', async () => {
@@ -1072,9 +1505,14 @@ describe('App', () => {
 
     const exportPayload = fileAccess.saveTextFile.mock.calls[0]?.[0]
     expect(exportPayload).toBeDefined()
-    expect(JSON.parse(String(exportPayload.contents))).toMatchObject({
-      pages: [expect.objectContaining({ id: pageId, title: '工作区首页' })],
-    })
+    const exportedSnapshot = JSON.parse(String(exportPayload.contents))
+    expect(exportedSnapshot.pages).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: pageId, title: '工作区首页' })]),
+    )
+    expect(exportedSnapshot.pages).toEqual(
+      expect.arrayContaining([expect.objectContaining({ title: '收件箱' })]),
+    )
+    expect(exportedSnapshot.settings.inboxPageId).toBeTruthy()
   })
 
   it('imports a page package as a new top-level page and navigates to it', async () => {

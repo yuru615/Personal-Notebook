@@ -4,6 +4,103 @@
 
 ## 维护规则
 
+## 2026-07-07 worktree 回退与桌面端数据修复
+
+提交：未提交
+
+简要描述：
+
+这次把一次比较危险的“跑错代码副本”问题兜住了：桌面调试被拉到了旧 worktree，上面缺少后续尚未提交到 Git 的同步块、引用块、页面提及、空白行 `+` 菜单等实现；同时旧桌面端还会把工作区设置写残。现在主工作区重新接管桌面调试，并补上了同步块孤儿恢复、收件箱复用和桌面端设置完整持久化。
+
+详细描述：
+- 定位到根因是 `E:\Workspace\个人知识库-桌面端\.worktrees\clipboard-capture-v1` 这条旧 worktree 曾被当成桌面调试入口运行，而真正最新的页面关系、同步块、空白行体验等代码只存在于主工作区的当前改动里。
+- 前端存储仓库加载工作区时，新增了“孤儿同步块组”兜底：如果本地库里还留着 `syncedBlockGroups`，但所有页面里一个 `synced_block` 容器都不剩，会自动创建一个顶层 `同步块恢复` 页面，把这些同步块集中恢复为可编辑主实例，避免共享内容彻底不可见。
+- 这个恢复只在“全工作区同步块容器为 0”时触发，不会把正常应该清掉的脏组重新塞回来。
+- Vite 开发监听增加了 `**/.worktrees/**` 忽略，避免主工作区调试时被嵌套 worktree 的文件变动反复触发整页重载。
+- Vitest 也补上了 `**/.worktrees/**` 排除，避免跑主工作区测试时把旧 worktree 里的历史测试一起扫进来。
+- `ensureInboxPageInSnapshot` 现在会先复用现有的 `收件箱` 页面，而不是在 `inboxPageId` 丢失时继续无限新建新的收件箱页面。
+- Rust 侧 `WorkspaceSettings` 补回了完整字段：`inboxPageId`、`sidebarLayout`、`sidebarWidth`、`pinnedSidebarItems`、`clipboardCaptureMode`，桌面端再次保存工作区时不再把设置写回成只剩 `lastOpenedPageId`。
+
+验证情况：
+- 已通过前端仓库恢复回归：`npm run test -- src/lib/workspaceRepository.test.ts`
+- 已通过收件箱复用回归：`npm run test -- src/store/createWorkspaceStore.test.ts -t "reuses an existing inbox page when inboxPageId is missing during bootstrap"`
+- 已通过原有同步块 / 引用块 / 空白行 / 页面提及回归：
+  `npm run test -- src/components/editor/BlockEditor.synced.test.tsx`
+  `npm run test -- src/components/editor/EmptyBlockRow.test.tsx`
+  `npm run test -- src/components/editor/RichTextEditable.test.tsx src/app/App.test.tsx`
+- 已通过 Rust 设置持久化回归：`cargo test --manifest-path src-tauri/Cargo.toml preserves_extended_workspace_settings_fields_when_loading_and_saving`
+- 已通过构建：`npm run build`
+- 额外复核时发现 `src/store/createWorkspaceStore.test.ts` 里现有两条剪贴板捕获测试仍然失败，说明方向 2 的剪贴板功能在主工作区尚未完整并回；这两条不是本次修复引入，但后续合并桌面捕获能力时需要继续收口。
+
+## 2026-07-07 方向 2 第一阶段桌面入口
+
+提交：未提交
+
+简要描述：
+
+把方向 2 的第一段桌面端入口闭环先落到最小可用：工作区固定收件箱、左侧 `系统` 分组、以及托盘里的 `打开知栖 / 新建笔记 / 打开收件箱 / 退出` 已经串通。
+
+详细描述：
+- `收件箱` 继续复用普通页面模型，不引入第二套捕获数据结构，只在工作区设置里记录 `inboxPageId`。
+- 新工作区会自动带上固定 `收件箱` 页面；旧工作区如果缺少收件箱，启动时会自动修复。
+- 左侧页面树新增 `系统` 分组，`收件箱` 固定显示在这里，并且不再重复出现在 `我的页面` 里。
+- 前端新增桌面托盘事件桥接：托盘 `新建笔记` 会直接创建顶层普通页面并打开；`打开收件箱` 会在必要时先补回收件箱，再直接跳转过去。
+- Tauri 托盘菜单已切换成 `打开知栖 / 新建笔记 / 打开收件箱 / 退出`，动作仍然通过前端 store 和现有路由链路完成，没有在 Rust 侧再造一套页面写入逻辑。
+- 顺手补齐了工作区整包导出测试，使其显式覆盖收件箱随工作区一起导出的新行为。
+
+验证情况：
+- 已通过定向前端回归：`npm run test -- src/store/createWorkspaceStore.test.ts src/components/sidebar/SidebarTree.test.tsx src/lib/desktopLifecycle.test.ts src/app/App.test.tsx`
+- 已通过 Rust 托盘映射回归：`cargo test --manifest-path src-tauri/Cargo.toml maps_tray_menu_ids_to_actions`
+- 已通过构建：`npm run build`
+
+## 2026-07-07 同步块 / 引用块用户层收口第一轮
+
+提交：未提交
+
+简要描述：
+
+把“同步组已丢失”这类异常同步块收回到和正常同步块一致的轻量块样式里，同时补上键盘删除与焦点回落，避免缺失态块单独长成一张卡片、手柄位置和删除体验都跑偏。
+
+详细描述：
+- 缺失同步组时，块容器不再走独立卡片样式，改为复用同步块现有的左侧竖条 callout 结构，和正常同步块 / 引用块保持同一套对齐逻辑。
+- 新增 `synced-block-container-missing` 状态，给缺失态补上单独的左侧强调色和聚焦反馈，但整体仍保持清爽的正文内嵌形式。
+- 缺失态同步块现在也可以像引用块一样先聚焦、再用 `Backspace / Delete` 直接删除容器，不需要先绕到更多菜单。
+- 删除缺失态同步块后，编辑焦点会回到前一个正文块，保持和现有引用块删除一致的编辑节奏。
+- 顺手收紧了同步块容器的键盘删除触发条件：只有块容器本身处于焦点时才响应删除键，避免嵌套按钮拿到焦点时误删整个同步块。
+- 复杂块的同步壳层现在和手柄菜单规则保持一致：主同步实例不再显示“前往原位置”，只有引用实例或非主同步实例才保留这个跳转动作。
+
+验证情况：
+- 已按 red -> green 运行定向回归：`npm run test -- src/components/editor/blocks/SyncedBlockContainer.test.tsx src/components/editor/BlockEditor.synced.test.tsx src/styles/pageOutlineLayout.test.ts`
+
+## 2026-07-07 同步块 / 引用块数据收口第一轮
+
+提交：未提交
+
+简要描述：
+
+补上了同步块 / 引用块最危险的一段数据完整性收口：同步组里的白板、数据表、导图资源现在会被正确计入引用；加载快照时也会修复脏的 `syncedBlockGroups`，避免主实例丢失或空组残留把本地数据带坏。
+
+详细描述：
+
+- `createWorkspaceStore` 里的资源引用扫描从只看 `pages[].blocks`，补成同时覆盖 `pages[].blocks` 和 `syncedBlockGroups[].blocks`。
+- 这次一起修正了三条关键路径：`cleanupOrphanBoards`、`cleanupOrphanDataTables`、以及删页面时的 `filterResourcesReferencedByPages` 资源过滤。
+- 新增回归测试，锁定“同步组内 whiteboard / data_table / mindmap 仍然被引用时，不会被误清理”的行为。
+- 把同步组修复逻辑抽成纯函数 `reconcileSyncedBlockGroups`，统一用于 store 侧和仓库加载侧。
+- 仓库加载快照时，若 `primaryInstanceId` 已失效，会自动迁移到当前还存在的实例；如果某个同步组已经没有任何页面实例，会在加载后被安全丢弃。
+- 现有“复制页面会保留 `groupId`、只重写副本 `blockId / instanceId`”的语义也补强了断言，顺手锁住原页面实例和原同步组元数据不会被误改。
+- 顺手补上了 `getNextPrimaryInstanceId(..., []) -> null` 的纯函数回归测试，避免后面再把空实例边界改坏。
+- 已复核当前同步块编辑器和搜索相关回归集，现有行为保持稳定，没有额外扩 UI 和交互规则。
+
+验证情况：
+
+- 已通过数据层定向测试：`npm run test -- src/domain/syncedBlocks.test.ts src/lib/workspaceRepository.test.ts src/store/createWorkspaceStore.test.ts`。
+- 已通过 Rust 定向回归：`cargo test --manifest-path src-tauri/Cargo.toml workspace_backup_and_bootstrap_include_synced_block_groups`。
+- 已通过 Rust 定向回归：`cargo test --manifest-path src-tauri/Cargo.toml page_package_export_includes_referenced_synced_groups_resources_and_assets`。
+- 已通过 Rust 定向回归：`cargo test --manifest-path src-tauri/Cargo.toml page_package_import_rewrites_synced_group_and_instance_ids`。
+- 已通过同步块编辑器与搜索回归：`npm run test -- src/components/editor/BlockEditor.synced.test.tsx src/components/editor/blocks/SyncedBlockContainer.test.tsx src/styles/pageOutlineLayout.test.ts src/domain/search.test.ts src/components/search/SearchDialog.test.tsx`。
+- 已通过合并后的聚焦回归：`npm run test -- src/domain/syncedBlocks.test.ts src/lib/workspaceRepository.test.ts src/store/createWorkspaceStore.test.ts src/components/editor/BlockEditor.synced.test.tsx src/components/editor/blocks/SyncedBlockContainer.test.tsx src/styles/pageOutlineLayout.test.ts src/domain/search.test.ts src/components/search/SearchDialog.test.tsx`，结果 8 个文件、135 个测试全部通过。
+- 已通过构建：`npm run build`。
+
 ## 2026-07-06 页面关系网络 v1
 
 提交：未提交

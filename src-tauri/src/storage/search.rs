@@ -1,9 +1,14 @@
+use std::collections::HashMap;
+
 use rusqlite::{params, Connection};
 use serde_json::Value;
 
 use super::{
     error::StorageResult,
-    models::{DataTableRecord, PagePropertyDefinition, PageRecord, SearchResult},
+    models::{
+        DataTableRecord, PagePropertyDefinition, PageRecord, SearchResult,
+        SyncedBlockGroupRecord,
+    },
 };
 
 const MAX_SEARCH_LIMIT: usize = 100;
@@ -13,8 +18,13 @@ pub fn replace_page_document(
     connection: &Connection,
     page: &PageRecord,
     page_property_definitions: &[PagePropertyDefinition],
+    synced_block_groups: &[SyncedBlockGroupRecord],
 ) -> StorageResult<()> {
     delete_documents_for_owner(connection, "page", &page.id)?;
+    let synced_group_map = synced_block_groups
+        .iter()
+        .map(|group| (group.id.as_str(), group))
+        .collect::<HashMap<_, _>>();
 
     let mut documents = vec![SearchDocument {
         document_id: format!("page:{}:title", page.id),
@@ -34,7 +44,7 @@ pub fn replace_page_document(
     }];
 
     documents.extend(property_documents(page, page_property_definitions));
-    documents.extend(block_documents(page));
+    documents.extend(block_documents(page, &synced_group_map));
 
     for document in documents {
         insert_document(connection, &document)?;
@@ -317,7 +327,10 @@ fn property_documents(
         .collect()
 }
 
-fn block_documents(page: &PageRecord) -> Vec<SearchDocument> {
+fn block_documents(
+    page: &PageRecord,
+    synced_group_map: &HashMap<&str, &SyncedBlockGroupRecord>,
+) -> Vec<SearchDocument> {
     page.blocks
         .iter()
         .enumerate()
@@ -327,22 +340,73 @@ fn block_documents(page: &PageRecord) -> Vec<SearchDocument> {
                 .and_then(Value::as_str)
                 .map(str::to_string)
                 .unwrap_or_else(|| format!("index_{index}"));
-            block_search_entries(block).into_iter().map(move |entry| SearchDocument {
-                document_id: format!("page:{}:block:{}:{}", page.id, block_id, entry.document_suffix),
-                kind: "page".to_string(),
-                page_id: page.id.clone(),
-                block_id: Some(block_id.clone()),
-                board_id: None,
-                database_id: None,
-                record_id: None,
-                title: page.title.clone(),
-                icon: page.icon.clone(),
-                excerpt: entry.excerpt,
-                body: entry.search_text,
-                match_source: entry.match_source,
-                match_key: None,
-                source_label: entry.source_label,
-            })
+            if block.get("type").and_then(Value::as_str) == Some("synced_block") {
+                let Some(group_id) = block.get("groupId").and_then(Value::as_str) else {
+                    return Vec::new().into_iter();
+                };
+                let Some(group) = synced_group_map.get(group_id).copied() else {
+                    return Vec::new().into_iter();
+                };
+                let is_reference = block.get("mode").and_then(Value::as_str) == Some("reference");
+                let match_source = if is_reference {
+                    "reference_block"
+                } else {
+                    "synced_block"
+                };
+                let source_label = if is_reference {
+                    "引用块内容"
+                } else {
+                    "同步块内容"
+                };
+                return group
+                    .blocks
+                    .iter()
+                    .flat_map(|inner_block| block_search_entries(inner_block))
+                    .map(move |entry| SearchDocument {
+                        document_id: format!(
+                            "page:{}:block:{}:{}:{}",
+                            page.id, block_id, match_source, entry.document_suffix
+                        ),
+                        kind: "page".to_string(),
+                        page_id: page.id.clone(),
+                        block_id: Some(block_id.clone()),
+                        board_id: None,
+                        database_id: None,
+                        record_id: None,
+                        title: page.title.clone(),
+                        icon: page.icon.clone(),
+                        excerpt: entry.excerpt,
+                        body: entry.search_text,
+                        match_source: match_source.to_string(),
+                        match_key: None,
+                        source_label: source_label.to_string(),
+                    })
+                    .collect::<Vec<_>>()
+                    .into_iter();
+            }
+            block_search_entries(block)
+                .into_iter()
+                .map(move |entry| SearchDocument {
+                    document_id: format!(
+                        "page:{}:block:{}:{}",
+                        page.id, block_id, entry.document_suffix
+                    ),
+                    kind: "page".to_string(),
+                    page_id: page.id.clone(),
+                    block_id: Some(block_id.clone()),
+                    board_id: None,
+                    database_id: None,
+                    record_id: None,
+                    title: page.title.clone(),
+                    icon: page.icon.clone(),
+                    excerpt: entry.excerpt,
+                    body: entry.search_text,
+                    match_source: entry.match_source,
+                    match_key: None,
+                    source_label: entry.source_label,
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
         })
         .collect()
 }
@@ -472,7 +536,20 @@ fn create_media_entry(parts: [&str; 3]) -> Option<SearchEntry> {
         .filter(|part| !part.is_empty())
         .map(str::to_string)
         .collect::<Vec<_>>();
-    let excerpt = trimmed_parts.first()?.to_string();
+    let file_name = trimmed_parts.first()?.to_string();
+    let description = trimmed_parts
+        .iter()
+        .skip(1)
+        .fold(Vec::new(), |mut entries, part| {
+            push_unique(&mut entries, part.clone());
+            entries
+        })
+        .join(" / ");
+    let excerpt = if description.is_empty() {
+        file_name.clone()
+    } else {
+        format!("{file_name} / {description}")
+    };
 
     Some(SearchEntry {
         document_suffix: "media".to_string(),
