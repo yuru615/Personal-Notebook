@@ -16,6 +16,7 @@ import { normalizeRichText, richTextFromPlainText } from '../domain/richText'
 import {
   createInboxPage,
   createSeedWorkspace,
+  DEFAULT_PAGE_DISPLAY_DEFAULTS,
   INBOX_PAGE_ICON,
   INBOX_PAGE_TITLE,
 } from '../domain/seed'
@@ -25,19 +26,24 @@ import {
   validateSyncedGroupBlocks,
 } from '../domain/syncedBlocks'
 import type {
+  AppCloseAction,
+  AppSettings,
   BlockRecord,
   BlockType,
   BoardRecord,
+  ClipboardCaptureMode,
   DataTableRecord,
   MindmapRecord,
   PageFontFamily,
   PageId,
+  PageDisplayDefaults,
   PagePropertyDefinition,
   PagePropertyOption,
   PagePropertyValue,
   PageRecord,
   RichTextSegment,
   SaveStatus,
+  SearchPreferences,
   SidebarPinnedItem,
   SyncedBlockGroupRecord,
   SyncedBlockInstanceBlock,
@@ -45,6 +51,7 @@ import type {
   WorkspaceSnapshot,
   WorkspaceSettings,
 } from '../domain/types'
+import { type AppSettingsRepository } from '../lib/appSettingsRepository'
 import { type WorkspaceRepository } from '../lib/workspaceRepository'
 import {
   createBlock,
@@ -63,6 +70,11 @@ import { reorderItems, type ReorderPosition } from '../utils/reorder'
 const UNTITLED_PAGE_TITLE = '未命名'
 const COPY_SUFFIX = ' \u526f\u672c'
 const BLOCK_SAVE_DEBOUNCE_MS = 600
+const DEFAULT_SEARCH_PREFERENCES: SearchPreferences = {
+  groupResults: true,
+  showSourceLabels: true,
+  excerptLength: 'medium',
+}
 
 interface CreatePageOptions {
   title?: string
@@ -77,12 +89,17 @@ export interface WorkspaceState {
   pages: PageRecord[]
   pageProperties: PagePropertyDefinition[]
   settings: WorkspaceSettings
+  appSettings: AppSettings
   currentPageId: PageId | null
   saveStatus: SaveStatus
   bootstrap: () => Promise<void>
   ensureInboxPage: () => Promise<PageRecord>
   createPage: (parentId?: PageId, options?: CreatePageOptions) => Promise<PageRecord>
   setCurrentPage: (pageId: PageId) => Promise<void>
+  setAppCloseAction: (closeAction: AppCloseAction) => Promise<void>
+  setClipboardCaptureMode: (mode: ClipboardCaptureMode) => Promise<void>
+  setPageDefaults: (defaults: Partial<PageDisplayDefaults>) => Promise<void>
+  setSearchPreferences: (preferences: Partial<SearchPreferences>) => Promise<void>
   setSidebarLayout: (layout: NonNullable<WorkspaceSettings['sidebarLayout']>) => Promise<void>
   setSidebarWidth: (width: number) => Promise<void>
   togglePinnedSidebarItem: (item: SidebarPinnedItem) => Promise<void>
@@ -106,6 +123,7 @@ export interface WorkspaceState {
   duplicateBoardToPage: (pageId: PageId, boardId: string) => Promise<BoardRecord | null>
   restoreMissingBoardReference: (pageId: PageId, boardId: string) => Promise<BoardRecord | null>
   cleanupOrphanBoards: () => Promise<void>
+  cleanupOrphanAssets: () => Promise<void>
   renameDataTable: (databaseId: string, title: string) => Promise<void>
   setDataTableIcon: (databaseId: string, icon: string | null) => Promise<void>
   setDataTableCover: (databaseId: string, cover: string | null) => Promise<void>
@@ -144,6 +162,10 @@ export interface WorkspaceState {
   unsyncBlockInstance: (pageId: PageId, blockId: string) => Promise<void>
   updateBlock: (pageId: PageId, blockId: string, nextBlock: BlockRecord) => Promise<void>
   flushPendingSaves: () => Promise<void>
+  appendClipboardCaptureToInbox: (
+    blocks: BlockRecord[],
+    capturedAt?: string,
+  ) => Promise<void>
   insertBlock: (pageId: PageId, type: BlockType) => Promise<BlockRecord | null>
   insertParagraphBlock: (pageId: PageId, text: string) => Promise<void>
   insertBlockAfter: (
@@ -184,6 +206,12 @@ function createEmptyState(): WorkspaceState {
       sidebarLayout: 'compact',
       sidebarWidth: 272,
       pinnedSidebarItems: [],
+      clipboardCaptureMode: 'off',
+      pageDefaults: DEFAULT_PAGE_DISPLAY_DEFAULTS,
+      searchPreferences: DEFAULT_SEARCH_PREFERENCES,
+    },
+    appSettings: {
+      closeAction: 'hide_to_tray',
     },
     currentPageId: null,
     saveStatus: 'idle',
@@ -191,10 +219,22 @@ function createEmptyState(): WorkspaceState {
     ensureInboxPage: async () => {
       throw new Error('not implemented')
     },
-    createPage: async (_parentId?: PageId, _options?: CreatePageOptions) => {
+    createPage: async () => {
       throw new Error('not implemented')
     },
     setCurrentPage: async () => {
+      throw new Error('not implemented')
+    },
+    setAppCloseAction: async () => {
+      throw new Error('not implemented')
+    },
+    setClipboardCaptureMode: async () => {
+      throw new Error('not implemented')
+    },
+    setPageDefaults: async () => {
+      throw new Error('not implemented')
+    },
+    setSearchPreferences: async () => {
       throw new Error('not implemented')
     },
     setSidebarLayout: async () => {
@@ -254,6 +294,9 @@ function createEmptyState(): WorkspaceState {
     cleanupOrphanBoards: async () => {
       throw new Error('not implemented')
     },
+    cleanupOrphanAssets: async () => {
+      throw new Error('not implemented')
+    },
     renameDataTable: async () => {
       throw new Error('not implemented')
     },
@@ -309,6 +352,9 @@ function createEmptyState(): WorkspaceState {
       throw new Error('not implemented')
     },
     flushPendingSaves: async () => undefined,
+    appendClipboardCaptureToInbox: async () => {
+      throw new Error('not implemented')
+    },
     insertBlock: async () => {
       throw new Error('not implemented')
     },
@@ -345,7 +391,53 @@ function createEmptyState(): WorkspaceState {
   }
 }
 
-function createPageRecord(parentId?: PageId, title = UNTITLED_PAGE_TITLE): PageRecord {
+function normalizeAppSettings(settings: AppSettings | null | undefined): AppSettings {
+  return {
+    closeAction: settings?.closeAction === 'quit' ? 'quit' : 'hide_to_tray',
+  }
+}
+
+function normalizePageDefaults(defaults: Partial<PageDisplayDefaults> | undefined): PageDisplayDefaults {
+  return {
+    isFullWidth: defaults?.isFullWidth === true,
+    isSmallText: defaults?.isSmallText === true,
+    fontFamily:
+      defaults?.fontFamily === 'serif' || defaults?.fontFamily === 'mono'
+        ? defaults.fontFamily
+        : 'default',
+    showOutline: defaults?.showOutline !== false,
+  }
+}
+
+function normalizeSearchPreferences(
+  preferences: Partial<SearchPreferences> | undefined,
+): SearchPreferences {
+  return {
+    groupResults: preferences?.groupResults !== false,
+    showSourceLabels: preferences?.showSourceLabels !== false,
+    excerptLength:
+      preferences?.excerptLength === 'short' || preferences?.excerptLength === 'long'
+        ? preferences.excerptLength
+        : 'medium',
+  }
+}
+
+function formatClipboardCaptureTimestamp(capturedAt?: string) {
+  const date = capturedAt ? new Date(capturedAt) : new Date()
+  const year = String(date.getFullYear())
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+
+  return `${year}-${month}-${day} ${hours}:${minutes}`
+}
+
+function createPageRecord(
+  parentId?: PageId,
+  title = UNTITLED_PAGE_TITLE,
+  defaults: PageDisplayDefaults = DEFAULT_PAGE_DISPLAY_DEFAULTS,
+): PageRecord {
   const now = new Date().toISOString()
   const nextTitle = title.trim() || UNTITLED_PAGE_TITLE
 
@@ -356,10 +448,7 @@ function createPageRecord(parentId?: PageId, title = UNTITLED_PAGE_TITLE): PageR
     icon: null,
     cover: null,
     properties: {},
-    isFullWidth: false,
-    isSmallText: false,
-    fontFamily: 'default',
-    showOutline: true,
+    ...defaults,
     blocks: [],
     createdAt: now,
     updatedAt: now,
@@ -372,6 +461,9 @@ function createSettings(
   sidebarWidth = 272,
   pinnedSidebarItems: SidebarPinnedItem[] = [],
   inboxPageId: PageId | null = null,
+  clipboardCaptureMode: ClipboardCaptureMode = 'off',
+  pageDefaults: PageDisplayDefaults = DEFAULT_PAGE_DISPLAY_DEFAULTS,
+  searchPreferences: SearchPreferences = DEFAULT_SEARCH_PREFERENCES,
 ): WorkspaceSettings {
   return {
     lastOpenedPageId,
@@ -379,6 +471,9 @@ function createSettings(
     sidebarLayout,
     sidebarWidth,
     pinnedSidebarItems,
+    clipboardCaptureMode,
+    pageDefaults,
+    searchPreferences,
   }
 }
 
@@ -393,11 +488,18 @@ function normalizeSettings(settings: WorkspaceSettings): {
       : 272
   const pinnedSidebarItems = normalizePinnedSidebarItems(settings.pinnedSidebarItems)
   const inboxPageId = typeof settings.inboxPageId === 'string' ? settings.inboxPageId : null
+  const clipboardCaptureMode =
+    settings.clipboardCaptureMode === 'prompt_to_inbox' ? 'prompt_to_inbox' : 'off'
+  const pageDefaults = normalizePageDefaults(settings.pageDefaults)
+  const searchPreferences = normalizeSearchPreferences(settings.searchPreferences)
   const didChange =
     settings.inboxPageId !== inboxPageId ||
     settings.sidebarLayout !== sidebarLayout ||
     settings.sidebarWidth !== sidebarWidth ||
-    JSON.stringify(settings.pinnedSidebarItems ?? []) !== JSON.stringify(pinnedSidebarItems)
+    JSON.stringify(settings.pinnedSidebarItems ?? []) !== JSON.stringify(pinnedSidebarItems) ||
+    settings.clipboardCaptureMode !== clipboardCaptureMode ||
+    JSON.stringify(settings.pageDefaults ?? null) !== JSON.stringify(pageDefaults) ||
+    JSON.stringify(settings.searchPreferences ?? null) !== JSON.stringify(searchPreferences)
 
   return {
     settings: {
@@ -406,6 +508,9 @@ function normalizeSettings(settings: WorkspaceSettings): {
       sidebarLayout,
       sidebarWidth,
       pinnedSidebarItems,
+      clipboardCaptureMode,
+      pageDefaults,
+      searchPreferences,
     },
     didChange,
   }
@@ -772,28 +877,44 @@ function normalizeWorkspaceSnapshot(snapshot: WorkspaceSnapshot) {
       liveBlockTypes.has((block as BlockRecord | { type: string }).type as BlockRecord['type']),
     )
     const normalized = normalizeListBlocks(supportedBlocks)
+    const normalizedDisplay: PageDisplayDefaults = {
+      isFullWidth: page.isFullWidth === true,
+      isSmallText: page.isSmallText === true,
+      fontFamily:
+        page.fontFamily === 'serif' || page.fontFamily === 'mono' ? page.fontFamily : 'default',
+      showOutline: page.showOutline !== false,
+    }
+    const normalizedProperties = normalizePagePropertyValues(pageProperties, page.properties)
 
-    if (supportedBlocks.length !== page.blocks.length || normalized.didChange) {
+    if (
+      supportedBlocks.length !== page.blocks.length ||
+      normalized.didChange ||
+      page.isFullWidth !== normalizedDisplay.isFullWidth ||
+      page.isSmallText !== normalizedDisplay.isSmallText ||
+      page.fontFamily !== normalizedDisplay.fontFamily ||
+      page.showOutline !== normalizedDisplay.showOutline
+    ) {
       didChange = true
       return {
         ...page,
-        properties: normalizePagePropertyValues(pageProperties, page.properties),
+        ...normalizedDisplay,
+        properties: normalizedProperties,
         blocks: normalized.blocks,
       }
     }
-
-    const normalizedProperties = normalizePagePropertyValues(pageProperties, page.properties)
 
     if (JSON.stringify(page.properties ?? {}) !== JSON.stringify(normalizedProperties)) {
       didChange = true
       return {
         ...page,
+        ...normalizedDisplay,
         properties: normalizedProperties,
       }
     }
 
     return {
       ...page,
+      ...normalizedDisplay,
       properties: page.properties ?? normalizedProperties,
     }
   })
@@ -1101,7 +1222,17 @@ function touchPagesWithChangedBlocks(
   })
 }
 
-export function createWorkspaceStore(repository: WorkspaceRepository) {
+export function createWorkspaceStore(
+  repository: WorkspaceRepository,
+  appSettingsRepository: AppSettingsRepository = {
+    async load() {
+      return null
+    },
+    async save() {
+      return undefined
+    },
+  },
+) {
   const undoStack: WorkspaceSnapshot[] = []
   const redoStack: WorkspaceSnapshot[] = []
   let pagePropertyPersistQueue: Promise<void> = Promise.resolve()
@@ -1112,6 +1243,18 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
   let pendingBlockSaveTask: Promise<void> | null = null
   let pendingBlockSaveVersion = 0
   let bootstrapTask: Promise<void> | null = null
+
+  function getClipboardCaptureMode(settings: WorkspaceSettings) {
+    return settings.clipboardCaptureMode === 'prompt_to_inbox' ? 'prompt_to_inbox' : 'off'
+  }
+
+  function getPageDefaults(settings: WorkspaceSettings) {
+    return normalizePageDefaults(settings.pageDefaults)
+  }
+
+  function getSearchPreferences(settings: WorkspaceSettings) {
+    return normalizeSearchPreferences(settings.searchPreferences)
+  }
 
   function createSnapshotFromState(
     state: Pick<
@@ -1318,10 +1461,12 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
       bootstrapTask = (async () => {
         const persistedSnapshot = await repository.load()
+        const persistedAppSettings = await appSettingsRepository.load()
         const rawSnapshot = persistedSnapshot ?? createSeedWorkspace()
         const normalized = normalizeWorkspaceSnapshot(rawSnapshot)
         const snapshot = normalized.snapshot
         const currentPageId = resolveCurrentPageId(snapshot)
+        const appSettings = normalizeAppSettings(persistedAppSettings)
         undoStack.length = 0
         redoStack.length = 0
 
@@ -1342,7 +1487,11 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
             snapshot.settings.sidebarWidth ?? 272,
             snapshot.settings.pinnedSidebarItems ?? [],
             snapshot.settings.inboxPageId ?? null,
+            getClipboardCaptureMode(snapshot.settings),
+            getPageDefaults(snapshot.settings),
+            getSearchPreferences(snapshot.settings),
           ),
+          appSettings,
           currentPageId,
           saveStatus: 'saved',
         })
@@ -1373,6 +1522,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         state.settings.sidebarWidth ?? 272,
         state.settings.pinnedSidebarItems ?? [],
         inboxPage.id,
+        getClipboardCaptureMode(state.settings),
+        getPageDefaults(state.settings),
+        getSearchPreferences(state.settings),
       )
       const nextSnapshot = createSnapshotFromState({
         ...state,
@@ -1400,7 +1552,7 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
 
     createPage: async (parentId?: PageId, options?: CreatePageOptions) => {
       const state = get()
-      const page = createPageRecord(parentId, options?.title)
+      const page = createPageRecord(parentId, options?.title, getPageDefaults(state.settings))
       const nextCurrentPageId = options?.setCurrent === false ? state.currentPageId : page.id
       const nextSettings = createSettings(
         nextCurrentPageId,
@@ -1408,6 +1560,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         state.settings.sidebarWidth ?? 272,
         state.settings.pinnedSidebarItems ?? [],
         state.settings.inboxPageId ?? null,
+        getClipboardCaptureMode(state.settings),
+        getPageDefaults(state.settings),
+        getSearchPreferences(state.settings),
       )
       const nextSnapshot = createSnapshotFromState({
         ...state,
@@ -1453,6 +1608,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         state.settings.sidebarWidth ?? 272,
         state.settings.pinnedSidebarItems ?? [],
         state.settings.inboxPageId ?? null,
+        getClipboardCaptureMode(state.settings),
+        getPageDefaults(state.settings),
+        getSearchPreferences(state.settings),
       )
       const nextSnapshot = createSnapshotFromState({
         ...state,
@@ -1475,6 +1633,115 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       }
     },
 
+    setAppCloseAction: async (closeAction) => {
+      const nextAppSettings = normalizeAppSettings({ closeAction })
+      set({
+        appSettings: nextAppSettings,
+      })
+      await appSettingsRepository.save(nextAppSettings)
+    },
+
+    setClipboardCaptureMode: async (mode) => {
+      const state = get()
+      const nextSettings = createSettings(
+        state.settings.lastOpenedPageId,
+        state.settings.sidebarLayout ?? 'compact',
+        state.settings.sidebarWidth ?? 272,
+        state.settings.pinnedSidebarItems ?? [],
+        state.settings.inboxPageId ?? null,
+        mode,
+        getPageDefaults(state.settings),
+        getSearchPreferences(state.settings),
+      )
+      const nextSnapshot = createSnapshotFromState({
+        ...state,
+        settings: nextSettings,
+      })
+
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save(nextSnapshot)
+        set({
+          settings: nextSettings,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to update clipboard capture mode')
+      }
+    },
+
+    setPageDefaults: async (defaults) => {
+      const state = get()
+      const nextDefaults = normalizePageDefaults({
+        ...state.settings.pageDefaults,
+        ...defaults,
+      })
+      const nextSettings = createSettings(
+        state.settings.lastOpenedPageId,
+        state.settings.sidebarLayout ?? 'compact',
+        state.settings.sidebarWidth ?? 272,
+        state.settings.pinnedSidebarItems ?? [],
+        state.settings.inboxPageId ?? null,
+        getClipboardCaptureMode(state.settings),
+        nextDefaults,
+        getSearchPreferences(state.settings),
+      )
+      const nextSnapshot = createSnapshotFromState({
+        ...state,
+        settings: nextSettings,
+      })
+
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save(nextSnapshot)
+        set({
+          settings: nextSettings,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to update page defaults')
+      }
+    },
+
+    setSearchPreferences: async (preferences) => {
+      const state = get()
+      const nextSearchPreferences = normalizeSearchPreferences({
+        ...state.settings.searchPreferences,
+        ...preferences,
+      })
+      const nextSettings = createSettings(
+        state.settings.lastOpenedPageId,
+        state.settings.sidebarLayout ?? 'compact',
+        state.settings.sidebarWidth ?? 272,
+        state.settings.pinnedSidebarItems ?? [],
+        state.settings.inboxPageId ?? null,
+        getClipboardCaptureMode(state.settings),
+        getPageDefaults(state.settings),
+        nextSearchPreferences,
+      )
+      const nextSnapshot = createSnapshotFromState({
+        ...state,
+        settings: nextSettings,
+      })
+
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save(nextSnapshot)
+        set({
+          settings: nextSettings,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to update search preferences')
+      }
+    },
+
     setSidebarLayout: async (layout) => {
       const state = get()
 
@@ -1488,6 +1755,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         state.settings.sidebarWidth ?? 272,
         state.settings.pinnedSidebarItems ?? [],
         state.settings.inboxPageId ?? null,
+        getClipboardCaptureMode(state.settings),
+        getPageDefaults(state.settings),
+        getSearchPreferences(state.settings),
       )
       const nextSnapshot = createSnapshotFromState({
         ...state,
@@ -1522,6 +1792,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         nextWidth,
         state.settings.pinnedSidebarItems ?? [],
         state.settings.inboxPageId ?? null,
+        getClipboardCaptureMode(state.settings),
+        getPageDefaults(state.settings),
+        getSearchPreferences(state.settings),
       )
       const nextSnapshot = createSnapshotFromState({
         ...state,
@@ -1557,6 +1830,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         state.settings.sidebarWidth ?? 272,
         nextPinnedSidebarItems,
         state.settings.inboxPageId ?? null,
+        getClipboardCaptureMode(state.settings),
+        getPageDefaults(state.settings),
+        getSearchPreferences(state.settings),
       )
       const nextSnapshot = createSnapshotFromState({
         ...state,
@@ -2100,6 +2376,18 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         await persistNonPageAssets(state, { boards: nextBoards })
       } catch {
         throw new Error('Failed to cleanup orphan boards')
+      }
+    },
+
+    cleanupOrphanAssets: async () => {
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.cleanupOrphanAssets()
+        set({ saveStatus: 'saved' })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to cleanup orphan assets')
       }
     },
 
@@ -2679,6 +2967,9 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         state.settings.sidebarWidth ?? 272,
         nextPinnedSidebarItems,
         nextInboxPageId,
+        getClipboardCaptureMode(state.settings),
+        getPageDefaults(state.settings),
+        getSearchPreferences(state.settings),
       )
 
       pushUndoSnapshot(state)
@@ -3078,6 +3369,59 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
       scheduleBlockSave()
     },
 
+    appendClipboardCaptureToInbox: async (blocks, capturedAt) => {
+      await get().ensureInboxPage()
+      const state = get()
+      const inboxPageId = state.settings.inboxPageId
+
+      if (!inboxPageId) {
+        throw new Error('Inbox page not found')
+      }
+
+      const timestamp = formatClipboardCaptureTimestamp(capturedAt)
+      const nextPages = state.pages.map((page) =>
+        page.id === inboxPageId
+          ? {
+              ...page,
+              updatedAt: capturedAt ?? new Date().toISOString(),
+              blocks: [
+                ...page.blocks,
+                {
+                  id: createId('block'),
+                  type: 'paragraph' as const,
+                  text: `剪贴板捕获 · ${timestamp}`,
+                },
+                ...structuredClone(blocks),
+                {
+                  id: createId('block'),
+                  type: 'paragraph' as const,
+                  text: '',
+                },
+              ],
+            }
+          : page,
+      )
+
+      const nextSnapshot = createSnapshotFromState({
+        ...state,
+        pages: nextPages,
+      })
+
+      pushUndoSnapshot(state)
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save(nextSnapshot)
+        set({
+          pages: nextPages,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to append clipboard capture to inbox')
+      }
+    },
+
     flushPendingSaves,
 
     insertBlock: async (pageId: PageId, type: BlockType) => {
@@ -3098,16 +3442,8 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         if (type === 'child_page') {
           const childId = createId('page')
           childPage = {
+            ...createPageRecord(pageId, UNTITLED_PAGE_TITLE, getPageDefaults(state.settings)),
             id: childId,
-            title: UNTITLED_PAGE_TITLE,
-            parentId: pageId,
-            icon: null,
-            cover: null,
-            isFullWidth: false,
-            isSmallText: false,
-            fontFamily: 'default',
-            showOutline: true,
-            blocks: [],
             createdAt: now,
             updatedAt: now,
           }
@@ -3273,16 +3609,8 @@ export function createWorkspaceStore(repository: WorkspaceRepository) {
         if (type === 'child_page') {
           const childId = createId('page')
           childPage = {
+            ...createPageRecord(pageId, UNTITLED_PAGE_TITLE, getPageDefaults(state.settings)),
             id: childId,
-            title: UNTITLED_PAGE_TITLE,
-            parentId: pageId,
-            icon: null,
-            cover: null,
-            isFullWidth: false,
-            isSmallText: false,
-            fontFamily: 'default',
-            showOutline: true,
-            blocks: [],
             createdAt: now,
             updatedAt: now,
           }

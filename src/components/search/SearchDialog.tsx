@@ -7,6 +7,7 @@ import type {
   MindmapRecord,
   PagePropertyDefinition,
   PageRecord,
+  SearchPreferences,
   SyncedBlockGroupRecord,
 } from '../../domain/types'
 import {
@@ -26,6 +27,7 @@ interface SearchDialogProps {
   dataTables?: DataTableRecord[]
   mindmaps?: MindmapRecord[]
   syncedBlockGroups?: SyncedBlockGroupRecord[]
+  searchPreferences?: Partial<SearchPreferences>
   onSearch?: (query: string) => Promise<AsyncSearchResult[]>
   onClose: () => void
   onOpenPage: (pageId: string, blockId?: string) => void
@@ -62,6 +64,7 @@ export function SearchDialog({
   dataTables = [],
   mindmaps = [],
   syncedBlockGroups = [],
+  searchPreferences,
   onSearch,
   onClose,
   onOpenPage,
@@ -74,6 +77,10 @@ export function SearchDialog({
   const [asyncResults, setAsyncResults] = useState<SearchResult[]>([])
   const [selectedIndex, setSelectedIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const normalizedSearchPreferences = useMemo(
+    () => normalizeSearchPreferences(searchPreferences),
+    [searchPreferences],
+  )
   const localResults = useMemo(
     () => [
       ...searchPages(pages, pageProperties, syncedBlockGroups, query),
@@ -359,7 +366,7 @@ export function SearchDialog({
           {!query.trim() ? (
             <div className="search-empty">{uiCopy.search.emptyQuery}</div>
           ) : filteredResults.length > 0 ? (
-            groupedResults.map((group) => (
+            normalizedSearchPreferences.groupResults ? groupedResults.map((group) => (
               <section key={group.key} className="search-group" aria-label={group.label}>
                 <h2 className="search-group-title">{group.label}</h2>
                 <div className="search-group-results">
@@ -388,16 +395,55 @@ export function SearchDialog({
                         <span className="search-result-body">
                           <span className="search-result-title-row">
                             <span className="search-result-title">{result.title}</span>
-                            <span className="search-result-source">{result.sourceLabel}</span>
+                            {normalizedSearchPreferences.showSourceLabels ? (
+                              <span className="search-result-source">{result.sourceLabel}</span>
+                            ) : null}
                           </span>
-                          <span className="search-result-excerpt">{result.excerpt}</span>
+                          <span className="search-result-excerpt">
+                            {trimExcerpt(result.excerpt, normalizedSearchPreferences.excerptLength)}
+                          </span>
                         </span>
                       </button>
                     )
                   })}
                 </div>
               </section>
-            ))
+            )) : (
+              <div className="search-group-results">
+                {filteredResults.map((result, index) => (
+                  <button
+                    key={`${getResultKey(result)}-${index}`}
+                    type="button"
+                    className={[
+                      'search-result',
+                      index === activeIndex ? 'search-result-active' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    data-search-result-index={index}
+                    aria-label={resultAriaLabels[index] ?? getResultActionLabel(result)}
+                    aria-current={index === activeIndex ? 'true' : undefined}
+                    onClick={() => openResult(result)}
+                    onMouseEnter={() => setSelectedIndex(index)}
+                  >
+                    <span className="search-result-icon" aria-hidden="true">
+                      {result.icon ?? '📄'}
+                    </span>
+                    <span className="search-result-body">
+                      <span className="search-result-title-row">
+                        <span className="search-result-title">{result.title}</span>
+                        {normalizedSearchPreferences.showSourceLabels ? (
+                          <span className="search-result-source">{result.sourceLabel}</span>
+                        ) : null}
+                      </span>
+                      <span className="search-result-excerpt">
+                        {trimExcerpt(result.excerpt, normalizedSearchPreferences.excerptLength)}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )
           ) : (
             <div className="search-empty">{uiCopy.search.noResults}</div>
           )}
@@ -411,6 +457,42 @@ export function SearchDialog({
   }
 
   return createPortal(dialog, document.body)
+}
+
+function normalizeSearchPreferences(
+  preferences: Partial<SearchPreferences> | undefined,
+): SearchPreferences {
+  return {
+    groupResults: preferences?.groupResults !== false,
+    showSourceLabels: preferences?.showSourceLabels !== false,
+    excerptLength:
+      preferences?.excerptLength === 'short' || preferences?.excerptLength === 'long'
+        ? preferences.excerptLength
+        : 'medium',
+  }
+}
+
+function getExcerptLimit(excerptLength: SearchPreferences['excerptLength']) {
+  if (excerptLength === 'short') {
+    return 72
+  }
+
+  if (excerptLength === 'long') {
+    return 220
+  }
+
+  return 120
+}
+
+function trimExcerpt(text: string, excerptLength: SearchPreferences['excerptLength']) {
+  const normalized = text.trim()
+  const limit = getExcerptLimit(excerptLength)
+
+  if (normalized.length <= limit) {
+    return normalized
+  }
+
+  return `${normalized.slice(0, Math.max(0, limit - 3)).trimEnd()}...`
 }
 
 function normalizeAsyncSearchResult(result: AsyncSearchResult): SearchResult {

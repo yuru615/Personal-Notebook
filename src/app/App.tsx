@@ -27,6 +27,11 @@ import {
 } from '../components/export/ExportImportPanel'
 import { AppShell } from '../components/layout/AppShell'
 import { SearchDialog } from '../components/search/SearchDialog'
+import {
+  DEFAULT_SETTINGS_SECTION,
+  SettingsCenter,
+  normalizeSettingsSection,
+} from '../components/settings/SettingsCenter'
 import ConfirmDialog from '../components/dataTable/components/table/ConfirmDialog'
 import { SidebarTree } from '../components/sidebar/SidebarTree'
 import { AppErrorBoundary } from '../components/shared/AppErrorBoundary'
@@ -41,6 +46,7 @@ import type {
   BoardRecord,
   DataTableRecord,
   MindmapRecord,
+  PageDisplayDefaults,
   PageFontFamily,
   PagePropertyDefinition,
   PagePropertyOption,
@@ -57,6 +63,7 @@ import {
   createStorageWorkspaceRepository,
   type WorkspaceRepository,
 } from '../lib/workspaceRepository'
+import { createAppSettingsRepository } from '../lib/appSettingsRepository'
 import {
   exportPagePackageToPath,
   exportPagePackage,
@@ -82,6 +89,7 @@ import { uiCopy } from '../ui/copy'
 import { sanitizeFileNameSegment } from '../utils/fileName'
 import { deletePageBranch } from '../utils/pageTree'
 import type { ReorderPosition } from '../utils/reorder'
+import { useDesktopClipboardCapture } from './useDesktopClipboardCapture'
 
 type WorkspaceStore = ReturnType<typeof createWorkspaceStore>
 type AppState = ReturnType<WorkspaceStore['getState']>
@@ -174,12 +182,19 @@ function createAppStore(repository?: WorkspaceRepository) {
     return store
   }
 
-  defaultWorkspaceStore ??= createWorkspaceStore(createStorageWorkspaceRepository())
+  defaultWorkspaceStore ??= createWorkspaceStore(
+    createStorageWorkspaceRepository(),
+    createAppSettingsRepository(),
+  )
   return defaultWorkspaceStore
 }
 
 export function App({ repository, store: injectedStore, initialEntries }: AppProps = {}) {
   const [store] = useState(() => injectedStore ?? createAppStore(repository))
+  const workspaceImportRepository = useMemo(
+    () => repository ?? createStorageWorkspaceRepository(),
+    [repository],
+  )
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState)
   const [isBootstrapped, setIsBootstrapped] = useState(false)
   const [bootstrapError, setBootstrapError] = useState<unknown>(null)
@@ -188,6 +203,12 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
   const bootstrapPromiseRef = useRef<Promise<void> | null>(null)
   const archiveTaskClearTimerRef = useRef<number | null>(null)
   const setCurrentPage = store.getState().setCurrentPage
+
+  useDesktopClipboardCapture({
+    isBootstrapped,
+    clipboardCaptureMode: state.settings.clipboardCaptureMode,
+    appendClipboardCaptureToInbox: store.getState().appendClipboardCaptureToInbox,
+  })
 
   function ensureBootstrap() {
     bootstrapPromiseRef.current ??= store.getState().bootstrap()
@@ -318,7 +339,10 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
     window.addEventListener('pagehide', flushPendingSavesSilently)
     window.addEventListener('beforeunload', flushPendingSavesSilently)
     document.addEventListener('visibilitychange', handleVisibilityChange)
-    void registerDesktopPendingSaveFlush(flushPendingSaves)
+    void registerDesktopPendingSaveFlush(
+      flushPendingSaves,
+      () => store.getState().appSettings.closeAction ?? 'hide_to_tray',
+    )
       .then((unlisten) => {
         if (isActive) {
           unlistenDesktopFlush = unlisten
@@ -446,6 +470,33 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
     }
   }
 
+  async function importWorkspaceSnapshot() {
+    const file = await openTextFile({ filters: JSON_FILE_FILTER })
+
+    if (!file) {
+      return store.getState().currentPageId
+    }
+
+    if (!window.confirm(uiCopy.export.workspaceImportConfirm)) {
+      return store.getState().currentPageId
+    }
+
+    try {
+      showArchiveTask({ label: uiCopy.export.importingWorkspace, percent: 0 })
+      await store.getState().flushPendingSaves()
+      showArchiveTask({ label: uiCopy.export.importingWorkspace, percent: 24 })
+      await workspaceImportRepository.replace(JSON.parse(file.contents) as WorkspaceSnapshot)
+      showArchiveTask({ label: uiCopy.export.refreshingWorkspace, percent: 95 })
+      await store.getState().bootstrap()
+      finishArchiveTask(uiCopy.export.workspaceImportComplete)
+      return store.getState().currentPageId
+    } catch {
+      failArchiveTask(uiCopy.export.workspaceImportError)
+      window.alert(uiCopy.export.workspaceImportError)
+      return store.getState().currentPageId
+    }
+  }
+
   if (!isBootstrapped) {
     return <div className="page-empty">{uiCopy.app.loading}</div>
   }
@@ -462,6 +513,8 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       syncedBlockGroups={state.syncedBlockGroups}
       pages={state.pages}
       pageProperties={state.pageProperties}
+      appSettings={state.appSettings}
+      workspaceSettings={state.settings}
       currentPageId={state.currentPageId}
       inboxPageId={state.settings.inboxPageId ?? null}
       desktopRouteRequest={desktopRouteRequest}
@@ -473,7 +526,12 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onCreatePage={(parentId, options) => store.getState().createPage(parentId, options)}
       onSetSidebarLayout={(layout) => store.getState().setSidebarLayout(layout)}
       onSetSidebarWidth={(width) => store.getState().setSidebarWidth(width)}
+      onSetAppCloseAction={(closeAction) => store.getState().setAppCloseAction(closeAction)}
+      onSetClipboardCaptureMode={(mode) => store.getState().setClipboardCaptureMode(mode)}
+      onSetPageDefaults={(defaults) => store.getState().setPageDefaults(defaults)}
+      onSetSearchPreferences={(preferences) => store.getState().setSearchPreferences(preferences)}
       onTogglePinnedSidebarItem={(item) => store.getState().togglePinnedSidebarItem(item)}
+      onEnsureInboxPage={() => store.getState().ensureInboxPage()}
       onRoutePageChange={setCurrentPage}
       onRenamePage={(pageId, title) => store.getState().renamePage(pageId, title)}
       onDuplicatePage={(pageId) => store.getState().duplicatePage(pageId)}
@@ -601,6 +659,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       }}
       onExportPage={(pageId) => exportPageArchive(pageId)}
       onExportWorkspace={exportWorkspaceSnapshot}
+      onImportWorkspace={importWorkspaceSnapshot}
       onImportArchive={async () => {
         if (isDesktopRuntime()) {
           const file = await openLocalFilePath({ filters: ZIP_FILE_FILTER })
@@ -658,6 +717,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       }}
       onCleanupOrphanBoards={() => store.getState().cleanupOrphanBoards()}
       onCleanupOrphanDataTables={() => store.getState().cleanupOrphanDataTables()}
+      onCleanupOrphanAssets={() => store.getState().cleanupOrphanAssets()}
     />
   )
 
@@ -675,6 +735,8 @@ interface AppRoutesProps {
   syncedBlockGroups: AppState['syncedBlockGroups']
   pages: AppState['pages']
   pageProperties: PagePropertyDefinition[]
+  appSettings: AppState['appSettings']
+  workspaceSettings: WorkspaceSettings
   currentPageId: AppState['currentPageId']
   inboxPageId: string | null
   desktopRouteRequest: DesktopRouteRequest | null
@@ -684,9 +746,19 @@ interface AppRoutesProps {
   pinnedSidebarItems: SidebarPinnedItem[]
   archiveTask: ArchiveTaskStatus | null
   onCreatePage: (parentId?: string, options?: CreatePageOptions) => Promise<PageRecord>
+  onSetAppCloseAction: (closeAction: 'hide_to_tray' | 'quit') => Promise<void>
   onSetSidebarLayout: (layout: NonNullable<WorkspaceSettings['sidebarLayout']>) => Promise<void>
   onSetSidebarWidth: (width: number) => Promise<void>
+  onSetClipboardCaptureMode: (
+    mode: NonNullable<WorkspaceSettings['clipboardCaptureMode']>,
+  ) => Promise<void>
+  onSetPageDefaults: (defaults: Partial<PageDisplayDefaults>) => Promise<void>
+  onSetSearchPreferences: (
+    preferences: Partial<NonNullable<WorkspaceSettings['searchPreferences']>>,
+  ) => Promise<void>
   onTogglePinnedSidebarItem: (item: SidebarPinnedItem) => Promise<void>
+  onEnsureInboxPage: () => Promise<PageRecord>
+  onImportWorkspace: () => Promise<string | null>
   onRoutePageChange: (pageId: string) => Promise<void>
   onRenamePage: (pageId: string, title: string) => Promise<void>
   onDuplicatePage: (pageId: string) => Promise<PageRecord | null>
@@ -784,6 +856,7 @@ interface AppRoutesProps {
   onImportArchive: () => Promise<string | null>
   onCleanupOrphanBoards: () => Promise<void>
   onCleanupOrphanDataTables: () => Promise<void>
+  onCleanupOrphanAssets: () => Promise<void>
 }
 
 interface SearchFocusLocationState {
@@ -797,6 +870,8 @@ function AppRoutes({
   syncedBlockGroups,
   pages,
   pageProperties,
+  appSettings,
+  workspaceSettings,
   currentPageId,
   inboxPageId,
   desktopRouteRequest,
@@ -806,9 +881,15 @@ function AppRoutes({
   pinnedSidebarItems,
   archiveTask,
   onCreatePage,
+  onSetAppCloseAction,
   onSetSidebarLayout,
   onSetSidebarWidth,
+  onSetClipboardCaptureMode,
+  onSetPageDefaults,
+  onSetSearchPreferences,
   onTogglePinnedSidebarItem,
+  onEnsureInboxPage,
+  onImportWorkspace,
   onRoutePageChange,
   onRenamePage,
   onDuplicatePage,
@@ -857,10 +938,12 @@ function AppRoutes({
   onImportArchive,
   onCleanupOrphanBoards,
   onCleanupOrphanDataTables,
+  onCleanupOrphanAssets,
 }: AppRoutesProps) {
   const navigate = useNavigate()
   const isWhiteboardRoute = useMatch('/pages/:pageId/boards/:boardId') !== null
   const isMindmapRoute = useMatch('/pages/:pageId/mindmaps/:mindmapId') !== null
+  const isSettingsRoute = useMatch('/settings/:section?') !== null
   const [isSearchOpen, setIsSearchOpen] = useState(false)
   const [pendingDeletePageId, setPendingDeletePageId] = useState<string | null>(null)
   const pendingDeletePage = pages.find((page) => page.id === pendingDeletePageId) ?? null
@@ -947,7 +1030,7 @@ function AppRoutes({
 
   return (
     <AppShell
-      hideSidebar={isWhiteboardRoute || isMindmapRoute}
+      hideSidebar={isWhiteboardRoute || isMindmapRoute || isSettingsRoute}
       sidebarClassName={sidebarLayout === 'compact' ? 'sidebar sidebar-compact' : 'sidebar'}
       sidebarWidth={sidebarWidth}
       onSidebarWidthChange={(width) => {
@@ -970,6 +1053,12 @@ function AppRoutes({
           }}
           onExportWorkspace={() => {
             void onExportWorkspace()
+          }}
+          onImportWorkspace={() => {
+            void onImportWorkspace()
+          }}
+          onOpenSettings={() => {
+            navigate(`/settings/${DEFAULT_SETTINGS_SECTION}`)
           }}
           onSetSidebarLayout={(layout) => {
             void onSetSidebarLayout(layout)
@@ -1003,6 +1092,7 @@ function AppRoutes({
         dataTables={dataTables}
         mindmaps={mindmaps}
         syncedBlockGroups={syncedBlockGroups}
+        searchPreferences={workspaceSettings.searchPreferences}
         onClose={() => setIsSearchOpen(false)}
         onOpenPage={(pageId, blockId) =>
           navigate(`/pages/${pageId}`, blockId ? { state: { focusBlockId: blockId } } : undefined)
@@ -1027,6 +1117,35 @@ function AppRoutes({
               ) : (
                 <div className="page-empty">{uiCopy.app.pageNotFound}</div>
               )
+            }
+          />
+          <Route
+            path="/settings/:section?"
+            element={
+              <SettingsRoute
+                appSettings={appSettings}
+                workspaceSettings={workspaceSettings}
+                onSetAppCloseAction={onSetAppCloseAction}
+                onSetSidebarLayout={onSetSidebarLayout}
+                onSetSidebarWidth={onSetSidebarWidth}
+                onSetClipboardCaptureMode={onSetClipboardCaptureMode}
+                onSetPageDefaults={onSetPageDefaults}
+                onSetSearchPreferences={onSetSearchPreferences}
+                onExportWorkspace={onExportWorkspace}
+                onImportWorkspace={onImportWorkspace}
+                onImportArchive={onImportArchive}
+                onCleanupOrphanBoards={onCleanupOrphanBoards}
+                onCleanupOrphanDataTables={onCleanupOrphanDataTables}
+                onCleanupOrphanAssets={onCleanupOrphanAssets}
+                onOpenInbox={async () => {
+                  const page = await onEnsureInboxPage()
+                  navigate(`/pages/${page.id}`)
+                }}
+                onBackToWorkspace={() => {
+                  const targetPageId = currentPageId ?? workspaceSettings.lastOpenedPageId
+                  navigate(targetPageId ? `/pages/${targetPageId}` : '/')
+                }}
+              />
             }
           />
           <Route
@@ -1066,6 +1185,7 @@ function AppRoutes({
                 saveStatus={saveStatus}
                 onExportArchive={onExportArchive}
                 onExportWorkspace={onExportWorkspace}
+                onImportWorkspace={onImportWorkspace}
                 onImportArchive={onImportArchive}
                 onCleanupOrphanBoards={onCleanupOrphanBoards}
                 onCleanupOrphanDataTables={onCleanupOrphanDataTables}
@@ -1119,6 +1239,7 @@ function AppRoutes({
                 onTogglePageOutlineVisible={onTogglePageOutlineVisible}
                 onExportArchive={onExportArchive}
                 onExportWorkspace={onExportWorkspace}
+                onImportWorkspace={onImportWorkspace}
                 onImportArchive={onImportArchive}
                 onCleanupOrphanBoards={onCleanupOrphanBoards}
                 onCleanupOrphanDataTables={onCleanupOrphanDataTables}
@@ -1147,6 +1268,7 @@ function AppRoutes({
                 onTogglePageOutlineVisible={onTogglePageOutlineVisible}
                 onExportArchive={onExportArchive}
                 onExportWorkspace={onExportWorkspace}
+                onImportWorkspace={onImportWorkspace}
                 onImportArchive={onImportArchive}
                 onCleanupOrphanBoards={onCleanupOrphanBoards}
                 onCleanupOrphanDataTables={onCleanupOrphanDataTables}
@@ -1182,6 +1304,103 @@ function AppRoutes({
         />
       ) : null}
     </AppShell>
+  )
+}
+
+interface SettingsRouteProps {
+  appSettings: AppState['appSettings']
+  workspaceSettings: WorkspaceSettings
+  onSetAppCloseAction: (closeAction: 'hide_to_tray' | 'quit') => Promise<void>
+  onSetSidebarLayout: (layout: NonNullable<WorkspaceSettings['sidebarLayout']>) => Promise<void>
+  onSetSidebarWidth: (width: number) => Promise<void>
+  onSetClipboardCaptureMode: (
+    mode: NonNullable<WorkspaceSettings['clipboardCaptureMode']>,
+  ) => Promise<void>
+  onSetPageDefaults: (defaults: Partial<PageDisplayDefaults>) => Promise<void>
+  onSetSearchPreferences: (
+    preferences: Partial<NonNullable<WorkspaceSettings['searchPreferences']>>,
+  ) => Promise<void>
+  onExportWorkspace: () => Promise<void>
+  onImportWorkspace: () => Promise<string | null>
+  onImportArchive: () => Promise<string | null>
+  onCleanupOrphanBoards: () => Promise<void>
+  onCleanupOrphanDataTables: () => Promise<void>
+  onCleanupOrphanAssets: () => Promise<void>
+  onOpenInbox: () => Promise<void>
+  onBackToWorkspace: () => void
+}
+
+function SettingsRoute({
+  appSettings,
+  workspaceSettings,
+  onSetAppCloseAction,
+  onSetSidebarLayout,
+  onSetSidebarWidth,
+  onSetClipboardCaptureMode,
+  onSetPageDefaults,
+  onSetSearchPreferences,
+  onExportWorkspace,
+  onImportWorkspace,
+  onImportArchive,
+  onCleanupOrphanBoards,
+  onCleanupOrphanDataTables,
+  onCleanupOrphanAssets,
+  onOpenInbox,
+  onBackToWorkspace,
+}: SettingsRouteProps) {
+  const navigate = useNavigate()
+  const { section } = useParams()
+  const activeSection = normalizeSettingsSection(section)
+
+  return (
+    <SettingsCenter
+      activeSection={activeSection}
+      appSettings={appSettings}
+      workspaceSettings={workspaceSettings}
+      onSectionChange={(nextSection) => {
+        navigate(`/settings/${nextSection}`, { replace: nextSection === activeSection })
+      }}
+      onSetPageDefaults={(defaults) => {
+        void onSetPageDefaults(defaults)
+      }}
+      onSetAppCloseAction={(closeAction) => {
+        void onSetAppCloseAction(closeAction)
+      }}
+      onSetSidebarLayout={(layout) => {
+        void onSetSidebarLayout(layout)
+      }}
+      onSetSidebarWidth={(width) => {
+        void onSetSidebarWidth(width)
+      }}
+      onSetClipboardCaptureMode={(mode) => {
+        void onSetClipboardCaptureMode(mode)
+      }}
+      onSetSearchPreferences={(preferences) => {
+        void onSetSearchPreferences(preferences)
+      }}
+      onExportWorkspace={() => {
+        void onExportWorkspace()
+      }}
+      onImportWorkspace={() => {
+        void onImportWorkspace()
+      }}
+      onImportArchive={() => {
+        void onImportArchive()
+      }}
+      onCleanupOrphanBoards={() => {
+        void onCleanupOrphanBoards()
+      }}
+      onCleanupOrphanDataTables={() => {
+        void onCleanupOrphanDataTables()
+      }}
+      onCleanupOrphanAssets={() => {
+        void onCleanupOrphanAssets()
+      }}
+      onOpenInbox={() => {
+        void onOpenInbox()
+      }}
+      onBackToWorkspace={onBackToWorkspace}
+    />
   )
 }
 
@@ -1246,6 +1465,7 @@ interface PageRouteProps {
   saveStatus: SaveStatus
   onExportArchive: () => Promise<void>
   onExportWorkspace: () => Promise<void>
+  onImportWorkspace: () => Promise<string | null>
   onImportArchive: () => Promise<string | null>
   onCleanupOrphanBoards: () => Promise<void>
   onCleanupOrphanDataTables: () => Promise<void>
@@ -1313,6 +1533,7 @@ function PageRoute({
   saveStatus,
   onExportArchive,
   onExportWorkspace,
+  onImportWorkspace,
   onImportArchive,
   onCleanupOrphanBoards,
   onCleanupOrphanDataTables,
@@ -1416,6 +1637,10 @@ function PageRoute({
       }}
       onExportArchive={() => void onExportArchive()}
       onExportWorkspace={() => void onExportWorkspace()}
+      onImportWorkspace={async () => {
+        const nextPageId = await onImportWorkspace()
+        navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
+      }}
       onImportArchive={async () => {
         const nextPageId = await onImportArchive()
         navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
@@ -1698,6 +1923,7 @@ interface DataTableRouteProps {
   onTogglePageOutlineVisible: (pageId: string, showOutline: boolean) => Promise<void>
   onExportArchive: () => Promise<void>
   onExportWorkspace: () => Promise<void>
+  onImportWorkspace: () => Promise<string | null>
   onImportArchive: () => Promise<string | null>
   onCleanupOrphanBoards: () => Promise<void>
   onCleanupOrphanDataTables: () => Promise<void>
@@ -1722,6 +1948,7 @@ function DataTableRoute({
   onTogglePageOutlineVisible,
   onExportArchive,
   onExportWorkspace,
+  onImportWorkspace,
   onImportArchive,
   onCleanupOrphanBoards,
   onCleanupOrphanDataTables,
@@ -1802,6 +2029,10 @@ function DataTableRoute({
             }}
             onExportArchive={() => void onExportArchive()}
             onExportWorkspace={() => void onExportWorkspace()}
+            onImportWorkspace={async () => {
+              const nextPageId = await onImportWorkspace()
+              navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
+            }}
             onImportArchive={async () => {
               const nextPageId = await onImportArchive()
               navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })

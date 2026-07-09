@@ -70,10 +70,10 @@ describe('data table styles', () => {
     expect(embeddedIcon).toContain('display: none')
   })
 
-  it('keeps the full data table route aligned to the normal page content column', () => {
+  it('keeps fit-page data table routes adaptive while keeping the route chrome aligned', () => {
     expect(getAppRuleBody('.data-table-route-page')).toContain('--page-content-available-width: calc(')
     expect(getAppRuleBody('.data-table-route-page .database-page.is-full-width')).toContain(
-      'max-width: min(760px, var(--page-content-available-width))',
+      'max-width: var(--page-content-available-width)',
     )
     expect(getAppRuleBody('.data-table-route-page .database-page.is-full-width')).toContain(
       'margin: 0 auto',
@@ -138,5 +138,16 @@ describe('data table styles', () => {
     expect(embeddedMain).toContain('min-width: 0')
     expect(embeddedShell).toContain('min-width: 0')
     expect(embeddedPage).toContain('min-width: 0')
+  })
+
+  it('keeps board views scrolling horizontally inside the normal page content width', () => {
+    const boardContent = getRuleBody('.board-view-content')
+    const boardGrid = getRuleBody('.board-view-grid')
+
+    expect(boardContent).toContain('min-width: 0')
+    expect(boardContent).toContain('max-width: 100%')
+    expect(boardGrid).toContain('min-width: 0')
+    expect(boardGrid).toContain('width: 100%')
+    expect(boardGrid).toContain('overflow-x: auto')
   })
 })

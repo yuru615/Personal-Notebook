@@ -5,6 +5,7 @@ use tauri::{
     Emitter, Manager, WindowEvent,
 };
 
+mod clipboard_capture;
 mod storage;
 
 const MAIN_WINDOW_LABEL: &str = "main";
@@ -44,9 +45,17 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
             open_external_url,
+            clipboard_capture::read_clipboard_candidate,
+            clipboard_capture::set_clipboard_capture_enabled,
+            clipboard_capture::take_confirmed_clipboard_capture,
+            clipboard_capture::show_clipboard_capture_notification,
+            clipboard_capture::show_clipboard_capture_failure_notification,
+            clipboard_capture::suppress_clipboard_capture,
             storage::commands::bootstrap_workspace,
             storage::commands::export_workspace_backup,
             storage::commands::replace_workspace_backup,
+            storage::commands::load_app_settings,
+            storage::commands::save_app_settings,
             storage::commands::export_page_package,
             storage::commands::export_page_package_to_path,
             storage::commands::import_page_package,
@@ -73,6 +82,9 @@ pub fn run() {
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir()?;
             app.manage(storage::StorageState::open(app_data_dir)?);
+            let clipboard_capture_state = clipboard_capture::ClipboardCaptureState::default();
+            app.manage(clipboard_capture_state.clone());
+            clipboard_capture::start_clipboard_capture_monitor(app.handle().clone(), clipboard_capture_state);
             setup_tray(app)?;
             Ok(())
         })

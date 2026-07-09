@@ -24,15 +24,16 @@ pub use error::{StorageError, StorageResult};
 #[allow(unused_imports)]
 pub use models::PagePackageImportResult;
 pub use models::{
-    AssetMeta, BoardRecord, BootstrapPayload, DataTableRecord, DeleteResult, ImportAssetFileInput,
-    LoadedPage, MindmapRecord, PageMeta, PagePackageManifest, PagePropertyDefinition, PageRecord,
-    SaveResult, SearchResult, SyncedBlockGroupRecord, WorkspaceSettings, WorkspaceSnapshot,
-    WriteAssetInput,
+    AppSettings, AssetMeta, BoardRecord, BootstrapPayload, DataTableRecord, DeleteResult,
+    ImportAssetFileInput, LoadedPage, MindmapRecord, PageMeta, PagePackageManifest,
+    PagePropertyDefinition, PageRecord, SaveResult, SearchResult, SyncedBlockGroupRecord,
+    WorkspaceSettings, WorkspaceSnapshot, WriteAssetInput,
 };
 
 const DATABASE_FILE_NAME: &str = "zhixi.db";
 const ASSETS_DIR_NAME: &str = "zhixi-assets";
 const SETTINGS_ID: &str = "workspace";
+const APP_SETTINGS_ID: &str = "appSettings";
 const PAGE_PROPERTIES_SETTINGS_ID: &str = "page_properties";
 #[allow(dead_code)]
 pub const PAGE_PACKAGE_KIND: &str = "zhixi.page-package";
@@ -1028,6 +1029,15 @@ impl Storage {
         Ok(())
     }
 
+    fn save_app_settings(&self, settings: &AppSettings) -> StorageResult<()> {
+        self.connection.execute(
+            "INSERT INTO zhixi_settings (id, record_json) VALUES (?1, ?2)
+              ON CONFLICT(id) DO UPDATE SET record_json = excluded.record_json",
+            params![APP_SETTINGS_ID, serde_json::to_string(settings)?],
+        )?;
+        Ok(())
+    }
+
     fn save_page_properties(&self, definitions: &[PagePropertyDefinition]) -> StorageResult<()> {
         self.connection.execute(
             "INSERT INTO zhixi_settings (id, record_json) VALUES (?1, ?2)
@@ -1045,6 +1055,18 @@ impl Storage {
             .query_row(
                 "SELECT record_json FROM zhixi_settings WHERE id = ?1",
                 [SETTINGS_ID],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .map(|json| serde_json::from_str(&json).map_err(Into::into))
+            .transpose()
+    }
+
+    fn load_app_settings(&self) -> StorageResult<Option<AppSettings>> {
+        self.connection
+            .query_row(
+                "SELECT record_json FROM zhixi_settings WHERE id = ?1",
+                [APP_SETTINGS_ID],
                 |row| row.get::<_, String>(0),
             )
             .optional()?
@@ -2738,6 +2760,27 @@ mod tests {
             .expect("export workspace backup");
 
         assert_eq!(exported.settings, snapshot.settings);
+    }
+
+    #[test]
+    fn saves_and_loads_app_settings_independently_from_workspace_settings() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let settings = AppSettings {
+            close_action: Some("hide_to_tray".to_string()),
+        };
+
+        storage
+            .save_app_settings(&settings)
+            .expect("save app settings");
+
+        assert_eq!(
+            storage.load_app_settings().expect("load app settings"),
+            Some(settings)
+        );
+        assert_eq!(
+            storage.load_settings().expect("load workspace settings"),
+            None
+        );
     }
 
     #[test]

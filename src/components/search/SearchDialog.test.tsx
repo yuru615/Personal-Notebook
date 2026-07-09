@@ -615,4 +615,95 @@ describe('SearchDialog', () => {
     expect(screen.getByText('Capture001.png / 首页截图')).toBeInTheDocument()
     expect(screen.queryByText('Search ranking notes')).not.toBeInTheDocument()
   })
+  it('can render results without group headings when grouping is disabled', async () => {
+    const user = userEvent.setup()
+    const { container } = render(
+      <SearchDialog
+        open
+        pages={pages}
+        onClose={vi.fn()}
+        onOpenPage={vi.fn()}
+        searchPreferences={{
+          groupResults: false,
+          showSourceLabels: true,
+          excerptLength: 'medium',
+        }}
+      />,
+    )
+
+    await user.type(screen.getByPlaceholderText(searchPlaceholder), 'customer')
+
+    expect(container.querySelector('.search-group-title')).toBeNull()
+    expect(
+      await screen.findByRole('button', { name: `${openPageLabel} Customer Feedback` }),
+    ).toBeInTheDocument()
+  })
+
+  it('hides source labels when the preference is disabled', async () => {
+    const user = userEvent.setup()
+    const { container } = render(
+      <SearchDialog
+        open
+        pages={pages}
+        onClose={vi.fn()}
+        onOpenPage={vi.fn()}
+        searchPreferences={{
+          groupResults: true,
+          showSourceLabels: false,
+          excerptLength: 'medium',
+        }}
+      />,
+    )
+
+    await user.type(screen.getByPlaceholderText(searchPlaceholder), 'customer')
+
+    expect(
+      await screen.findByRole('button', { name: `${openPageLabel} Customer Feedback` }),
+    ).toBeInTheDocument()
+    expect(container.querySelector('.search-result-source')).toBeNull()
+  })
+
+  it('trims excerpts according to the configured excerpt length', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <SearchDialog
+        open
+        pages={[
+          {
+            id: 'page-long',
+            parentId: null,
+            title: 'Long Notes',
+            icon: null,
+            cover: null,
+            blocks: [
+              {
+                id: 'block-long',
+                type: 'paragraph',
+                text: 'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega',
+              },
+            ],
+            createdAt: now,
+            updatedAt: now,
+          },
+        ]}
+        onClose={vi.fn()}
+        onOpenPage={vi.fn()}
+        searchPreferences={{
+          groupResults: true,
+          showSourceLabels: true,
+          excerptLength: 'short',
+        }}
+      />,
+    )
+
+    await user.type(screen.getByPlaceholderText(searchPlaceholder), 'alpha')
+
+    const excerpt = await screen.findByText((content, element) => {
+      return element?.classList.contains('search-result-excerpt') === true && content.includes('alpha')
+    })
+
+    expect(excerpt.textContent?.length ?? 0).toBeLessThan(80)
+    expect(excerpt.textContent).toContain('...')
+  })
 })

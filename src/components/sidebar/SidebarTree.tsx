@@ -63,7 +63,9 @@ interface SidebarTreeProps {
   onExportPage?: (pageId: PageId) => void | Promise<void>
   onDuplicatePage?: (pageId: PageId) => void | Promise<void>
   onDeletePage?: (pageId: PageId) => void | Promise<void>
+  onImportWorkspace?: () => void | Promise<void>
   onImportArchive?: () => void | Promise<void>
+  onOpenSettings?: () => void | Promise<void>
   layout?: SidebarLayout
   onSetSidebarLayout?: (layout: SidebarLayout) => void | Promise<void>
 }
@@ -88,7 +90,9 @@ export function SidebarTree({
   onExportPage,
   onDuplicatePage,
   onDeletePage,
+  onImportWorkspace,
   onImportArchive,
+  onOpenSettings,
   layout = 'classic',
   onSetSidebarLayout,
 }: SidebarTreeProps) {
@@ -105,6 +109,8 @@ export function SidebarTree({
     shared: true,
     my_pages: true,
   })
+  const sidebarLayoutRef = useRef<HTMLDivElement | null>(null)
+  const sidebarAnchorBaseTopRef = useRef<number | null>(null)
   const systemInboxPage = useMemo(
     () => pages.find((page) => page.id === inboxPageId) ?? null,
     [inboxPageId, pages],
@@ -149,6 +155,59 @@ export function SidebarTree({
       setIsUtilityMenuOpen(false)
     },
   })
+
+  useLayoutEffect(() => {
+    function getSidebarAnchor() {
+      const sidebarLayout = sidebarLayoutRef.current
+
+      if (!sidebarLayout) {
+        return null
+      }
+
+      return sidebarLayout.closest('.sidebar') as HTMLElement | null ?? sidebarLayout
+    }
+
+    function updateFixedTopOffset() {
+      const sidebarLayout = sidebarLayoutRef.current
+      const sidebarAnchor = getSidebarAnchor()
+
+      if (!sidebarLayout || !sidebarAnchor) {
+        return
+      }
+
+      const currentTop = sidebarAnchor.getBoundingClientRect().top
+
+      if (sidebarAnchorBaseTopRef.current === null) {
+        sidebarAnchorBaseTopRef.current = currentTop
+      }
+
+      const nextOffset = sidebarAnchorBaseTopRef.current - currentTop
+      sidebarLayout.style.setProperty(
+        '--sidebar-fixed-top-offset',
+        `${Math.abs(nextOffset) < 0.01 ? 0 : nextOffset}px`,
+      )
+    }
+
+    function handleResize() {
+      const sidebarAnchor = getSidebarAnchor()
+
+      if (!sidebarAnchor) {
+        return
+      }
+
+      sidebarAnchorBaseTopRef.current = sidebarAnchor.getBoundingClientRect().top
+      updateFixedTopOffset()
+    }
+
+    updateFixedTopOffset()
+    window.addEventListener('scroll', updateFixedTopOffset, { passive: true })
+    window.addEventListener('resize', handleResize)
+
+    return () => {
+      window.removeEventListener('scroll', updateFixedTopOffset)
+      window.removeEventListener('resize', handleResize)
+    }
+  }, [])
 
   useLayoutEffect(() => {
     if (openMenuItem === null) {
@@ -371,6 +430,18 @@ export function SidebarTree({
             }}
           >
             <div className="page-menu-section">
+              {onOpenSettings ? (
+                <button
+                  type="button"
+                  className="page-menu-action"
+                  onClick={() => {
+                    setIsUtilityMenuOpen(false)
+                    void onOpenSettings()
+                  }}
+                >
+                  <span className="page-menu-item-label">设置</span>
+                </button>
+              ) : null}
               {onExportWorkspace ? (
                 <button
                   type="button"
@@ -381,6 +452,30 @@ export function SidebarTree({
                   }}
                 >
                   <span className="page-menu-item-label">{uiCopy.export.workspace}</span>
+                </button>
+              ) : null}
+              {onImportWorkspace ? (
+                <button
+                  type="button"
+                  className="page-menu-action"
+                  onClick={() => {
+                    setIsUtilityMenuOpen(false)
+                    void onImportWorkspace()
+                  }}
+                >
+                  <span className="page-menu-item-label">{uiCopy.export.importWorkspace}</span>
+                </button>
+              ) : null}
+              {onImportArchive ? (
+                <button
+                  type="button"
+                  className="page-menu-action"
+                  onClick={() => {
+                    setIsUtilityMenuOpen(false)
+                    void onImportArchive()
+                  }}
+                >
+                  <span className="page-menu-item-label">{uiCopy.export.importArchive}</span>
                 </button>
               ) : null}
               <button
@@ -440,9 +535,9 @@ export function SidebarTree({
             type="button"
             className="sidebar-tool-button"
             aria-label={uiCopy.sidebar.import}
-            disabled={!onImportArchive}
+            disabled={!onImportWorkspace}
             onClick={() => {
-              void onImportArchive?.()
+              void onImportWorkspace?.()
             }}
           >
             <Upload size={15} strokeWidth={1.9} />
@@ -514,8 +609,10 @@ export function SidebarTree({
   }
 
   return (
-    <div className={`sidebar-layout sidebar-layout-${layout}`}>
-      <div className={sidebarScrolled ? 'sidebar-fixed-top sidebar-fixed-top-scrolled' : 'sidebar-fixed-top'}>
+    <div ref={sidebarLayoutRef} className={`sidebar-layout sidebar-layout-${layout}`}>
+      <div
+        className={sidebarScrolled ? 'sidebar-fixed-top sidebar-fixed-top-scrolled' : 'sidebar-fixed-top'}
+      >
         {layout === 'compact' ? renderCompactHeader() : renderClassicHeader()}
       </div>
 

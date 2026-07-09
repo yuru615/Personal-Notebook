@@ -214,6 +214,26 @@ export interface SyncedBlockInstanceBlock extends BlockBase {
 }
 
 export type PageFontFamily = 'default' | 'serif' | 'mono'
+export type ClipboardCaptureMode = 'off' | 'prompt_to_inbox'
+export type AppCloseAction = 'hide_to_tray' | 'quit'
+export type SearchExcerptLength = 'short' | 'medium' | 'long'
+
+export interface PageDisplayDefaults {
+  isFullWidth: boolean
+  isSmallText: boolean
+  fontFamily: PageFontFamily
+  showOutline: boolean
+}
+
+export interface SearchPreferences {
+  groupResults: boolean
+  showSourceLabels: boolean
+  excerptLength: SearchExcerptLength
+}
+
+export interface AppSettings {
+  closeAction?: AppCloseAction
+}
 
 export type BlockRecord =
   | ParagraphBlock
@@ -290,6 +310,9 @@ export interface WorkspaceSettings {
   sidebarLayout?: 'compact' | 'classic'
   sidebarWidth?: number
   pinnedSidebarItems?: SidebarPinnedItem[]
+  clipboardCaptureMode?: ClipboardCaptureMode
+  pageDefaults?: Partial<PageDisplayDefaults>
+  searchPreferences?: Partial<SearchPreferences>
 }
 
 export interface WorkspaceSnapshot {

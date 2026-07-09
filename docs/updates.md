@@ -4,6 +4,67 @@
 
 ## 维护规则
 
+## 2026-07-08 工作区整包导入补回
+
+提交：未提交
+
+简要描述：
+
+把“导入”这条链路从原来几乎只指向页面包，补成了真正可用的“工作区整包恢复 + 页面包导入并存”。
+
+详细描述：
+- 根因是当前多个入口只接了 `导入页面包`，而 `全部导出` 导出的却是整库 JSON 备份，所以用户拿工作区备份去走原导入入口时一定会失败。
+- 现在新增了 `导入完整备份` 动作，直接读取工作区 JSON 备份，并在导入前明确提示“会覆盖当前工作区内容”。
+- 导入完整备份前会先刷新待保存内容，避免把旧内存状态又写回去覆盖刚恢复的数据。
+- 导入完成后会重新加载整个工作区，并回到备份里的当前页面或首页。
+- 普通页面菜单现在同时保留四条动作：`导出当前页面`、`全部导出`、`导入完整备份`、`导入页面包`。
+- 左侧顶部单独的 `导入` 按钮现在改为更符合语义的“导入完整备份”；页面包导入保留在左侧更多菜单和页面菜单里，避免“导入”到底是导整库还是导单页的歧义。
+- 设置中心的“导入导出”分组也同步补上了 `导入完整备份`，和 `导入页面包` 并列显示。
+
+验证情况：
+- 已通过定向回归：`npm run test -- src/components/export/ExportImportPanel.test.tsx src/components/settings/SettingsCenter.test.tsx src/components/sidebar/SidebarTree.test.tsx src/app/App.test.tsx`
+- 已通过构建：`npm run build`
+
+## 2026-07-08 设置中心 Phase 2A
+
+提交：未提交
+
+简要描述：
+
+把设置中心里原本占位的“搜索与知识组织”补成真实可用设置，同时补上“清理孤立资源文件”入口，并让这些搜索展示偏好立刻作用到全局搜索弹窗。
+
+详细描述：
+- 工作区设置新增搜索展示偏好：`按类型分组显示搜索结果`、`显示命中来源标签`、`搜索摘要长度`（短 / 标准 / 长）。
+- 这些偏好继续复用现有 `WorkspaceSettings` 持久化，不再额外造第二套搜索配置来源，刷新后也会保留。
+- 全局搜索弹窗已经接入这组设置：关闭分组后直接平铺结果，关闭来源标签后不再显示“正文 / 标签 / 白板内容”这类说明，摘要长度会按设置即时裁切。
+- “数据与维护”新增 `清理孤立资源文件`，直接复用已有仓库清理能力，不新增桌面命令和额外后端逻辑。
+- 这次只补搜索结果展示层和维护入口，没有顺手扩到搜索重建、工作区恢复或更高风险的数据修复动作。
+
+验证情况：
+- 已通过定向前端回归：`npm run test -- src/store/createWorkspaceStore.test.ts src/components/settings/SettingsCenter.test.tsx src/components/search/SearchDialog.test.tsx src/app/App.test.tsx`
+- 已通过构建：`npm run build`
+
+## 2026-07-08 设置中心 Phase 1
+
+提交：未提交
+
+简要描述：
+
+把已经分散在侧边栏、页面显示和桌面端关闭行为里的低风险设置收进了第一版设置中心，同时补上了独立的应用级设置持久化。
+
+详细描述：
+- 新增应用级 `设置中心` 路由和页面壳体，固定为“左侧分类 + 右侧内容”，先接入通用、外观与侧边栏、编辑与页面默认、导入导出、桌面端、数据与维护几组可落地内容。
+- 左侧侧边栏顶部“更多”菜单新增 `设置` 入口，可以直接从当前工作区跳进设置中心。
+- 新增 `AppSettings` 持久化链路，和现有 `WorkspaceSettings` 分开保存；当前先落地一个真实应用级设置：关闭窗口时是“最小化到托盘”还是“直接退出”。
+- 工作区设置补齐剪贴板捕获模式和新页面默认显示值，并让这些默认值只作用于后续新建页面，不改写已有页面。
+- 设置中心里接入了现有的工作区导入导出、孤立白板清理、孤立数据表清理和收件箱快捷入口，没有重造第二套动作实现。
+- 桌面端关闭事件现在会在冲刷待保存数据后，根据设置决定隐藏窗口还是直接退出。
+
+验证情况：
+- 已通过定向前端回归：`npm run test -- src/lib/appSettingsRepository.test.ts src/lib/storageClient.test.ts src/store/createWorkspaceStore.test.ts src/components/settings/SettingsCenter.test.tsx src/components/sidebar/SidebarTree.test.tsx src/lib/desktopLifecycle.test.ts src/app/App.test.tsx src/styles/settingsCenterLayout.test.ts`
+- 已通过 Rust 存储回归：`cargo test --manifest-path src-tauri/Cargo.toml saves_and_loads_app_settings_independently_from_workspace_settings`
+- 已通过构建：`npm run build`
+
 ## 2026-07-07 worktree 回退与桌面端数据修复
 
 提交：未提交
@@ -928,3 +989,28 @@
 验证情况：
 
 - 已完成设计文档自检，覆盖范围、分层边界、危险操作规则、导出备份边界和分期顺序已写明。
+
+## 2026-07-08 桌面端剪贴板捕获首版打通
+
+提交：未提交
+
+简要描述：
+
+桌面端“复制后提示收进收件箱”这条链路已经接通：现在能在后台轮询桌面剪贴板，识别文字、富文本、截图位图和复制出来的本地图片路径，并在确认后追加进收件箱。
+
+详细描述：
+
+- 新增 `src/app/useDesktopClipboardCapture.ts`，把桌面端剪贴板轮询、重复内容去重、站内复制抑制、待确认缓存和最终写入收件箱的逻辑收口到独立 hook。
+- 剪贴板文字内容会复用现有 `clipboardCapture` / `richTextHtml` 解析逻辑，按“空行分段、段内换行保留”的规则落成正文块。
+- 剪贴板图片支持两条路径：
+  - 直接复制出来的位图字节会落成应用内图片资源，再插入图片块。
+  - 复制出来的本地图片文件路径会通过现有资产导入管线入库，再插入图片块。
+- 桌面端确认提示改为走系统通知点击确认：点击通知后，把当前待确认内容收进收件箱；如果资源导入失败，会补一条失败通知，不写入坏块。
+- 收件箱里新增的“剪贴板捕获”标题时间现在按本机本地时间格式化，不再沿用 UTC 时间导致显示错位。
+- 为避免误捕获站内正常复制，正文里的 `copy` 事件会短暂抑制下一轮桌面剪贴板检查；同一份内容在短时间内也不会重复弹通知。
+- Rust 侧新增了一个 Windows 专用剪贴板读取桥，使用系统自带 PowerShell + Windows Forms 读取文本、HTML、位图和文件拖放列表，不额外引入新的 Rust 依赖。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/lib/assets.test.ts src/lib/desktopLifecycle.test.ts src/app/useDesktopClipboardCapture.test.tsx src/app/App.test.tsx src/store/createWorkspaceStore.test.ts src/domain/richTextHtml.test.ts src/domain/clipboardCapture.test.ts`
+- 已通过 `$env:CARGO_TARGET_DIR='E:\\Workspace\\个人知识库-桌面端\\.cargo-target-local'; cargo test --manifest-path src-tauri/Cargo.toml clipboard_capture`

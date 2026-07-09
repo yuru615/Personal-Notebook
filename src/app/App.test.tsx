@@ -14,6 +14,29 @@ const desktopLifecycle = vi.hoisted(() => ({
   registerDesktopTrayActions: vi.fn(async () => () => undefined),
 }))
 const fileAccess = vi.hoisted(() => ({
+  openTextFile: vi.fn(async () => ({
+    name: '知栖工作区备份.json',
+    contents: JSON.stringify({
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: 'page_restored_home',
+          parentId: null,
+          title: '恢复后的首页',
+          icon: null,
+          cover: null,
+          blocks: [],
+          createdAt: '2026-07-08T00:00:00.000Z',
+          updatedAt: '2026-07-08T00:00:00.000Z',
+        },
+      ],
+      settings: {
+        lastOpenedPageId: 'page_restored_home',
+      },
+    }),
+  })),
   openBinaryFile: vi.fn(async () => ({
     name: '工作区备份.zip',
     contents: new Uint8Array([80, 75, 3, 4]),
@@ -46,6 +69,7 @@ vi.mock('../lib/fileAccess', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/fileAccess')>()
   return {
     ...actual,
+    openTextFile: fileAccess.openTextFile,
     openBinaryFile: fileAccess.openBinaryFile,
     openLocalFilePath: fileAccess.openLocalFilePath,
     pickSaveFilePath: fileAccess.pickSaveFilePath,
@@ -97,6 +121,30 @@ describe('App', () => {
     Reflect.deleteProperty(globalThis, '__TAURI_INTERNALS__')
     desktopLifecycle.registerDesktopPendingSaveFlush.mockResolvedValue(() => undefined)
     desktopLifecycle.registerDesktopTrayActions.mockResolvedValue(() => undefined)
+    fileAccess.openTextFile.mockClear()
+    fileAccess.openTextFile.mockResolvedValue({
+      name: '知栖工作区备份.json',
+      contents: JSON.stringify({
+        boards: [],
+        dataTables: [],
+        mindmaps: [],
+        pages: [
+          {
+            id: 'page_restored_home',
+            parentId: null,
+            title: '恢复后的首页',
+            icon: null,
+            cover: null,
+            blocks: [],
+            createdAt: '2026-07-08T00:00:00.000Z',
+            updatedAt: '2026-07-08T00:00:00.000Z',
+          },
+        ],
+        settings: {
+          lastOpenedPageId: 'page_restored_home',
+        },
+      }),
+    })
     fileAccess.openBinaryFile.mockClear()
     fileAccess.openBinaryFile.mockResolvedValue({
       name: '工作区备份.zip',
@@ -252,6 +300,79 @@ describe('App', () => {
     await handlers?.onNewNote()
 
     expect(await screen.findByDisplayValue('未命名')).toBeInTheDocument()
+  })
+
+  it('opens the settings center from the sidebar utility menu', async () => {
+    const user = userEvent.setup()
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: 'page_settings_home',
+          parentId: null,
+          title: '快速开始',
+          icon: null,
+          cover: null,
+          blocks: [],
+          createdAt: '2026-07-08T00:00:00.000Z',
+          updatedAt: '2026-07-08T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: 'page_settings_home' },
+    }
+
+    render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={['/pages/page_settings_home']}
+      />,
+    )
+
+    await screen.findByDisplayValue('快速开始')
+    await user.click(screen.getByRole('button', { name: '更多' }))
+    await user.click(screen.getByRole('button', { name: '设置' }))
+
+    expect(await screen.findByRole('heading', { name: '设置中心' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '通用' })).toBeInTheDocument()
+    expect(screen.queryByRole('complementary', { name: '侧边栏' })).not.toBeInTheDocument()
+  })
+
+  it('returns to the workspace from the settings center', async () => {
+    const user = userEvent.setup()
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: 'page_settings_back',
+          parentId: null,
+          title: '快速开始',
+          icon: null,
+          cover: null,
+          blocks: [],
+          createdAt: '2026-07-08T00:00:00.000Z',
+          updatedAt: '2026-07-08T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: 'page_settings_back' },
+    }
+
+    const { container } = render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={['/settings/general']}
+      />,
+    )
+
+    expect(await screen.findByRole('heading', { name: '设置中心' })).toBeInTheDocument()
+    expect(container.querySelector('.page-panel-focus')).not.toBeNull()
+
+    await user.click(screen.getByRole('button', { name: '返回工作区' }))
+
+    expect(await screen.findByDisplayValue('快速开始')).toBeInTheDocument()
   })
 
   it('opens the inbox page from the desktop tray action', async () => {
@@ -428,6 +549,60 @@ describe('App', () => {
         name: '打开页面 Search Notes customer follow-up checklist',
       }),
     ).toBeInTheDocument()
+  })
+
+  it('applies workspace search preferences to the global search dialog', async () => {
+    const user = userEvent.setup()
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: 'page_search_preferences',
+          parentId: null,
+          title: 'Search Notes',
+          icon: null,
+          cover: null,
+          blocks: [
+            {
+              id: 'block_preferences',
+              type: 'paragraph',
+              text: 'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega',
+            },
+          ],
+          createdAt: '2026-07-08T00:00:00.000Z',
+          updatedAt: '2026-07-08T00:00:00.000Z',
+        },
+      ],
+      settings: {
+        lastOpenedPageId: 'page_search_preferences',
+        searchPreferences: {
+          groupResults: false,
+          showSourceLabels: false,
+          excerptLength: 'short',
+        },
+      },
+    }
+
+    render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={['/pages/page_search_preferences']}
+      />,
+    )
+
+    await screen.findByDisplayValue('Search Notes')
+
+    await user.click(screen.getByRole('button', { name: '搜索' }))
+    await user.type(screen.getByPlaceholderText('搜索页面或内容'), 'alpha')
+
+    expect(document.body.querySelector('.search-group-title')).toBeNull()
+    expect(document.body.querySelector('.search-result-source')).toBeNull()
+
+    const excerpt = document.body.querySelector('.search-result-excerpt')?.textContent ?? ''
+    expect(excerpt).toContain('...')
+    expect(excerpt.length).toBeLessThan(80)
   })
 
   it('navigates a page-content search hit to the matched block on the target page', async () => {
@@ -1566,6 +1741,51 @@ describe('App', () => {
       '/tmp/工作区备份.zip',
       expect.any(Function),
     )
+
+    confirm.mockRestore()
+  })
+
+  it('imports a workspace backup from the page menu and refreshes the workspace', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = userEvent.setup()
+    const pageId = 'page_before_restore'
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: '导入前页面',
+          icon: null,
+          cover: null,
+          blocks: [],
+          createdAt: '2026-07-08T00:00:00.000Z',
+          updatedAt: '2026-07-08T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+
+    render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={[`/pages/${pageId}`]}
+      />,
+    )
+
+    await screen.findByDisplayValue('导入前页面')
+    await user.click(screen.getByRole('button', { name: '页面菜单' }))
+    await user.click(screen.getByRole('button', { name: '导入完整备份' }))
+
+    await waitFor(() => {
+      expect(fileAccess.openTextFile).toHaveBeenCalledWith({
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      })
+    })
+    expect(confirm).toHaveBeenCalled()
+    expect(await screen.findByDisplayValue('恢复后的首页')).toBeInTheDocument()
 
     confirm.mockRestore()
   })

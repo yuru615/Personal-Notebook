@@ -1,10 +1,11 @@
 use tauri::{async_runtime, AppHandle, Emitter, State};
 
 use super::{
-    AssetMeta, BoardRecord, BootstrapPayload, DataTableRecord, DeleteResult, ImportAssetFileInput,
-    LoadedPage, MindmapRecord, PagePackageImportResult, PageRecord, SaveResult, SearchResult,
-    Storage, StorageError, StorageResult, StorageState, WorkspaceArchiveProgress,
-    WorkspaceSnapshot, WriteAssetInput, WORKSPACE_ARCHIVE_PROGRESS_EVENT,
+    AppSettings, AssetMeta, BoardRecord, BootstrapPayload, DataTableRecord, DeleteResult,
+    ImportAssetFileInput, LoadedPage, MindmapRecord, PagePackageImportResult, PageRecord,
+    SaveResult, SearchResult, Storage, StorageError, StorageResult, StorageState,
+    WorkspaceArchiveProgress, WorkspaceSnapshot, WriteAssetInput,
+    WORKSPACE_ARCHIVE_PROGRESS_EVENT,
 };
 
 #[tauri::command]
@@ -25,6 +26,19 @@ pub fn replace_workspace_backup(
     payload: WorkspaceSnapshot,
 ) -> StorageResult<()> {
     state.with_storage(|storage| storage.replace_workspace_backup(payload))
+}
+
+#[tauri::command]
+pub fn load_app_settings(state: State<'_, StorageState>) -> StorageResult<Option<AppSettings>> {
+    state.with_storage(|storage| storage.load_app_settings())
+}
+
+#[tauri::command]
+pub fn save_app_settings(
+    state: State<'_, StorageState>,
+    settings: AppSettings,
+) -> StorageResult<()> {
+    state.with_storage(|storage| storage.save_app_settings(&settings))
 }
 
 #[tauri::command]

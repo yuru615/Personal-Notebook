@@ -46,6 +46,13 @@ pub struct WorkspaceSettings {
     pub clipboard_capture_mode: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub close_action: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]

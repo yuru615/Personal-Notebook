@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { SearchResult } from '../domain/search'
 import type {
+  AppSettings,
   BoardRecord,
   DataTableRecord,
   MindmapRecord,
@@ -60,6 +61,8 @@ export type WorkspaceArchiveProgressHandler = (progress: WorkspaceArchiveProgres
 export interface WorkspaceStorageClient {
   exportWorkspaceBackup(): Promise<WorkspaceSnapshot | null>
   replaceWorkspaceBackup(snapshot: WorkspaceSnapshot): Promise<void>
+  loadAppSettings(): Promise<AppSettings | null>
+  saveAppSettings(settings: AppSettings): Promise<void>
   exportPagePackageToPath(
     pageId: string,
     path: string,
@@ -91,6 +94,14 @@ export function createTauriStorageClient(): WorkspaceStorageClient {
 
     replaceWorkspaceBackup(snapshot) {
       return invoke<void>('replace_workspace_backup', { payload: snapshot })
+    },
+
+    loadAppSettings() {
+      return invoke<AppSettings | null>('load_app_settings')
+    },
+
+    saveAppSettings(settings) {
+      return invoke<void>('save_app_settings', { settings })
     },
 
     exportPagePackageToPath(pageId, path, onProgress) {

@@ -74,6 +74,25 @@ describe('createTauriStorageClient', () => {
     })
   })
 
+  it('loads and saves app settings through dedicated Tauri commands', async () => {
+    const { createTauriStorageClient } = await import('./storageClient')
+    const appSettings = {
+      closeAction: 'hide_to_tray' as const,
+    }
+
+    eventApi.invoke.mockResolvedValueOnce(appSettings).mockResolvedValueOnce(undefined)
+
+    const client = createTauriStorageClient()
+
+    await expect(client.loadAppSettings()).resolves.toEqual(appSettings)
+    await client.saveAppSettings(appSettings)
+
+    expect(eventApi.invoke).toHaveBeenNthCalledWith(1, 'load_app_settings')
+    expect(eventApi.invoke).toHaveBeenNthCalledWith(2, 'save_app_settings', {
+      settings: appSettings,
+    })
+  })
+
   it('searches through the backend search command with a bounded limit', async () => {
     const { createTauriStorageClient } = await import('./storageClient')
     eventApi.invoke.mockResolvedValueOnce([

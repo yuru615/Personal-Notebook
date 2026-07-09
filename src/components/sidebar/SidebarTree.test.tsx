@@ -96,6 +96,46 @@ describe('SidebarTree', () => {
     expect(onExportWorkspace).toHaveBeenCalledTimes(1)
   })
 
+  it('triggers workspace backup import from the compact import button', async () => {
+    const user = userEvent.setup()
+    const onImportWorkspace = vi.fn()
+
+    render(
+      <MemoryRouter>
+        <SidebarTree
+          pages={pages as never}
+          currentPageId="page_parent"
+          onCreatePage={vi.fn()}
+          layout="compact"
+          onImportWorkspace={onImportWorkspace}
+        />
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getByRole('button', { name: '导入' }))
+
+    expect(onImportWorkspace).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders a settings action in the utility menu', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <MemoryRouter>
+        <SidebarTree
+          pages={pages as never}
+          currentPageId="page_parent"
+          onCreatePage={vi.fn()}
+          layout="compact"
+          onOpenSettings={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getByRole('button', { name: '更多' }))
+    expect(screen.getByRole('button', { name: '设置' })).toBeInTheDocument()
+  })
+
   it('adds the scrolled header state only after the sidebar content starts scrolling', async () => {
     const { container } = render(
       <MemoryRouter>
@@ -130,6 +170,69 @@ describe('SidebarTree', () => {
     fireEvent.scroll(scrollContent as HTMLDivElement)
 
     await waitFor(() => expect(fixedTop).not.toHaveClass('sidebar-fixed-top-scrolled'))
+  })
+
+  it('compensates the fixed sidebar header when window scrolling nudges its sticky position', async () => {
+    let sidebarLayoutTop = 12
+
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if ((this as Element).classList.contains('sidebar')) {
+        return {
+          x: 0,
+          y: sidebarLayoutTop,
+          top: sidebarLayoutTop,
+          left: 0,
+          bottom: sidebarLayoutTop + 120,
+          right: 120,
+          width: 120,
+          height: 120,
+          toJSON() {
+            return {}
+          },
+        } as DOMRect
+      }
+
+      return {
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        bottom: 0,
+        right: 0,
+        width: 0,
+        height: 0,
+        toJSON() {
+          return {}
+        },
+      } as DOMRect
+    })
+
+    const { container } = render(
+      <div className="sidebar">
+        <MemoryRouter>
+          <SidebarTree
+            pages={pages as never}
+            currentPageId="page_parent"
+            onCreatePage={vi.fn()}
+            layout="compact"
+          />
+        </MemoryRouter>
+      </div>,
+    )
+
+    const sidebarLayout = container.querySelector('.sidebar-layout') as HTMLDivElement | null
+
+    expect(sidebarLayout).not.toBeNull()
+    await waitFor(() =>
+      expect(sidebarLayout?.style.getPropertyValue('--sidebar-fixed-top-offset')).toBe('0px'),
+    )
+
+    sidebarLayoutTop = 11.5
+    fireEvent.scroll(window)
+
+    await waitFor(() =>
+      expect(sidebarLayout?.style.getPropertyValue('--sidebar-fixed-top-offset')).toBe('0.5px'),
+    )
   })
 
   it('renders the my pages section and lets users collapse and expand it', async () => {
@@ -327,23 +430,6 @@ describe('SidebarTree', () => {
         ],
       },
     ]
-    const boards = [
-      {
-        id: 'board_recent',
-        title: 'Flow Board',
-        snapshot: null,
-        createdAt: '',
-        updatedAt: '2026-06-18T12:00:00.000Z',
-      },
-      {
-        id: 'board_orphan',
-        title: 'Orphan Board',
-        snapshot: null,
-        createdAt: '',
-        updatedAt: '2026-06-18T13:00:00.000Z',
-      },
-    ]
-
     render(
       <MemoryRouter>
         <SidebarTree

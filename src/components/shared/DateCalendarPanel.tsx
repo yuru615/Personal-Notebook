@@ -12,6 +12,7 @@ interface DateCalendarPanelProps {
 
 const weekdayLabels = ['一', '二', '三', '四', '五', '六', '日']
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function parseIsoDate(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
 
@@ -35,6 +36,7 @@ export function parseIsoDate(value: string) {
   return parsedDate
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function formatDateDisplay(value: string) {
   const parsedDate = parseIsoDate(value)
 

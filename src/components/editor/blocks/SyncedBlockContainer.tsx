@@ -31,7 +31,7 @@ export function SyncedBlockContainer({
   group,
   isPrimary,
   canOpenPrimary,
-  allPages: _allPages,
+  allPages,
   onUpdateGroupBlock,
   onUnsync,
   onOpenPrimary,
@@ -40,6 +40,7 @@ export function SyncedBlockContainer({
   onCreatePageRelation,
   onDeleteContainer,
 }: SyncedBlockContainerProps) {
+  void allPages
   const isReference = containerBlock.mode === 'reference'
 
   if (!group) {

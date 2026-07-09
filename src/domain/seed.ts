@@ -1,9 +1,15 @@
 import { createDefaultPagePropertyDefinitions } from './pageProperties'
 import { createId } from '../utils/id'
-import type { PageRecord, WorkspaceSnapshot } from './types'
+import type { PageDisplayDefaults, PageRecord, WorkspaceSnapshot } from './types'
 
 export const INBOX_PAGE_TITLE = '\u6536\u4ef6\u7bb1'
 export const INBOX_PAGE_ICON = '\u{1F4E5}'
+export const DEFAULT_PAGE_DISPLAY_DEFAULTS: PageDisplayDefaults = {
+  isFullWidth: false,
+  isSmallText: false,
+  fontFamily: 'default',
+  showOutline: true,
+}
 
 export function createInboxPage(now = new Date().toISOString()): PageRecord {
   return {
@@ -13,10 +19,7 @@ export function createInboxPage(now = new Date().toISOString()): PageRecord {
     icon: INBOX_PAGE_ICON,
     cover: null,
     properties: {},
-    isFullWidth: false,
-    isSmallText: false,
-    fontFamily: 'default',
-    showOutline: true,
+    ...DEFAULT_PAGE_DISPLAY_DEFAULTS,
     blocks: [],
     createdAt: now,
     updatedAt: now,
@@ -32,10 +35,7 @@ export function createSeedPage(now = new Date().toISOString()): PageRecord {
     icon: '📄',
     cover: null,
     properties: {},
-    isFullWidth: false,
-    isSmallText: false,
-    fontFamily: 'default',
-    showOutline: true,
+    ...DEFAULT_PAGE_DISPLAY_DEFAULTS,
     blocks: [
       {
         id: createId('block'),
@@ -69,6 +69,10 @@ export function createSeedWorkspace(): WorkspaceSnapshot {
       lastOpenedPageId: page.id,
       inboxPageId: inboxPage.id,
       sidebarLayout: 'compact',
+      sidebarWidth: 272,
+      pinnedSidebarItems: [],
+      clipboardCaptureMode: 'off',
+      pageDefaults: DEFAULT_PAGE_DISPLAY_DEFAULTS,
     },
   }
 }

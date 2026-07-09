@@ -12,6 +12,7 @@ const OLD_EXPORT_MARKDOWN_LABEL = '导出 Markdown 页面包'
 const OLD_IMPORT_JSON_LABEL = '导入 JSON 备份'
 const PAGE_PACKAGE_SECTION_LABEL = '页面导入导出'
 const EXPORT_PAGE_LABEL = '导出当前页面'
+const IMPORT_WORKSPACE_LABEL = '导入完整备份'
 const IMPORT_PAGE_PACKAGE_LABEL = '导入页面包'
 
 const EXPORT_WORKSPACE_LABEL = '全部导出'
@@ -30,6 +31,7 @@ function renderPanel(overrides: Partial<ComponentProps<typeof ExportImportPanel>
       onToggleOutlineVisible={vi.fn()}
       onExportArchive={vi.fn()}
       onExportWorkspace={vi.fn()}
+      onImportWorkspace={vi.fn()}
       onImportArchive={vi.fn()}
       onCleanupOrphanBoards={vi.fn()}
       onCleanupOrphanDataTables={vi.fn()}
@@ -60,6 +62,7 @@ describe('ExportImportPanel', () => {
     expect(screen.getByText(PAGE_PACKAGE_SECTION_LABEL)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: EXPORT_PAGE_LABEL })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: EXPORT_WORKSPACE_LABEL })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: IMPORT_WORKSPACE_LABEL })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: IMPORT_PAGE_PACKAGE_LABEL })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: OLD_EXPORT_JSON_LABEL })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: OLD_EXPORT_MARKDOWN_LABEL })).not.toBeInTheDocument()
@@ -102,6 +105,18 @@ describe('ExportImportPanel', () => {
     await user.click(screen.getByRole('button', { name: IMPORT_PAGE_PACKAGE_LABEL }))
 
     expect(onImportArchive).toHaveBeenCalledTimes(1)
+  })
+
+  it('requests a workspace backup import from the menu', async () => {
+    const user = userEvent.setup()
+    const onImportWorkspace = vi.fn()
+
+    renderPanel({ onImportWorkspace })
+
+    await user.click(screen.getByRole('button', { name: uiCopy.page.menu }))
+    await user.click(screen.getByRole('button', { name: IMPORT_WORKSPACE_LABEL }))
+
+    expect(onImportWorkspace).toHaveBeenCalledTimes(1)
   })
 
   it('shows active archive progress outside the closed menu', async () => {

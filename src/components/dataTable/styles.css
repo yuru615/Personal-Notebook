@@ -1606,6 +1606,8 @@ button {
   display: flex;
   align-items: flex-start;
   gap: 16px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .board-view-grid {
@@ -1614,6 +1616,8 @@ button {
   grid-auto-flow: column;
   grid-auto-columns: minmax(280px, 1fr);
   gap: 14px;
+  min-width: 0;
+  width: 100%;
   overflow-x: auto;
   padding-bottom: 4px;
 }

@@ -96,6 +96,23 @@ export async function selectAndImportAsset(kind: MediaAssetKind): Promise<AssetM
   })
 }
 
+export async function importImageAssetFromPath(path: string): Promise<AssetMeta | null> {
+  if (!isDesktopRuntime()) {
+    return null
+  }
+
+  const mimeType = guessMimeType(path)
+
+  if (!mimeType.startsWith('image/')) {
+    return null
+  }
+
+  return storageClient.importAssetFile({
+    path,
+    mimeType,
+  })
+}
+
 export function writeAssetBytes(input: {
   name: string
   mimeType: string

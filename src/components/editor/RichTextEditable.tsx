@@ -7,6 +7,7 @@ import type {
 } from 'react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { RichTextSegment, TextColor } from '../../domain/types'
+import { readRichTextSegmentsFromElement } from '../../domain/richTextHtml'
 import {
   applyRichTextMark,
   normalizeRichText,
@@ -103,10 +104,6 @@ function escapeAttribute(value: string): string {
   return escapeHtml(value).replace(/'/g, '&#39;')
 }
 
-function isTextColor(value: string | null): value is TextColor {
-  return Boolean(value && value in textColorValues)
-}
-
 function richTextToHtml(segments: RichTextSegment[]) {
   return normalizeRichText(segments)
     .map((segment) => {
@@ -145,77 +142,6 @@ function richTextToHtml(segments: RichTextSegment[]) {
 
 function getSegments(value: string, richText?: RichTextSegment[]) {
   return richText && richText.length > 0 ? normalizeRichText(richText) : richTextFromPlainText(value)
-}
-
-function marksFromElement(element: Element, marks: Omit<RichTextSegment, 'text'>) {
-  const tagName = element.tagName.toLowerCase()
-  const nextMarks = { ...marks }
-
-  if (tagName === 'strong' || tagName === 'b') {
-    nextMarks.bold = true
-  }
-
-  if (tagName === 'em' || tagName === 'i') {
-    nextMarks.italic = true
-  }
-
-  if (tagName === 'u') {
-    nextMarks.underline = true
-  }
-
-  if (tagName === 's' || tagName === 'strike' || tagName === 'del') {
-    nextMarks.strike = true
-  }
-
-  if (tagName === 'a') {
-    const pageId = element.getAttribute('data-page-id')
-    const relationKind = element.getAttribute('data-page-relation-kind')
-
-    if (pageId && (relationKind === 'link' || relationKind === 'mention')) {
-      nextMarks.pageId = pageId
-      nextMarks.relationKind = relationKind
-      delete nextMarks.link
-    } else {
-      const href = element.getAttribute('href')
-      if (href) {
-        nextMarks.link = href
-      }
-    }
-  }
-
-  const color = element.getAttribute('data-rich-text-color')
-  if (isTextColor(color)) {
-    nextMarks.color = color
-  }
-
-  return nextMarks
-}
-
-function readSegmentsFromNode(
-  node: Node,
-  marks: Omit<RichTextSegment, 'text'>,
-): RichTextSegment[] {
-  if (node.nodeType === Node.TEXT_NODE) {
-    const text = node.textContent ?? ''
-    return text ? [{ text, ...marks }] : []
-  }
-
-  if (!(node instanceof Element)) {
-    return []
-  }
-
-  if (node.tagName.toLowerCase() === 'br') {
-    return [{ text: '\n', ...marks }]
-  }
-
-  const nextMarks = marksFromElement(node, marks)
-  return Array.from(node.childNodes).flatMap((child) => readSegmentsFromNode(child, nextMarks))
-}
-
-function readSegmentsFromElement(element: HTMLElement): RichTextSegment[] {
-  return normalizeRichText(
-    Array.from(element.childNodes).flatMap((child) => readSegmentsFromNode(child, {})),
-  )
 }
 
 function hasRichTextMarks(segments: RichTextSegment[]) {
@@ -444,7 +370,7 @@ function getRelationAutocompleteDraft(
     return null
   }
 
-  const text = richTextToPlainText(baseSegments ?? readSegmentsFromElement(element))
+  const text = richTextToPlainText(baseSegments ?? readRichTextSegmentsFromElement(element))
   const rawToken = text.slice(autocompleteState.start, end)
   const query =
     autocompleteState.kind === 'mention'
@@ -647,7 +573,7 @@ export function RichTextEditable({
     }
 
     if (isFocusedRef.current) {
-      const currentSegments = readSegmentsFromElement(element)
+      const currentSegments = readRichTextSegmentsFromElement(element)
       if (segmentsEqual(currentSegments, normalizedSegments)) {
         setIsEmpty(richTextToPlainText(normalizedSegments).length === 0)
         return
@@ -858,7 +784,7 @@ export function RichTextEditable({
       }
 
       const nextSelection = getSelectionOffsets(editable)
-      const segments = readSegmentsFromElement(editable)
+      const segments = readRichTextSegmentsFromElement(editable)
       selectionRef.current = nextSelection
       setActiveMarks(getActiveSelectionMarks(segments, nextSelection))
       setToolbarPosition(getToolbarPosition(editable))
@@ -892,7 +818,7 @@ export function RichTextEditable({
       return
     }
 
-    const segments = readSegmentsFromElement(element)
+    const segments = readRichTextSegmentsFromElement(element)
     selectionRef.current = selection
     setActiveMarks(getActiveSelectionMarks(segments, selection))
     setToolbarPosition(getToolbarPosition(element))
@@ -936,7 +862,7 @@ export function RichTextEditable({
       return
     }
 
-    const baseSegments = baseSegmentsOverride ?? readSegmentsFromElement(element)
+    const baseSegments = baseSegmentsOverride ?? readRichTextSegmentsFromElement(element)
     const displayText = getPageRelationDisplayText(page.title, kind)
     const nextSegments = replaceRichTextRange(baseSegments, start, end, [
       { text: displayText, pageId: page.id, relationKind: kind },
@@ -979,7 +905,7 @@ export function RichTextEditable({
       return
     }
 
-    const baseSegments = readSegmentsFromElement(element)
+    const baseSegments = readRichTextSegmentsFromElement(element)
     const draft = getRelationAutocompleteDraft(element, autocompleteState, baseSegments)
     const title = draft?.query.trim() ?? ''
     if (!title) {
@@ -1019,7 +945,7 @@ export function RichTextEditable({
       return
     }
 
-    const segments = readSegmentsFromElement(element)
+    const segments = readRichTextSegmentsFromElement(element)
     const payload = toChangePayload(segments)
     setIsEmpty(payload.text.length === 0)
     const selection = getSelectionOffsets(element)
@@ -1041,7 +967,7 @@ export function RichTextEditable({
       return
     }
 
-    const baseSegments = readSegmentsFromElement(element)
+    const baseSegments = readRichTextSegmentsFromElement(element)
     commitSegments(
       applyRichTextMark(baseSegments, selection.start, selection.end, mark),
       selection,
@@ -1060,7 +986,7 @@ export function RichTextEditable({
       return
     }
 
-    const baseSegments = readSegmentsFromElement(element)
+    const baseSegments = readRichTextSegmentsFromElement(element)
     applySelectionMark(
       {
         [markName]: selectedSegmentsAllHaveMark(baseSegments, selection, markName)
@@ -1263,7 +1189,7 @@ export function RichTextEditable({
     ) {
       const element = editableRef.current
       const caretOffset = element ? getCollapsedSelectionOffset(element) : null
-      const text = element ? richTextToPlainText(readSegmentsFromElement(element)) : ''
+      const text = element ? richTextToPlainText(readRichTextSegmentsFromElement(element)) : ''
       const previousCharacter = caretOffset !== null ? text.charAt(Math.max(0, caretOffset - 1)) : ''
 
       if (caretOffset !== null && previousCharacter === '[') {

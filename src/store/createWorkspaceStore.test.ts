@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createDefaultAppState } from '../components/dataTable/domain/factory'
 import { createMemoryRepository } from '../test/memoryRepository'
 import { createWorkspaceStore } from './createWorkspaceStore'
-import type { BlockRecord, WorkspaceSnapshot } from '../domain/types'
+import type { AppSettings, BlockRecord, WorkspaceSnapshot } from '../domain/types'
 
 function createCountingRepository(initialSnapshot: WorkspaceSnapshot | null = null) {
   let snapshot = initialSnapshot ? structuredClone(initialSnapshot) : null
@@ -41,6 +41,40 @@ function createCountingRepository(initialSnapshot: WorkspaceSnapshot | null = nu
       return cleanupCalls
     },
   }
+}
+
+function createMemoryAppSettingsRepository(initial: AppSettings | null = null) {
+  let settings = initial ? structuredClone(initial) : null
+  let saveCalls = 0
+
+  return {
+    repository: {
+      async load() {
+        return settings
+      },
+      async save(next: AppSettings) {
+        settings = structuredClone(next)
+        saveCalls += 1
+      },
+    },
+    getSettings() {
+      return settings
+    },
+    getSaveCalls() {
+      return saveCalls
+    },
+  }
+}
+
+function formatExpectedClipboardCaptureTimestamp(value: string) {
+  const date = new Date(value)
+  const year = String(date.getFullYear())
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+
+  return `${year}-${month}-${day} ${hours}:${minutes}`
 }
 
 function createLegacyWorkspace(): WorkspaceSnapshot {
@@ -274,13 +308,100 @@ describe('createWorkspaceStore data tables', () => {
     expect(store.getState().settings.clipboardCaptureMode).toBe('off')
     expect(counted.getReplaceCalls()).toBe(1)
 
-    await (store.getState() as any).setClipboardCaptureMode('prompt_to_inbox')
+    await store.getState().setClipboardCaptureMode('prompt_to_inbox')
 
     expect(store.getState().settings.clipboardCaptureMode).toBe('prompt_to_inbox')
     expect(counted.getSnapshot()?.settings).toMatchObject({
       lastOpenedPageId: 'page_1',
       clipboardCaptureMode: 'prompt_to_inbox',
     })
+  })
+
+  it('loads app settings defaults and persists close action changes', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const appSettings = createMemoryAppSettingsRepository()
+    const store = createWorkspaceStore(counted.repository, appSettings.repository)
+
+    await store.getState().bootstrap()
+
+    expect(store.getState().appSettings.closeAction).toBe('hide_to_tray')
+
+    await store.getState().setAppCloseAction('quit')
+
+    expect(store.getState().appSettings.closeAction).toBe('quit')
+    expect(appSettings.getSettings()).toEqual({ closeAction: 'quit' })
+    expect(appSettings.getSaveCalls()).toBe(1)
+  })
+
+  it('defaults search preferences and persists changes', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+
+    expect(store.getState().settings.searchPreferences).toEqual({
+      groupResults: true,
+      showSourceLabels: true,
+      excerptLength: 'medium',
+    })
+
+    await store.getState().setSearchPreferences({
+      groupResults: false,
+      showSourceLabels: false,
+      excerptLength: 'short',
+    })
+
+    expect(store.getState().settings.searchPreferences).toEqual({
+      groupResults: false,
+      showSourceLabels: false,
+      excerptLength: 'short',
+    })
+    expect(counted.getSnapshot()?.settings.searchPreferences).toEqual({
+      groupResults: false,
+      showSourceLabels: false,
+      excerptLength: 'short',
+    })
+  })
+
+  it('applies workspace page defaults to new top-level pages without rewriting existing pages', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const appSettings = createMemoryAppSettingsRepository()
+    const store = createWorkspaceStore(counted.repository, appSettings.repository)
+
+    await store.getState().bootstrap()
+    await store.getState().setPageDefaults({
+      isFullWidth: true,
+      isSmallText: true,
+      fontFamily: 'serif',
+      showOutline: false,
+    })
+
+    const created = await store.getState().createPage(undefined, { setCurrent: false })
+    const original = store.getState().pages.find((page) => page.id === 'page_1')
+
+    expect(created).toMatchObject({
+      isFullWidth: true,
+      isSmallText: true,
+      fontFamily: 'serif',
+      showOutline: false,
+    })
+    expect(original).toMatchObject({
+      isFullWidth: false,
+      isSmallText: false,
+      fontFamily: 'default',
+      showOutline: true,
+    })
+  })
+
+  it('delegates orphan asset cleanup to the repository', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+    await store.getState().cleanupOrphanAssets()
+
+    expect(counted.getCleanupCalls()).toBe(1)
+    expect(store.getState().saveStatus).toBe('saved')
   })
 
   it('appends clipboard capture blocks into the inbox page', async () => {
@@ -293,7 +414,7 @@ describe('createWorkspaceStore data tables', () => {
       throw new Error('Expected an inbox page after bootstrap')
     }
 
-    await (store.getState() as any).appendClipboardCaptureToInbox(
+    await store.getState().appendClipboardCaptureToInbox(
       [
         { id: 'block_1', type: 'paragraph', text: '第一段' },
         { id: 'block_2', type: 'todo', text: '第二段', checked: false },
@@ -302,15 +423,77 @@ describe('createWorkspaceStore data tables', () => {
     )
 
     const inboxPage = store.getState().pages.find((page) => page.id === inboxPageId)
+    const expectedTimestamp = formatExpectedClipboardCaptureTimestamp('2026-07-07T08:09:00.000Z')
 
     expect(inboxPage?.blocks).toEqual([
-      { id: expect.any(String), type: 'paragraph', text: '剪贴板捕获 · 2026-07-07 08:09' },
+      { id: expect.any(String), type: 'paragraph', text: `剪贴板捕获 · ${expectedTimestamp}` },
       { id: 'block_1', type: 'paragraph', text: '第一段' },
       { id: 'block_2', type: 'todo', text: '第二段', checked: false },
       { id: expect.any(String), type: 'paragraph', text: '' },
     ])
     expect(counted.getSnapshot()?.pages.find((page) => page.id === inboxPageId)?.blocks).toEqual(
       inboxPage?.blocks,
+    )
+  })
+
+  it('appends clipboard capture after existing inbox blocks and keeps the separator', async () => {
+    const workspace = createWorkspace()
+    const inboxPage = getInboxPage(workspace)
+    inboxPage.blocks = [
+      { id: 'existing_1', type: 'paragraph', text: 'existing text' },
+      { id: 'existing_2', type: 'paragraph', text: '' },
+    ]
+
+    const counted = createCountingRepository(workspace)
+    const store = createWorkspaceStore(counted.repository)
+    const incoming: BlockRecord[] = [
+      {
+        id: 'incoming_1',
+        type: 'paragraph',
+        text: 'hello',
+        richText: [{ text: 'hello', bold: true }],
+      },
+    ]
+
+    await store.getState().bootstrap()
+    await store.getState().appendClipboardCaptureToInbox(incoming, '2026-07-08T01:02:00.000Z')
+
+    incoming[0].text = 'mutated'
+    incoming[0].richText = [{ text: 'mutated' }]
+    const expectedTimestamp = formatExpectedClipboardCaptureTimestamp('2026-07-08T01:02:00.000Z')
+
+    expect(getInboxPage(store.getState()).blocks).toEqual([
+      { id: 'existing_1', type: 'paragraph', text: 'existing text' },
+      { id: 'existing_2', type: 'paragraph', text: '' },
+      { id: expect.any(String), type: 'paragraph', text: `剪贴板捕获 · ${expectedTimestamp}` },
+      {
+        id: 'incoming_1',
+        type: 'paragraph',
+        text: 'hello',
+        richText: [{ text: 'hello', bold: true }],
+      },
+      { id: expect.any(String), type: 'paragraph', text: '' },
+    ])
+  })
+
+  it('formats clipboard capture heading timestamps in local time', async () => {
+    const counted = createCountingRepository(createLegacyWorkspace())
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+    await store.getState().appendClipboardCaptureToInbox(
+      [{ id: 'block_local_time', type: 'paragraph', text: 'local time block' }],
+      '2026-07-07T08:09:00.000Z',
+    )
+
+    const heading = getInboxPage(store.getState()).blocks[0]
+    const expectedTimestamp = formatExpectedClipboardCaptureTimestamp('2026-07-07T08:09:00.000Z')
+
+    expect(heading).toEqual(
+      expect.objectContaining({
+        type: 'paragraph',
+        text: `剪贴板捕获 · ${expectedTimestamp}`,
+      }),
     )
   })
 

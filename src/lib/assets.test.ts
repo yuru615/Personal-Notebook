@@ -65,6 +65,47 @@ describe('asset helpers', () => {
     })
   })
 
+  it('imports a desktop image path through the asset pipeline', async () => {
+    Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    })
+
+    invoke.mockResolvedValue({
+      id: 'asset_image',
+      sha256: 'sha',
+      name: 'photo.png',
+      mimeType: 'image/png',
+      byteSize: 10,
+      relativePath: 'sh/sha.png',
+      createdAt: '2026-07-02T00:00:00.000Z',
+    })
+
+    const { importImageAssetFromPath } = await import('./assets')
+
+    await expect(importImageAssetFromPath('C:/captures/photo.png')).resolves.toMatchObject({
+      id: 'asset_image',
+    })
+    expect(invoke).toHaveBeenCalledWith('import_asset_file', {
+      input: {
+        path: 'C:/captures/photo.png',
+        mimeType: 'image/png',
+      },
+    })
+  })
+
+  it('returns null for non-image local paths', async () => {
+    Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    })
+
+    const { importImageAssetFromPath } = await import('./assets')
+
+    await expect(importImageAssetFromPath('C:/captures/readme.txt')).resolves.toBeNull()
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
   it('stores browser preview assets without Tauri', async () => {
     const { getAssetUrl, readAsset, writeAssetBytes } = await import('./assets')
 
