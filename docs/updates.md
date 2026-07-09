@@ -1014,3 +1014,18 @@
 
 - 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/lib/assets.test.ts src/lib/desktopLifecycle.test.ts src/app/useDesktopClipboardCapture.test.tsx src/app/App.test.tsx src/store/createWorkspaceStore.test.ts src/domain/richTextHtml.test.ts src/domain/clipboardCapture.test.ts`
 - 已通过 `$env:CARGO_TARGET_DIR='E:\\Workspace\\个人知识库-桌面端\\.cargo-target-local'; cargo test --manifest-path src-tauri/Cargo.toml clipboard_capture`
+## 2026-07-09 编辑器多选块设计稿
+提交：未提交
+
+简要描述：
+
+整理了“正文编辑器多选块 v1”的设计稿，并新增统一待做功能文档，先把第一版范围和后续暂缓项收口。
+
+详细描述：
+- 明确多选块第一版只做三件事：鼠标框选、批量删除、左侧手柄发起的整组拖动。
+- 明确“浮动批量工具条”不进第一版，先记入统一待做文档，避免这轮把编辑器交互面铺得过大。
+- 同时把 `Shift` 连选、`Ctrl / Cmd` 增减选也纳入待做文档，作为后续多选块补强项。
+- 设计稿明确采用最小实现路线：多选 UI 状态留在 `BlockEditor` 本地，不提前升级成全局 selection 系统；只新增一个与框选起点范围相关的设置项。
+
+验证情况：
+- 已完成设计稿自检，当前无 `TODO`、`TBD` 或待补占位文案。
