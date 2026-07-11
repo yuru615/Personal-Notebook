@@ -435,6 +435,7 @@ function getBlockSearchEntry(
       return createMediaSearchEntry([block.name, block.caption, block.alt], block.id)
     case 'video':
     case 'audio':
+    case 'file':
       return createMediaSearchEntry([block.name, block.caption], block.id)
     case 'child_page':
       return createSearchEntry(pageTitleById.get(block.pageId) ?? '', 'body', '正文', block.id)

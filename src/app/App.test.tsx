@@ -1745,6 +1745,46 @@ describe('App', () => {
     confirm.mockRestore()
   })
 
+  it('imports one Markdown file as a new editable top-level page', async () => {
+    const user = userEvent.setup()
+    const pageId = 'page_markdown_source'
+    fileAccess.openTextFile.mockResolvedValueOnce({
+      name: 'guide.md',
+      path: '/tmp/guide.md',
+      contents: '# 导入指南\n\n第一段正文',
+    })
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: '当前页面',
+          icon: null,
+          cover: null,
+          blocks: [],
+          createdAt: '2026-07-10T00:00:00.000Z',
+          updatedAt: '2026-07-10T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId },
+    }
+
+    render(<App repository={createMemoryRepository(snapshot)} initialEntries={[`/pages/${pageId}`]} />)
+
+    await screen.findByDisplayValue('当前页面')
+    await user.click(screen.getByRole('button', { name: '页面菜单' }))
+    await user.click(screen.getByRole('button', { name: '导入 Markdown' }))
+
+    expect(fileAccess.openTextFile).toHaveBeenCalledWith({
+      filters: [{ name: 'Markdown', extensions: ['md', 'markdown'] }],
+    })
+    expect(await screen.findByDisplayValue('导入指南')).toBeInTheDocument()
+    expect(screen.getByText('第一段正文')).toBeInTheDocument()
+  })
+
   it('imports a workspace backup from the page menu and refreshes the workspace', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const user = userEvent.setup()

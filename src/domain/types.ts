@@ -1,3 +1,5 @@
+import type { AppAccentTheme } from './theme'
+
 export type PageId = string
 export type BlockId = string
 export type BoardId = string
@@ -51,6 +53,7 @@ export type BlockType =
   | 'image'
   | 'video'
   | 'audio'
+  | 'file'
   | 'whiteboard'
   | 'data_table'
   | 'data_table_inline'
@@ -136,12 +139,12 @@ export interface TodoBlock extends BlockBase, TextBlockStyle, InlineRichText {
   checked: boolean
 }
 
-export interface BulletedListBlock extends BlockBase, TextBlockStyle {
+export interface BulletedListBlock extends BlockBase, TextBlockStyle, InlineRichText {
   type: 'bulleted_list'
   items: string[]
 }
 
-export interface NumberedListBlock extends BlockBase, TextBlockStyle {
+export interface NumberedListBlock extends BlockBase, TextBlockStyle, InlineRichText {
   type: 'numbered_list'
   items: string[]
 }
@@ -190,6 +193,14 @@ export interface AudioBlock extends BlockBase {
   caption: string
 }
 
+export interface FileBlock extends BlockBase {
+  type: 'file'
+  assetId: string | null
+  name: string
+  mimeType: string
+  caption: string
+}
+
 export interface WhiteboardBlock extends BlockBase {
   type: 'whiteboard'
   boardId: BoardId
@@ -215,6 +226,8 @@ export interface SyncedBlockInstanceBlock extends BlockBase {
 
 export type PageFontFamily = 'default' | 'serif' | 'mono'
 export type ClipboardCaptureMode = 'off' | 'prompt_to_inbox'
+export type BlockSelectionStartMode = 'safe_zone_only' | 'content_allowed'
+export type ExternalLinkOpenMode = 'modifier' | 'direct'
 export type AppCloseAction = 'hide_to_tray' | 'quit'
 export type SearchExcerptLength = 'short' | 'medium' | 'long'
 
@@ -223,6 +236,7 @@ export interface PageDisplayDefaults {
   isSmallText: boolean
   fontFamily: PageFontFamily
   showOutline: boolean
+  showProperties: boolean
 }
 
 export interface SearchPreferences {
@@ -233,6 +247,7 @@ export interface SearchPreferences {
 
 export interface AppSettings {
   closeAction?: AppCloseAction
+  accentTheme?: AppAccentTheme
 }
 
 export type BlockRecord =
@@ -249,6 +264,7 @@ export type BlockRecord =
   | ImageBlock
   | VideoBlock
   | AudioBlock
+  | FileBlock
   | WhiteboardBlock
   | DataTableBlock
   | MindmapBlock
@@ -293,12 +309,14 @@ export interface PageRecord {
   parentId: PageId | null
   title: string
   icon: string | null
+  iconHidden?: boolean
   cover: string | null
   properties?: PagePropertyValueMap
   isFullWidth?: boolean
   isSmallText?: boolean
   fontFamily?: PageFontFamily
   showOutline?: boolean
+  showProperties?: boolean
   blocks: BlockRecord[]
   createdAt: string
   updatedAt: string
@@ -311,6 +329,8 @@ export interface WorkspaceSettings {
   sidebarWidth?: number
   pinnedSidebarItems?: SidebarPinnedItem[]
   clipboardCaptureMode?: ClipboardCaptureMode
+  blockSelectionStartMode?: BlockSelectionStartMode
+  linkOpenMode?: ExternalLinkOpenMode
   pageDefaults?: Partial<PageDisplayDefaults>
   searchPreferences?: Partial<SearchPreferences>
 }

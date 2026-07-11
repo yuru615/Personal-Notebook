@@ -264,12 +264,7 @@ impl ClipboardCaptureState {
 pub fn read_clipboard_candidate() -> Result<Option<ClipboardCandidate>, String> {
     #[cfg(target_os = "windows")]
     {
-        if let Some(candidate) = read_windows_native_clipboard_candidate()? {
-            return Ok(Some(candidate));
-        }
-
-        let output = run_windows_powershell_script(WINDOWS_CLIPBOARD_READ_SCRIPT)?;
-        return parse_clipboard_candidate_json(&output);
+        return read_windows_clipboard_candidate_with_powershell_fallback();
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -362,7 +357,7 @@ fn process_clipboard_capture_tick(app: &AppHandle, state: &ClipboardCaptureState
         }
     }
 
-    match read_windows_native_clipboard_candidate() {
+    match read_windows_clipboard_candidate_with_powershell_fallback() {
         Ok(Some(candidate)) => {
             let should_notify = state.store_detected_candidate(candidate.clone(), iso_timestamp_now());
             if should_notify {
@@ -595,6 +590,38 @@ impl Drop for WindowsClipboardGuard {
     }
 }
 
+fn resolve_windows_clipboard_candidate_with_fallback<F>(
+    native_result: Result<Option<ClipboardCandidate>, String>,
+    fallback: F,
+) -> Result<Option<ClipboardCandidate>, String>
+where
+    F: FnOnce() -> Result<Option<ClipboardCandidate>, String>,
+{
+    match native_result {
+        Ok(Some(candidate)) => Ok(Some(candidate)),
+        Ok(None) => fallback(),
+        Err(native_error) => {
+            fallback().map_err(|fallback_error| {
+                format!(
+                    "native Windows clipboard read failed: {native_error}; PowerShell fallback failed: {fallback_error}"
+                )
+            })
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn read_windows_clipboard_candidate_with_powershell_fallback(
+) -> Result<Option<ClipboardCandidate>, String> {
+    resolve_windows_clipboard_candidate_with_fallback(
+        read_windows_native_clipboard_candidate(),
+        || {
+            let output = run_windows_powershell_script(WINDOWS_CLIPBOARD_READ_SCRIPT)?;
+            parse_clipboard_candidate_json(&output)
+        },
+    )
+}
+
 #[cfg(target_os = "windows")]
 fn read_windows_native_clipboard_candidate() -> Result<Option<ClipboardCandidate>, String> {
     let clipboard = open_windows_clipboard()?;
@@ -611,15 +638,20 @@ fn read_windows_native_clipboard_candidate() -> Result<Option<ClipboardCandidate
     }
 
     if let Some(text) = text_candidate {
+        if should_probe_windows_powershell_fallback(image_file_candidate.is_some()) {
+            drop(clipboard);
+            let output = run_windows_powershell_script(WINDOWS_CLIPBOARD_READ_SCRIPT)?;
+            if let Some(candidate) = parse_clipboard_candidate_json(&output)? {
+                return Ok(Some(candidate));
+            }
+        }
+
         return Ok(clipboard_text_candidate(&text, None));
     }
 
     drop(clipboard);
 
-    if should_probe_windows_powershell_fallback(
-        image_file_candidate.is_some(),
-        text_candidate.is_some(),
-    ) {
+    if should_probe_windows_powershell_fallback(image_file_candidate.is_some()) {
         let output = run_windows_powershell_script(WINDOWS_CLIPBOARD_READ_SCRIPT)?;
         return parse_clipboard_candidate_json(&output);
     }
@@ -629,9 +661,8 @@ fn read_windows_native_clipboard_candidate() -> Result<Option<ClipboardCandidate
 
 fn should_probe_windows_powershell_fallback(
     has_native_image_file: bool,
-    has_native_text: bool,
 ) -> bool {
-    !has_native_image_file && !has_native_text
+    !has_native_image_file
 }
 
 #[cfg(target_os = "windows")]
@@ -962,25 +993,41 @@ Add-Type -AssemblyName System.Drawing | Out-Null
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $clipboard = [System.Windows.Forms.Clipboard]
 
-if ($clipboard::ContainsFileDropList()) {
-  foreach ($path in $clipboard::GetFileDropList()) {
-    $extension = [System.IO.Path]::GetExtension($path)
-    if ($null -eq $extension) {
-      continue
+  if ($clipboard::ContainsFileDropList()) {
+    foreach ($path in $clipboard::GetFileDropList()) {
+      $extension = [System.IO.Path]::GetExtension($path)
+      if ($null -eq $extension) {
+        continue
     }
 
     $normalizedExtension = $extension.TrimStart('.').ToLowerInvariant()
     if (@('png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg') -contains $normalizedExtension) {
       @{ kind = 'image_file'; path = $path } | ConvertTo-Json -Compress
       exit 0
+      }
     }
   }
-}
 
-$text = ''
-if ($clipboard::ContainsText([System.Windows.Forms.TextDataFormat]::UnicodeText)) {
-  $text = $clipboard::GetText([System.Windows.Forms.TextDataFormat]::UnicodeText)
-} elseif ($clipboard::ContainsText()) {
+  if ($clipboard::ContainsImage()) {
+    $image = $clipboard::GetImage()
+    if ($null -ne $image) {
+      $stream = New-Object System.IO.MemoryStream
+      try {
+        $image.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
+        @{ kind = 'image_bytes'; bytes = $stream.ToArray() } | ConvertTo-Json -Compress -Depth 3
+        exit 0
+      }
+      finally {
+        $stream.Dispose()
+        $image.Dispose()
+      }
+    }
+  }
+
+  $text = ''
+  if ($clipboard::ContainsText([System.Windows.Forms.TextDataFormat]::UnicodeText)) {
+    $text = $clipboard::GetText([System.Windows.Forms.TextDataFormat]::UnicodeText)
+  } elseif ($clipboard::ContainsText()) {
   $text = $clipboard::GetText()
 }
 
@@ -998,30 +1045,14 @@ function Convert-StringToHex([string] $value) {
   return [System.BitConverter]::ToString($bytes).Replace('-', '').ToLowerInvariant()
 }
 
-if (-not [string]::IsNullOrWhiteSpace($text) -or -not [string]::IsNullOrWhiteSpace($html)) {
-  @{
-    kind = 'text_hex'
-    text_hex = Convert-StringToHex($text)
-    html_hex = if ($null -eq $html) { $null } else { Convert-StringToHex($html) }
-  } | ConvertTo-Json -Compress -Depth 3
-  exit 0
-}
-
-if ($clipboard::ContainsImage()) {
-  $image = $clipboard::GetImage()
-  if ($null -ne $image) {
-    $stream = New-Object System.IO.MemoryStream
-    try {
-      $image.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
-      @{ kind = 'image_bytes'; bytes = $stream.ToArray() } | ConvertTo-Json -Compress -Depth 3
-      exit 0
-    }
-    finally {
-      $stream.Dispose()
-      $image.Dispose()
-    }
+  if (-not [string]::IsNullOrWhiteSpace($text) -or -not [string]::IsNullOrWhiteSpace($html)) {
+    @{
+      kind = 'text_hex'
+      text_hex = Convert-StringToHex($text)
+      html_hex = if ($null -eq $html) { $null } else { Convert-StringToHex($html) }
+    } | ConvertTo-Json -Compress -Depth 3
+    exit 0
   }
-}
 "#;
 
 #[cfg(test)]
@@ -1051,6 +1082,68 @@ mod tests {
     }
 
     #[test]
+    fn keeps_the_native_candidate_without_running_the_fallback() {
+        let mut fallback_used = false;
+        let candidate = ClipboardCandidate::ImageBytes {
+            bytes: vec![137, 80, 78, 71],
+        };
+
+        let result = resolve_windows_clipboard_candidate_with_fallback(
+            Ok(Some(candidate.clone())),
+            || {
+                fallback_used = true;
+                Ok(None)
+            },
+        )
+        .expect("candidate should resolve");
+
+        assert_eq!(result, Some(candidate));
+        assert!(!fallback_used);
+    }
+
+    #[test]
+    fn uses_the_fallback_when_the_native_reader_returns_none() {
+        let candidate = ClipboardCandidate::ImageBytes {
+            bytes: vec![137, 80, 78, 71],
+        };
+
+        let result = resolve_windows_clipboard_candidate_with_fallback(
+            Ok(None),
+            || Ok(Some(candidate.clone())),
+        )
+        .expect("candidate should resolve");
+
+        assert_eq!(result, Some(candidate));
+    }
+
+    #[test]
+    fn uses_the_fallback_when_the_native_reader_errors() {
+        let candidate = ClipboardCandidate::ImageBytes {
+            bytes: vec![137, 80, 78, 71],
+        };
+
+        let result = resolve_windows_clipboard_candidate_with_fallback(
+            Err("clipboard busy".to_string()),
+            || Ok(Some(candidate.clone())),
+        )
+        .expect("candidate should resolve");
+
+        assert_eq!(result, Some(candidate));
+    }
+
+    #[test]
+    fn keeps_both_error_messages_when_native_and_fallback_reads_fail() {
+        let error = resolve_windows_clipboard_candidate_with_fallback(
+            Err("clipboard busy".to_string()),
+            || Err("fallback unavailable".to_string()),
+        )
+        .expect_err("candidate should fail");
+
+        assert!(error.contains("clipboard busy"));
+        assert!(error.contains("fallback unavailable"));
+    }
+
+    #[test]
     fn ignores_duplicate_signatures_until_the_clipboard_changes() {
         let state = ClipboardCaptureState::default();
         let candidate = ClipboardCandidate::Text {
@@ -1068,13 +1161,17 @@ mod tests {
 
     #[test]
     fn probes_the_powershell_fallback_when_no_native_file_or_text_match_exists() {
-        assert!(should_probe_windows_powershell_fallback(false, false));
+        assert!(should_probe_windows_powershell_fallback(false));
     }
 
     #[test]
-    fn skips_the_powershell_fallback_when_native_text_or_files_already_matched() {
-        assert!(!should_probe_windows_powershell_fallback(true, false));
-        assert!(!should_probe_windows_powershell_fallback(false, true));
+    fn keeps_probing_the_powershell_fallback_when_only_native_text_matched() {
+        assert!(should_probe_windows_powershell_fallback(false));
+    }
+
+    #[test]
+    fn skips_the_powershell_fallback_when_native_files_already_matched() {
+        assert!(!should_probe_windows_powershell_fallback(true));
     }
 
     #[test]
@@ -1196,5 +1293,18 @@ mod tests {
     #[cfg(target_os = "windows")]
     fn prefers_unicode_text_format_in_the_windows_clipboard_reader() {
         assert!(WINDOWS_CLIPBOARD_READ_SCRIPT.contains("TextDataFormat]::UnicodeText"));
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn checks_images_before_text_in_the_windows_clipboard_reader() {
+        let image_index = WINDOWS_CLIPBOARD_READ_SCRIPT
+            .find("if ($clipboard::ContainsImage())")
+            .expect("image probe should exist");
+        let text_index = WINDOWS_CLIPBOARD_READ_SCRIPT
+            .find("if ($clipboard::ContainsText([System.Windows.Forms.TextDataFormat]::UnicodeText))")
+            .expect("text probe should exist");
+
+        assert!(image_index < text_index);
     }
 }

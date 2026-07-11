@@ -83,6 +83,29 @@ describe('DataTablePage', () => {
     expect(container.querySelector('.workspace-sidebar')).toBeNull()
   })
 
+  it('uses the parent page adaptive width setting for the table route', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <DataTablePage
+          page={page}
+          dataTable={dataTable}
+          saveStatus="saved"
+          route="table"
+          basePath="/pages/page-1/data-tables/database-1"
+          adaptiveWidth
+          onChange={vi.fn()}
+          onRename={vi.fn()}
+          onChangeIcon={vi.fn()}
+          onChangeCover={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(container.querySelector('.data-table-route-page')).toHaveClass(
+      'data-table-route-page-adaptive',
+    )
+  })
+
   it('uses the knowledge-base shell for record pages without copied record navigation', () => {
     const snapshot = createDefaultAppState()
     const recordId = 'record-1'

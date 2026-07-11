@@ -1,5 +1,5 @@
 import { type ReactNode, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Bell, ChevronRight, MoreHorizontal, Plus, Search, Upload } from 'lucide-react'
+import { Bell, ChevronRight, Download, MoreHorizontal, Plus, Search, Upload } from 'lucide-react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useDismissableLayer } from '../editor/useDismissableLayer'
 import { DEFAULT_PAGE_ICON } from '../../domain/pageIcons'
@@ -22,6 +22,7 @@ const SIDEBAR_DUPLICATE_PAGE_LABEL = '复制页面'
 const SIDEBAR_DELETE_PAGE_LABEL = '删除页面'
 const SIDEBAR_RENAME_PAGE_PROMPT = '重命名页面'
 const SIDEBAR_EXPORT_PAGE_LABEL = '导出页面'
+const SIDEBAR_EXPORT_WORKSPACE_LABEL = '导出工作区'
 const SIDEBAR_PAGE_MENU_GAP = 8
 const SIDEBAR_PAGE_MENU_VIEWPORT_PADDING = 12
 
@@ -65,6 +66,7 @@ interface SidebarTreeProps {
   onDeletePage?: (pageId: PageId) => void | Promise<void>
   onImportWorkspace?: () => void | Promise<void>
   onImportArchive?: () => void | Promise<void>
+  onImportMarkdown?: () => void | Promise<void>
   onOpenSettings?: () => void | Promise<void>
   layout?: SidebarLayout
   onSetSidebarLayout?: (layout: SidebarLayout) => void | Promise<void>
@@ -92,6 +94,7 @@ export function SidebarTree({
   onDeletePage,
   onImportWorkspace,
   onImportArchive,
+  onImportMarkdown,
   onOpenSettings,
   layout = 'classic',
   onSetSidebarLayout,
@@ -401,6 +404,7 @@ export function SidebarTree({
           type="button"
           className={buttonClassName}
           aria-label={uiCopy.sidebar.more}
+          data-tooltip={buttonClassName.includes('sidebar-tool-button') ? uiCopy.sidebar.more : undefined}
           aria-expanded={isUtilityMenuOpen}
           aria-haspopup="menu"
           onClick={(event) => {
@@ -478,6 +482,18 @@ export function SidebarTree({
                   <span className="page-menu-item-label">{uiCopy.export.importArchive}</span>
                 </button>
               ) : null}
+              {onImportMarkdown ? (
+                <button
+                  type="button"
+                  className="page-menu-action"
+                  onClick={() => {
+                    setIsUtilityMenuOpen(false)
+                    void onImportMarkdown()
+                  }}
+                >
+                  <span className="page-menu-item-label">{uiCopy.export.importMarkdown}</span>
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="page-menu-action"
@@ -520,13 +536,20 @@ export function SidebarTree({
           </div>
         </div>
         <div className="sidebar-toolstrip" aria-label={uiCopy.sidebar.tools}>
-          <button type="button" className="sidebar-tool-button" aria-label={uiCopy.sidebar.search} onClick={onSearch}>
+          <button
+            type="button"
+            className="sidebar-tool-button"
+            aria-label={uiCopy.sidebar.search}
+            data-tooltip={uiCopy.sidebar.search}
+            onClick={onSearch}
+          >
             <Search size={15} strokeWidth={1.9} />
           </button>
           <button
             type="button"
             className="sidebar-tool-button"
             aria-label={uiCopy.sidebar.newPage}
+            data-tooltip={uiCopy.sidebar.newPage}
             onClick={onCreatePage}
           >
             <Plus size={15} strokeWidth={1.9} />
@@ -535,6 +558,7 @@ export function SidebarTree({
             type="button"
             className="sidebar-tool-button"
             aria-label={uiCopy.sidebar.import}
+            data-tooltip={uiCopy.sidebar.import}
             disabled={!onImportWorkspace}
             onClick={() => {
               void onImportWorkspace?.()
@@ -545,7 +569,20 @@ export function SidebarTree({
           <button
             type="button"
             className="sidebar-tool-button"
+            aria-label={SIDEBAR_EXPORT_WORKSPACE_LABEL}
+            data-tooltip={SIDEBAR_EXPORT_WORKSPACE_LABEL}
+            disabled={!onExportWorkspace}
+            onClick={() => {
+              void onExportWorkspace?.()
+            }}
+          >
+            <Download size={15} strokeWidth={1.9} />
+          </button>
+          <button
+            type="button"
+            className="sidebar-tool-button"
             aria-label={uiCopy.sidebar.notifications}
+            data-tooltip={uiCopy.sidebar.notifications}
             disabled
           >
             <Bell size={15} strokeWidth={1.9} />
@@ -850,7 +887,7 @@ export function SidebarTree({
                   }}
                 >
                   <span className="sidebar-tree-icon" aria-hidden="true">
-                    {page.icon ?? DEFAULT_PAGE_ICON}
+                    {page.iconHidden ? '' : page.icon ?? DEFAULT_PAGE_ICON}
                   </span>
                   <span className="sidebar-tree-label">{page.title}</span>
                 </NavLink>
@@ -1113,7 +1150,7 @@ function buildPinnedItemEntries(
       title: page.title,
       isPinned: explicitPinnedKeys.has(key),
       href: `/pages/${page.id}`,
-      icon: page.icon ?? DEFAULT_PAGE_ICON,
+      icon: page.iconHidden ? '' : page.icon ?? DEFAULT_PAGE_ICON,
       depth,
       hasNestedItems,
     })

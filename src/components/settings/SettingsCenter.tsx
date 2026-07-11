@@ -2,10 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AppCloseAction,
   AppSettings,
+  BlockSelectionStartMode,
+  ExternalLinkOpenMode,
   PageDisplayDefaults,
   SearchPreferences,
   WorkspaceSettings,
 } from '../../domain/types'
+import { appAccentThemeOptions, type AppAccentTheme } from '../../domain/theme'
 
 export type SettingsSectionKey =
   | 'general'
@@ -44,15 +47,19 @@ export interface SettingsCenterProps {
   onSectionChange: (section: SettingsSectionKey) => void
   onSetPageDefaults: (defaults: Partial<PageDisplayDefaults>) => void | Promise<void>
   onSetAppCloseAction: (closeAction: AppCloseAction) => void | Promise<void>
+  onSetAppAccentTheme: (theme: AppAccentTheme) => void | Promise<void>
   onSetSidebarLayout: (layout: NonNullable<WorkspaceSettings['sidebarLayout']>) => void | Promise<void>
   onSetSidebarWidth: (width: number) => void | Promise<void>
   onSetClipboardCaptureMode: (
     mode: NonNullable<WorkspaceSettings['clipboardCaptureMode']>,
   ) => void | Promise<void>
+  onSetBlockSelectionStartMode: (mode: BlockSelectionStartMode) => void | Promise<void>
+  onSetLinkOpenMode: (mode: ExternalLinkOpenMode) => void | Promise<void>
   onSetSearchPreferences: (preferences: Partial<SearchPreferences>) => void | Promise<void>
   onExportWorkspace: () => void | Promise<void>
   onImportWorkspace: () => void | Promise<void>
   onImportArchive: () => void | Promise<void>
+  onImportMarkdown: () => void | Promise<void>
   onCleanupOrphanBoards: () => void | Promise<void>
   onCleanupOrphanDataTables: () => void | Promise<void>
   onCleanupOrphanAssets: () => void | Promise<void>
@@ -69,6 +76,7 @@ function normalizePageDefaults(defaults: WorkspaceSettings['pageDefaults']): Pag
         ? defaults.fontFamily
         : 'default',
     showOutline: defaults?.showOutline !== false,
+    showProperties: defaults?.showProperties === true,
   }
 }
 
@@ -100,13 +108,17 @@ export function SettingsCenter({
   onSectionChange,
   onSetPageDefaults,
   onSetAppCloseAction,
+  onSetAppAccentTheme,
   onSetSidebarLayout,
   onSetSidebarWidth,
   onSetClipboardCaptureMode,
+  onSetBlockSelectionStartMode,
+  onSetLinkOpenMode,
   onSetSearchPreferences,
   onExportWorkspace,
   onImportWorkspace,
   onImportArchive,
+  onImportMarkdown,
   onCleanupOrphanBoards,
   onCleanupOrphanDataTables,
   onCleanupOrphanAssets,
@@ -128,11 +140,14 @@ export function SettingsCenter({
   const [draftSidebarWidth, setDraftSidebarWidth] = useState(sidebarWidth)
   const pendingSidebarWidthRef = useRef<number | null>(null)
   const clipboardCaptureMode = workspaceSettings.clipboardCaptureMode ?? 'off'
+  const blockSelectionStartMode = workspaceSettings.blockSelectionStartMode ?? 'safe_zone_only'
+  const linkOpenMode = workspaceSettings.linkOpenMode === 'direct' ? 'direct' : 'modifier'
   const searchPreferences = useMemo(
     () => normalizeSearchPreferences(workspaceSettings.searchPreferences),
     [workspaceSettings.searchPreferences],
   )
   const closeAction = appSettings.closeAction === 'quit' ? 'quit' : 'hide_to_tray'
+  const accentTheme = appSettings.accentTheme ?? 'blue_gray'
 
   useEffect(() => {
     setDraftSidebarWidth(sidebarWidth)
@@ -256,6 +271,27 @@ export function SettingsCenter({
               <h2 className="settings-section-title">外观与侧边栏</h2>
               <div className="settings-card">
                 <div className="settings-card-field">
+                  <div className="settings-card-label">界面强调色</div>
+                  <div className="settings-theme-choice-group" role="group" aria-label="界面强调色">
+                    {appAccentThemeOptions.map((theme) => (
+                      <button
+                        key={theme.value}
+                        type="button"
+                        className="settings-theme-choice"
+                        data-accent-theme={theme.value}
+                        aria-pressed={accentTheme === theme.value}
+                        onClick={() => {
+                          void onSetAppAccentTheme(theme.value)
+                        }}
+                      >
+                        <span aria-hidden="true" />
+                        {theme.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="settings-card-divider" />
+                <div className="settings-card-field">
                   <div className="settings-card-label">侧边栏模式</div>
                   <div className="settings-choice-group">
                     <button
@@ -348,6 +384,42 @@ export function SettingsCenter({
                   />
                   <span>新页面默认显示目录</span>
                 </label>
+                <label className="settings-toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={pageDefaults.showProperties}
+                    onChange={(event) => {
+                      void onSetPageDefaults({ showProperties: event.currentTarget.checked })
+                    }}
+                  />
+                  <span>新页面默认显示页面属性</span>
+                </label>
+                <div className="settings-card-divider" />
+                <div className="settings-card-field">
+                  <div className="settings-card-label">正文外链打开方式</div>
+                  <div className="settings-choice-group">
+                    <button
+                      type="button"
+                      className="settings-choice-button"
+                      aria-pressed={linkOpenMode === 'modifier'}
+                      onClick={() => {
+                        void onSetLinkOpenMode('modifier')
+                      }}
+                    >
+                      按 Ctrl 后打开外链
+                    </button>
+                    <button
+                      type="button"
+                      className="settings-choice-button"
+                      aria-pressed={linkOpenMode === 'direct'}
+                      onClick={() => {
+                        void onSetLinkOpenMode('direct')
+                      }}
+                    >
+                      点击直接打开外链
+                    </button>
+                  </div>
+                </div>
                 <div className="settings-card-divider" />
                 <div className="settings-card-field">
                   <div className="settings-card-label">新页面默认字体</div>
@@ -381,6 +453,32 @@ export function SettingsCenter({
                       }}
                     >
                       等宽
+                    </button>
+                  </div>
+                </div>
+                <div className="settings-card-divider" />
+                <div className="settings-card-field">
+                  <div className="settings-card-label">框选起点</div>
+                  <div className="settings-choice-group">
+                    <button
+                      type="button"
+                      className="settings-choice-button"
+                      aria-pressed={blockSelectionStartMode === 'safe_zone_only'}
+                      onClick={() => {
+                        void onSetBlockSelectionStartMode('safe_zone_only')
+                      }}
+                    >
+                      仅在块左侧或空白处框选
+                    </button>
+                    <button
+                      type="button"
+                      className="settings-choice-button"
+                      aria-pressed={blockSelectionStartMode === 'content_allowed'}
+                      onClick={() => {
+                        void onSetBlockSelectionStartMode('content_allowed')
+                      }}
+                    >
+                      允许从正文区域直接框选
                     </button>
                   </div>
                 </div>
@@ -490,6 +588,15 @@ export function SettingsCenter({
                     }}
                   >
                     导入页面包
+                  </button>
+                  <button
+                    type="button"
+                    className="settings-action-button"
+                    onClick={() => {
+                      void onImportMarkdown()
+                    }}
+                  >
+                    导入 Markdown
                   </button>
                 </div>
               </div>

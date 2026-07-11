@@ -20,6 +20,8 @@ interface BlockFrameProps {
   onDragEnd: () => void
   onChangeTextStyle?: (nextStyle: TextBlockStyle) => void
   onInsertPick?: (type: SlashMenuCommand) => void
+  onInsertAbove?: () => void
+  onInsertBelow?: () => void
   onTurnInto: (type: BlockType) => void
   onDuplicate: () => void
   onDelete: () => void
@@ -36,6 +38,8 @@ export function BlockFrame({
   onDragEnd,
   onChangeTextStyle,
   onInsertPick,
+  onInsertAbove,
+  onInsertBelow,
   onTurnInto,
   onDuplicate,
   onDelete,
@@ -63,6 +67,7 @@ export function BlockFrame({
 
   return (
     <div className={`block-frame${badge ? ' block-frame-has-badge' : ''}`} ref={frameRef}>
+      <span className="block-selection-gutter" aria-hidden="true" />
       <div className="block-frame-handle-anchor">
         <button
           ref={handleRef}
@@ -89,6 +94,16 @@ export function BlockFrame({
           onKeyDown={(event) => {
             if (event.key === 'Escape') {
               setOpen(false)
+              return
+            }
+
+            if (
+              !event.nativeEvent.isComposing &&
+              (event.key === 'Backspace' || event.key === 'Delete')
+            ) {
+              event.preventDefault()
+              setOpen(false)
+              onDelete()
             }
           }}
         >
@@ -122,6 +137,8 @@ export function BlockFrame({
               }))}
               textStyle={textStyle}
               onChangeTextStyle={onChangeTextStyle}
+              onInsertAbove={onInsertAbove}
+              onInsertBelow={onInsertBelow}
               onTurnInto={(type) => {
                 setOpen(false)
                 onTurnInto(type)

@@ -49,6 +49,7 @@ describe('SidebarTree', () => {
   it('renders the compact sidebar tools and lets users switch layout mode', async () => {
     const user = userEvent.setup()
     const onSetSidebarLayout = vi.fn()
+    const onExportWorkspace = vi.fn()
 
     render(
       <MemoryRouter>
@@ -58,6 +59,7 @@ describe('SidebarTree', () => {
           onCreatePage={vi.fn()}
           layout="compact"
           onSetSidebarLayout={onSetSidebarLayout}
+          onExportWorkspace={onExportWorkspace}
         />
       </MemoryRouter>,
     )
@@ -66,7 +68,16 @@ describe('SidebarTree', () => {
     expect(screen.getByRole('button', { name: '搜索' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '新建页面' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '导入' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '导出工作区' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '消息' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '搜索' })).toHaveAttribute('data-tooltip', '搜索')
+    expect(screen.getByRole('button', { name: '导出工作区' })).toHaveAttribute(
+      'data-tooltip',
+      '导出工作区',
+    )
+
+    await user.click(screen.getByRole('button', { name: '导出工作区' }))
+    expect(onExportWorkspace).toHaveBeenCalledTimes(1)
 
     await user.click(screen.getByRole('button', { name: '更多' }))
     await user.click(screen.getByRole('button', { name: '经典模式' }))

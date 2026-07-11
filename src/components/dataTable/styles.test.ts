@@ -12,7 +12,7 @@ function getRuleBody(selector: string) {
 }
 
 function getAppRuleBody(selector: string) {
-  return new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`).exec(
+  return new RegExp(`(?:^|\\n)\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`).exec(
     appStyles,
   )?.[1] ?? ''
 }
@@ -78,6 +78,18 @@ describe('data table styles', () => {
     expect(getAppRuleBody('.data-table-route-page .database-page.is-full-width')).toContain(
       'margin: 0 auto',
     )
+    expect(getAppRuleBody('.data-table-route-page.data-table-route-page-adaptive .database-page')).toContain(
+      'max-width: var(--page-content-available-width)',
+    )
+    expect(
+      getAppRuleBody('.data-table-route-page:not(.data-table-route-page-adaptive) .database-page'),
+    ).toContain('max-width: min(760px, var(--page-content-available-width))')
+    expect(
+      getAppRuleBody('.data-table-route-page.data-table-route-page-adaptive .data-table-route-breadcrumb-row'),
+    ).toContain('max-width: var(--page-content-available-width)')
+    expect(
+      getAppRuleBody('.data-table-route-page.data-table-route-page-adaptive .data-table-route-page-header'),
+    ).toContain('max-width: var(--page-content-available-width)')
     expect(getAppRuleBody('.data-table-route-page-header')).toContain(
       'max-width: min(760px, var(--page-content-available-width))',
     )
@@ -149,5 +161,43 @@ describe('data table styles', () => {
     expect(boardGrid).toContain('min-width: 0')
     expect(boardGrid).toContain('width: 100%')
     expect(boardGrid).toContain('overflow-x: auto')
+  })
+
+  it('keeps gantt bars at their scheduled timeline width when they contain many fields', () => {
+    const ganttBar = getRuleBody('.gantt-row-bar')
+
+    expect(ganttBar).toContain('box-sizing: border-box')
+    expect(ganttBar).not.toContain('min-width: max-content')
+  })
+
+  it('uses a compact, theme-aware continuous canvas only for the gantt timeline', () => {
+    const ganttRows = getRuleBody('.gantt-rows')
+    const ganttTimelineCanvas = getRuleBody('.gantt-rows::before')
+    const ganttTimelineBorder = getRuleBody('.gantt-rows::after')
+    const ganttTrack = getRuleBody('.gantt-row-track')
+
+    expect(ganttRows).toContain('gap: 4px')
+    expect(ganttRows).toContain('position: relative')
+    expect(ganttRows).not.toContain('background: var(--app-accent-soft)')
+    expect(styles).toContain('grid-template-columns: 220px var(--gantt-track-width)')
+    expect(styles).toContain('min-width: calc(220px + var(--gantt-track-width))')
+    expect(ganttTimelineCanvas).toContain('left: calc(220px + 14px)')
+    expect(ganttTimelineCanvas).toContain('background: var(--app-accent-soft)')
+    expect(ganttTimelineBorder).toContain('border: 1px solid var(--app-accent-border)')
+    expect(ganttTimelineBorder).toContain('z-index: 2')
+    expect(ganttTrack).toContain('min-height: 52px')
+    expect(ganttTrack).toContain('background: transparent')
+    expect(ganttTrack).not.toContain('border: 1px solid')
+  })
+
+  it('keeps gantt timeline scale controls compact and theme-aware', () => {
+    const actions = getRuleBody('.gantt-view-actions')
+    const switcher = getRuleBody('.gantt-time-scale-switch')
+    const activeButton = getRuleBody('.gantt-time-scale-button.is-active')
+
+    expect(actions).toContain('display: flex')
+    expect(switcher).toContain('display: inline-flex')
+    expect(activeButton).toContain('background: var(--app-accent-soft)')
+    expect(activeButton).toContain('color: var(--app-accent)')
   })
 })

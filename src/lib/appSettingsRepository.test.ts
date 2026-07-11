@@ -11,6 +11,7 @@ describe('appSettingsRepository', () => {
 
     await expect(repository.load()).resolves.toEqual({
       closeAction: 'hide_to_tray',
+      accentTheme: 'blue_gray',
     })
   })
 
@@ -19,10 +20,12 @@ describe('appSettingsRepository', () => {
 
     await repository.save({
       closeAction: 'quit',
+      accentTheme: 'violet',
     })
 
     await expect(repository.load()).resolves.toEqual({
       closeAction: 'quit',
+      accentTheme: 'violet',
     })
   })
 })

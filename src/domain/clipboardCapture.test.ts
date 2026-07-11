@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildClipboardTextBlocks,
+  clipboardHtmlToStructuredBlocks,
   clipboardHtmlToParagraphBlocks,
   clipboardPlainTextToParagraphBlocks,
   isDuplicateClipboardSignature,
@@ -38,6 +39,36 @@ describe('clipboardCapture', () => {
           { text: ' ' },
           { text: 'Link', link: 'https://example.com' },
           { text: '\nTail' },
+        ],
+      },
+    ])
+  })
+
+  it('converts copied markdown preview HTML into matching editor block types', () => {
+    expect(
+      clipboardHtmlToStructuredBlocks(
+        [
+          '<h1>项目计划</h1>',
+          '<p>这是 <strong>重点</strong>。</p>',
+          '<ul><li>第一项</li></ul>',
+          '<pre><code class="language-ts">const done = true</code></pre>',
+          '<table><tr><th>名称</th><th>状态</th></tr><tr><td>知栖</td><td>进行中</td></tr></table>',
+        ].join(''),
+      ),
+    ).toMatchObject([
+      { type: 'heading_1', text: '项目计划' },
+      {
+        type: 'paragraph',
+        text: '这是 重点。',
+        richText: [{ text: '这是 ' }, { text: '重点', bold: true }, { text: '。' }],
+      },
+      { type: 'bulleted_list', items: ['第一项'] },
+      { type: 'code', language: 'ts', text: 'const done = true' },
+      {
+        type: 'table',
+        rows: [
+          ['名称', '状态'],
+          ['知栖', '进行中'],
         ],
       },
     ])

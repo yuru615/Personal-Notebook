@@ -20,15 +20,18 @@ interface ExportImportPanelProps {
   smallText: boolean
   fontFamily: PageFontFamily
   outlineVisible: boolean
+  propertiesVisible: boolean
   archiveTask?: ArchiveTaskStatus | null
   onToggleAdaptiveWidth: (value: boolean) => void
   onToggleSmallText: (value: boolean) => void
   onToggleFontFamily: (value: PageFontFamily) => void
   onToggleOutlineVisible: (value: boolean) => void
+  onTogglePropertiesVisible: (value: boolean) => void
   onExportArchive: () => void | Promise<void>
   onExportWorkspace: () => void | Promise<void>
   onImportWorkspace: () => void | Promise<void>
   onImportArchive: () => void | Promise<void>
+  onImportMarkdown: () => void | Promise<void>
   onCleanupOrphanBoards: () => void | Promise<void>
   onCleanupOrphanDataTables: () => void | Promise<void>
   onDeletePage?: () => void | Promise<void>
@@ -40,15 +43,18 @@ export function ExportImportPanel({
   smallText,
   fontFamily,
   outlineVisible,
+  propertiesVisible,
   archiveTask,
   onToggleAdaptiveWidth,
   onToggleSmallText,
   onToggleFontFamily,
   onToggleOutlineVisible,
+  onTogglePropertiesVisible,
   onExportArchive,
   onExportWorkspace,
   onImportWorkspace,
   onImportArchive,
+  onImportMarkdown,
   onCleanupOrphanBoards,
   onCleanupOrphanDataTables,
   onDeletePage,
@@ -109,6 +115,15 @@ export function ExportImportPanel({
 
     closeMenu()
     void onImportWorkspace()
+  }
+
+  function handleImportMarkdown() {
+    if (isArchiveBusy) {
+      return
+    }
+
+    closeMenu()
+    void onImportMarkdown()
   }
 
   function handleCleanupOrphanBoards() {
@@ -209,6 +224,14 @@ export function ExportImportPanel({
               />
             </label>
             <label className="page-menu-toggle">
+              <span className="page-menu-item-label">{uiCopy.page.propertiesVisible}</span>
+              <input
+                type="checkbox"
+                checked={propertiesVisible}
+                onChange={(event) => onTogglePropertiesVisible(event.target.checked)}
+              />
+            </label>
+            <label className="page-menu-toggle">
               <span className="page-menu-item-label">{uiCopy.page.adaptiveWidth}</span>
               <input
                 type="checkbox"
@@ -251,6 +274,14 @@ export function ExportImportPanel({
               onClick={handleImportArchive}
             >
               <span className="page-menu-item-label">{uiCopy.export.importArchive}</span>
+            </button>
+            <button
+              type="button"
+              className="page-menu-action"
+              disabled={isArchiveBusy}
+              onClick={handleImportMarkdown}
+            >
+              <span className="page-menu-item-label">{uiCopy.export.importMarkdown}</span>
             </button>
             <button type="button" className="page-menu-action" onClick={handleCleanupOrphanBoards}>
               <span className="page-menu-item-label">{CLEANUP_ORPHAN_WHITEBOARDS_LABEL}</span>

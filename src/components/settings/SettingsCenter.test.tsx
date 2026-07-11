@@ -29,9 +29,12 @@ function createProps(
     onSectionChange: vi.fn(),
     onSetPageDefaults: vi.fn(),
     onSetAppCloseAction: vi.fn(),
+    onSetAppAccentTheme: vi.fn(),
     onSetSidebarLayout: vi.fn(),
     onSetSidebarWidth: vi.fn(),
     onSetClipboardCaptureMode: vi.fn(),
+    onSetBlockSelectionStartMode: vi.fn(),
+    onSetLinkOpenMode: vi.fn(),
     onSetSearchPreferences: vi.fn(),
     onExportWorkspace: vi.fn(),
     onImportWorkspace: vi.fn(),
@@ -65,6 +68,68 @@ it('switches sections and edits page defaults from the left navigation', async (
 
   await user.click(screen.getByRole('checkbox', { name: '新页面默认自适应正文宽度' }))
   expect(onSetPageDefaults).toHaveBeenCalledWith({ isFullWidth: true })
+})
+
+it('updates block selection start mode from the editing section', async () => {
+  const user = userEvent.setup()
+  const onSetBlockSelectionStartMode = vi.fn()
+
+  render(
+    <SettingsCenter
+      {...createProps({
+        activeSection: 'editing_page_defaults',
+        workspaceSettings: {
+          ...createProps().workspaceSettings,
+          blockSelectionStartMode: 'safe_zone_only',
+        },
+        onSetBlockSelectionStartMode,
+      })}
+    />,
+  )
+
+  await user.click(screen.getByRole('button', { name: '允许从正文区域直接框选' }))
+
+  expect(onSetBlockSelectionStartMode).toHaveBeenCalledWith('content_allowed')
+})
+
+it('updates new-page property visibility and external-link activation from editing settings', async () => {
+  const user = userEvent.setup()
+  const onSetPageDefaults = vi.fn()
+  const onSetLinkOpenMode = vi.fn()
+
+  render(
+    <SettingsCenter
+      {...createProps({
+        activeSection: 'editing_page_defaults',
+        onSetPageDefaults,
+        onSetLinkOpenMode,
+      })}
+    />,
+  )
+
+  await user.click(screen.getByRole('checkbox', { name: '新页面默认显示页面属性' }))
+  await user.click(screen.getByRole('button', { name: '点击直接打开外链' }))
+
+  expect(onSetPageDefaults).toHaveBeenCalledWith({ showProperties: true })
+  expect(onSetLinkOpenMode).toHaveBeenCalledWith('direct')
+})
+
+it('updates the app accent theme from appearance settings', async () => {
+  const user = userEvent.setup()
+  const onSetAppAccentTheme = vi.fn()
+
+  render(
+    <SettingsCenter
+      {...createProps({
+        activeSection: 'appearance_sidebar',
+        onSetAppAccentTheme,
+      })}
+    />,
+  )
+
+  await user.click(screen.getByRole('button', { name: '紫罗兰' }))
+
+  expect(onSetAppAccentTheme).toHaveBeenCalledWith('violet')
 })
 
 it('updates search preferences from the search section', async () => {

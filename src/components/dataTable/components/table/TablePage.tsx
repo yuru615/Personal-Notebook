@@ -150,6 +150,7 @@ export default function TablePage({
     boardShowPropertyNames = true,
     ganttStartPropertyId,
     ganttEndPropertyId,
+    ganttTimelineScale = "day",
     calendarDatePropertyId,
     openMode,
     tableWidthMode,
@@ -1144,6 +1145,11 @@ export default function TablePage({
                 records={orderedRecords}
                 startPropertyId={ganttStartPropertyId}
                 endPropertyId={ganttEndPropertyId}
+                timelineScale={ganttTimelineScale}
+                hiddenPropertyIds={hiddenPropertyIds}
+                onTimelineScaleChange={(timelineScale) =>
+                  actions.updateActiveView({ ganttTimelineScale: timelineScale })
+                }
                 onOpenRecord={openRecordInCurrentMode}
               />
             )

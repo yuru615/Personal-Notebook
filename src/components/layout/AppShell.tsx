@@ -7,6 +7,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from 'react'
+import type { AppAccentTheme } from '../../domain/theme'
 import { uiCopy } from '../../ui/copy'
 
 interface AppShellProps {
@@ -15,7 +16,9 @@ interface AppShellProps {
   hideSidebar?: boolean
   sidebarClassName?: string
   sidebarWidth?: number
+  accentTheme?: AppAccentTheme
   onSidebarWidthChange?: (width: number) => void
+  onDropFiles?: (files: File[]) => void | Promise<void>
 }
 
 const DEFAULT_SIDEBAR_WIDTH = 272
@@ -36,11 +39,15 @@ export function AppShell({
   hideSidebar = false,
   sidebarClassName = 'sidebar',
   sidebarWidth = DEFAULT_SIDEBAR_WIDTH,
+  accentTheme = 'blue_gray',
   onSidebarWidthChange,
+  onDropFiles,
 }: AppShellProps) {
   const [liveSidebarWidth, setLiveSidebarWidth] = useState(() => clampSidebarWidth(sidebarWidth))
   const dragWidthRef = useRef(liveSidebarWidth)
   const pendingPersistWidthRef = useRef<number | null>(null)
+  const [isFileDropActive, setIsFileDropActive] = useState(false)
+  const fileDragDepthRef = useRef(0)
 
   useEffect(() => {
     const nextWidth = clampSidebarWidth(sidebarWidth)
@@ -107,7 +114,34 @@ export function AppShell({
   )
 
   return (
-    <div className={hideSidebar ? 'app-shell app-shell-focus' : 'app-shell'} style={shellStyle}>
+    <div
+      className={hideSidebar ? 'app-shell app-shell-focus' : 'app-shell'}
+      data-accent-theme={accentTheme}
+      style={shellStyle}
+      onDragEnter={(event) => {
+        if (!Array.from(event.dataTransfer.types).includes('Files')) return
+        event.preventDefault()
+        fileDragDepthRef.current += 1
+        setIsFileDropActive(true)
+      }}
+      onDragOver={(event) => {
+        if (Array.from(event.dataTransfer.types).includes('Files')) event.preventDefault()
+      }}
+      onDragLeave={(event) => {
+        if (!Array.from(event.dataTransfer.types).includes('Files')) return
+        fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1)
+        if (fileDragDepthRef.current === 0) setIsFileDropActive(false)
+      }}
+      onDrop={(event) => {
+        const files = Array.from(event.dataTransfer.files)
+        if (files.length === 0) return
+        event.preventDefault()
+        fileDragDepthRef.current = 0
+        setIsFileDropActive(false)
+        void onDropFiles?.(files)
+      }}
+    >
+      {isFileDropActive ? <div className="app-file-drop-overlay">松开以导入到收件箱</div> : null}
       {hideSidebar ? null : (
         <>
           <aside className={sidebarClassName} aria-label={uiCopy.sidebar.ariaLabel}>

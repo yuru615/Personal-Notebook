@@ -35,6 +35,7 @@ export interface PickSaveFilePathOptions {
 export interface OpenedTextFile {
   name: string
   contents: string
+  path?: string
 }
 
 export interface OpenedBinaryFile {
@@ -116,6 +117,7 @@ export async function openTextFile(options: OpenTextFileOptions) {
     return {
       name: fileNameFromPath(path),
       contents: await readTextFile(path),
+      path,
     }
   }
 

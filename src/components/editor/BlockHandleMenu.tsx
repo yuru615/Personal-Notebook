@@ -20,6 +20,8 @@ interface BlockHandleMenuProps {
   textStyle?: TextBlockStyle
   onChangeTextStyle?: (nextStyle: TextBlockStyle) => void
   onTurnInto: (type: BlockType) => void
+  onInsertAbove?: () => void
+  onInsertBelow?: () => void
   onDuplicate: () => void
   onDelete: () => void
 }
@@ -63,6 +65,8 @@ export function BlockHandleMenu({
   textStyle,
   onChangeTextStyle,
   onTurnInto,
+  onInsertAbove,
+  onInsertBelow,
   onDuplicate,
   onDelete,
 }: BlockHandleMenuProps) {
@@ -83,6 +87,10 @@ export function BlockHandleMenu({
     : turnIntoOptions
   const showTurnIntoSection = filteredTurnIntoOptions.length > 0
   const canChangeTextStyle = textStyle !== undefined && onChangeTextStyle !== undefined
+  const insertActions: BlockHandleMenuAction[] = [
+    ...(onInsertAbove ? [{ key: 'insert-above', label: '在上方插入块', onSelect: onInsertAbove }] : []),
+    ...(onInsertBelow ? [{ key: 'insert-below', label: '在下方插入块', onSelect: onInsertBelow }] : []),
+  ]
   const operationActions: BlockHandleMenuAction[] = [
     ...extraActions,
     { key: 'duplicate', label: '复制', onSelect: onDuplicate },
@@ -95,6 +103,19 @@ export function BlockHandleMenu({
       className={`block-menu ${placement === 'top' ? 'floating-menu-top' : 'floating-menu-bottom'}`}
       style={maxHeight ? { maxHeight: `${maxHeight}px` } : undefined}
     >
+      {insertActions.length > 0 ? (
+        <section className="block-menu-section">
+          <div className="block-menu-label">插入</div>
+          <div className="block-menu-section-options">
+            {insertActions.map((action) => (
+              <button key={action.key} type="button" className="block-menu-action" onClick={action.onSelect}>
+                <span>{action.label}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
+      {insertActions.length > 0 ? <div className="block-menu-divider" /> : null}
       {canChangeTextStyle ? (
         <section className="block-menu-section">
           <div className="block-menu-label">样式</div>

@@ -26,6 +26,7 @@ describe('AppShell', () => {
       <AppShell
         sidebar={<div>Sidebar</div>}
         sidebarWidth={272}
+        accentTheme="violet"
         onSidebarWidthChange={onSidebarWidthChange}
       >
         <div>Page</div>
@@ -38,6 +39,7 @@ describe('AppShell', () => {
     expect(shell).toHaveStyle({
       '--app-sidebar-width': '272px',
     })
+    expect(shell).toHaveAttribute('data-accent-theme', 'violet')
 
     fireEvent.mouseDown(resizer, { clientX: 272 })
     fireEvent.mouseMove(window, { clientX: 80 })

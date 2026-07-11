@@ -262,7 +262,7 @@ export function PageHeader({
           className={hasVisibleCover ? 'page-header-icon page-header-icon-with-cover' : 'page-header-icon'}
           aria-hidden="true"
         >
-          {page.icon ?? DEFAULT_PAGE_ICON}
+          {page.iconHidden ? '' : page.icon ?? DEFAULT_PAGE_ICON}
         </div>
         <input
           key={`${page.id}:${page.title}`}

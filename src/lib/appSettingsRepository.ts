@@ -1,4 +1,5 @@
 import type { AppSettings } from '../domain/types'
+import { normalizeAppAccentTheme } from '../domain/theme'
 import { isDesktopRuntime } from './fileAccess'
 import { createTauriStorageClient, type WorkspaceStorageClient } from './storageClient'
 
@@ -17,6 +18,7 @@ interface CreateAppSettingsRepositoryOptions {
 function normalizeAppSettings(settings: AppSettings | null | undefined): AppSettings {
   return {
     closeAction: settings?.closeAction === 'quit' ? 'quit' : 'hide_to_tray',
+    accentTheme: normalizeAppAccentTheme(settings?.accentTheme),
   }
 }
 

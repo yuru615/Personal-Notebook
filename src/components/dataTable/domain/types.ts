@@ -39,6 +39,7 @@ export type SelectOption = {
 };
 
 export type BoardCardSortMode = "manual" | "titleAsc" | "titleDesc";
+export type GanttTimelineScale = "day" | "week" | "month";
 
 export type PropertyConfig = {
   options?: SelectOption[];
@@ -83,6 +84,7 @@ export type DatabaseView = {
   boardShowPropertyNames?: boolean;
   ganttStartPropertyId: string | null;
   ganttEndPropertyId: string | null;
+  ganttTimelineScale?: GanttTimelineScale;
   calendarDatePropertyId: string | null;
   openMode: "sidePeek" | "centerPeek" | "fullPage";
   tableWidthMode: "fitPage" | "content";

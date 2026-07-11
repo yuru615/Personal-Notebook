@@ -1188,7 +1188,7 @@ impl Storage {
                 )?;
             }
 
-            if matches!(block_type, "image" | "video" | "audio") {
+            if matches!(block_type, "image" | "video" | "audio" | "file") {
                 if let Some(asset_id) = block.get("assetId").and_then(Value::as_str) {
                     self.connection.execute(
                         "INSERT OR IGNORE INTO zhixi_asset_refs (asset_id, owner_kind, owner_id)
@@ -1288,7 +1288,7 @@ impl Storage {
             let Some(block_type) = block.get("type").and_then(Value::as_str) else {
                 continue;
             };
-            if matches!(block_type, "image" | "video" | "audio") {
+            if matches!(block_type, "image" | "video" | "audio" | "file") {
                 if let Some(asset_id) = block.get("assetId").and_then(Value::as_str) {
                     self.connection.execute(
                         "INSERT OR IGNORE INTO zhixi_asset_refs (asset_id, owner_kind, owner_id)
@@ -2397,7 +2397,7 @@ fn collect_asset_ids_from_pages(pages: &[PageRecord]) -> Vec<String> {
             let Some(block_type) = block.get("type").and_then(Value::as_str) else {
                 continue;
             };
-            if matches!(block_type, "image" | "video" | "audio") {
+            if matches!(block_type, "image" | "video" | "audio" | "file") {
                 if let Some(asset_id) = block.get("assetId").and_then(Value::as_str) {
                     if !ids.iter().any(|existing| existing == asset_id) {
                         ids.push(asset_id.to_string());
@@ -2749,6 +2749,7 @@ mod tests {
                 "pageId": "page_1"
             })],
             clipboard_capture_mode: Some("off".to_string()),
+            block_selection_start_mode: Some("content_allowed".to_string()),
         };
 
         storage
@@ -2763,10 +2764,38 @@ mod tests {
     }
 
     #[test]
+    fn preserves_block_selection_start_mode_when_loading_and_saving() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let mut snapshot_value = serde_json::to_value(sample_snapshot()).expect("serialize snapshot");
+        snapshot_value["settings"]["blockSelectionStartMode"] = json!("content_allowed");
+        let snapshot: WorkspaceSnapshot =
+            serde_json::from_value(snapshot_value).expect("deserialize snapshot");
+
+        storage
+            .replace_workspace_backup(snapshot)
+            .expect("replace workspace");
+
+        let exported = serde_json::to_value(
+            storage
+                .export_workspace_backup()
+                .expect("export workspace backup"),
+        )
+        .expect("serialize exported workspace");
+
+        assert_eq!(
+            exported
+                .pointer("/settings/blockSelectionStartMode")
+                .and_then(Value::as_str),
+            Some("content_allowed")
+        );
+    }
+
+    #[test]
     fn saves_and_loads_app_settings_independently_from_workspace_settings() {
         let storage = Storage::open_in_memory_for_tests().expect("storage opens");
         let settings = AppSettings {
             close_action: Some("hide_to_tray".to_string()),
+            accent_theme: Some("violet".to_string()),
         };
 
         storage
@@ -3907,6 +3936,33 @@ mod tests {
             .expect("asset ref count");
 
         assert_eq!(ref_count, 1);
+        assert_eq!(storage.cleanup_orphan_assets().expect("cleanup"), 0);
+    }
+
+    #[test]
+    fn file_block_asset_reference_is_preserved() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let asset = storage
+            .write_asset(WriteAssetInput {
+                name: "brief.pdf".to_string(),
+                mime_type: "application/pdf".to_string(),
+                bytes: b"pdf".to_vec(),
+            })
+            .expect("write asset");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages[0].blocks.push(json!({
+            "id": "block_file",
+            "type": "file",
+            "assetId": asset.id,
+            "name": "brief.pdf",
+            "mimeType": "application/pdf",
+            "caption": ""
+        }));
+
+        storage
+            .replace_workspace_backup(snapshot)
+            .expect("replace snapshot");
+
         assert_eq!(storage.cleanup_orphan_assets().expect("cleanup"), 0);
     }
 

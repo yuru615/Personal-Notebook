@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type WheelEvent,
 } from 'react'
@@ -17,6 +18,7 @@ interface MediaBlockProps {
   block: MediaBlockRecord
   onChange: (block: MediaBlockRecord) => void
   readOnly?: boolean
+  onDelete?: () => void
 }
 
 interface ImagePreviewView {
@@ -150,7 +152,7 @@ function formatPreviewTransform(scale: number, offset: { x: number; y: number })
   return `translate(${offset.x}px, ${offset.y}px) scale(${scale})`
 }
 
-export function MediaBlock({ block, onChange, readOnly = false }: MediaBlockProps) {
+export function MediaBlock({ block, onChange, readOnly = false, onDelete }: MediaBlockProps) {
   const [assetUrl, setAssetUrl] = useState<string | null>(null)
   const [videoPosterUrl, setVideoPosterUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -362,6 +364,20 @@ export function MediaBlock({ block, onChange, readOnly = false }: MediaBlockProp
     }
   }
 
+  function handleDeleteKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (
+      !onDelete ||
+      event.nativeEvent.isComposing ||
+      (event.key !== 'Backspace' && event.key !== 'Delete') ||
+      event.target !== event.currentTarget
+    ) {
+      return
+    }
+
+    event.preventDefault()
+    onDelete()
+  }
+
   function renderPreview() {
     if (!block.assetId) {
       if (readOnly) {
@@ -417,7 +433,14 @@ export function MediaBlock({ block, onChange, readOnly = false }: MediaBlockProp
             aria-label={openImagePreviewLabel}
             onClick={() => setIsImagePreviewOpen(true)}
           >
-            <img className="media-block-image" src={assetUrl} alt={block.alt || block.name} />
+            <img
+              className="media-block-image"
+              src={assetUrl}
+              alt={block.name || labels.title}
+              onError={() => {
+                setHasLoadError(true)
+              }}
+            />
           </button>
         </div>
       )
@@ -463,7 +486,11 @@ export function MediaBlock({ block, onChange, readOnly = false }: MediaBlockProp
 
   return (
     <>
-      <figure className={`media-block media-block-kind-${block.type}`}>
+      <figure
+        className={`media-block media-block-kind-${block.type}`}
+        tabIndex={!readOnly && onDelete ? -1 : undefined}
+        onKeyDown={handleDeleteKeyDown}
+      >
         <div className="media-block-toolbar">
           <div className="media-block-label">
             <Icon size={16} aria-hidden="true" />
@@ -490,14 +517,6 @@ export function MediaBlock({ block, onChange, readOnly = false }: MediaBlockProp
             placeholder="添加说明"
             onChange={(event) => onChange({ ...block, caption: event.currentTarget.value })}
           />
-          {block.type === 'image' ? (
-            <input
-              className="media-block-caption"
-              value={block.alt}
-              placeholder="替代文本"
-              onChange={(event) => onChange({ ...block, alt: event.currentTarget.value })}
-            />
-          ) : null}
         </figcaption>
       </figure>
       {block.type === 'image' && assetUrl && isImagePreviewOpen
@@ -511,8 +530,8 @@ export function MediaBlock({ block, onChange, readOnly = false }: MediaBlockProp
                 onClick={(event) => event.stopPropagation()}
               >
                 <div className="media-block-image-preview-header">
-                  <span className="media-block-image-preview-name" title={block.alt || block.name}>
-                    {block.alt || block.name || labels.title}
+                  <span className="media-block-image-preview-name" title={block.name || labels.title}>
+                    {block.name || labels.title}
                   </span>
                   <div className="media-block-image-preview-actions">
                     <span className="media-block-image-preview-zoom" aria-live="polite">
@@ -544,7 +563,7 @@ export function MediaBlock({ block, onChange, readOnly = false }: MediaBlockProp
                     ref={previewImageRef}
                     className="media-block-image-preview-image"
                     src={assetUrl}
-                    alt={block.alt || block.name}
+                    alt={block.name || labels.title}
                     draggable={false}
                     style={{
                       transformOrigin: `${imagePreviewView.origin.x}px ${imagePreviewView.origin.y}px`,

@@ -1,12 +1,13 @@
 import type {
   CSSProperties,
+  ClipboardEvent as ReactClipboardEvent,
   FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
   KeyboardEventHandler,
   MouseEvent,
 } from 'react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { RichTextSegment, TextColor } from '../../domain/types'
+import type { ExternalLinkOpenMode, RichTextSegment, TextColor } from '../../domain/types'
 import { readRichTextSegmentsFromElement } from '../../domain/richTextHtml'
 import {
   applyRichTextMark,
@@ -17,6 +18,10 @@ import {
   type RichTextMarkPatch,
 } from '../../domain/richText'
 import { getPageRelationDisplayText } from '../../domain/pageRelations'
+import {
+  readDesktopClipboardCandidate,
+  type DesktopClipboardCandidate,
+} from '../../lib/desktopLifecycle'
 import { openExternalLink } from '../../lib/externalLinks'
 import { textColorValues } from './blockTextStyle'
 import {
@@ -29,6 +34,15 @@ export interface RichTextEditableChange {
   richText?: RichTextSegment[]
 }
 
+export type PastedImageSource =
+  | File
+  | Extract<DesktopClipboardCandidate, { kind: 'image_bytes' | 'image_file' }>
+
+export interface DesktopPasteFallback {
+  handled: boolean
+  imageSource?: PastedImageSource
+}
+
 interface RichTextEditableProps {
   value: string
   richText?: RichTextSegment[]
@@ -38,11 +52,15 @@ interface RichTextEditableProps {
   ariaLabel: string
   onChange: (next: RichTextEditableChange) => void
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>
+  onPasteImage?: (source: PastedImageSource) => Promise<void> | void
+  onPasteStructuredContent?: (clipboardData: DataTransfer) => boolean
+  onPasteDesktopContent?: () => Promise<DesktopPasteFallback>
   relationPages?: PageRelationAutocompleteItem[]
   onOpenPageRelation?: (pageId: string) => void
   onCreatePageRelation?: (
     title: string,
   ) => Promise<PageRelationAutocompleteItem>
+  linkOpenMode?: ExternalLinkOpenMode
 }
 
 interface SelectionOffsets {
@@ -395,6 +413,117 @@ function toChangePayload(segments: RichTextSegment[]): RichTextEditableChange {
   }
 }
 
+function isImageFile(file: File) {
+  if (file.type && file.type.startsWith('image/')) {
+    return true
+  }
+
+  return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(file.name || '')
+}
+
+function getClipboardImageFile(dataTransfer?: DataTransfer | null) {
+  if (!dataTransfer) {
+    return null
+  }
+
+  const file = Array.from(dataTransfer.files ?? []).find(isImageFile)
+  if (file) {
+    return file
+  }
+
+  for (const item of Array.from(dataTransfer.items ?? [])) {
+    if (item.kind !== 'file') {
+      continue
+    }
+
+    const candidate = item.getAsFile()
+    if (candidate && (item.type.startsWith('image/') || isImageFile(candidate))) {
+      return candidate
+    }
+  }
+
+  return null
+}
+
+function getClipboardImageName(mimeType: string) {
+  const extension = mimeType.split('/')[1]?.split('+')[0] || 'png'
+  return `clipboard-${Date.now()}.${extension}`
+}
+
+async function readBrowserClipboardImageFile(): Promise<File | null> {
+  if (typeof navigator === 'undefined') {
+    return null
+  }
+
+  const clipboard = navigator.clipboard as Clipboard & {
+    read?: () => Promise<Array<{ types: readonly string[]; getType?: (type: string) => Promise<Blob> }>>
+  }
+
+  if (typeof clipboard?.read !== 'function') {
+    return null
+  }
+
+  try {
+    const items = await clipboard.read()
+
+    for (const item of items) {
+      const mimeType = item.types.find((type) => type.startsWith('image/'))
+
+      if (!mimeType || typeof item.getType !== 'function') {
+        continue
+      }
+
+      const blob = await item.getType(mimeType)
+
+      if (blob.size === 0) {
+        continue
+      }
+
+      return new File([blob], getClipboardImageName(mimeType), {
+        type: mimeType,
+        lastModified: Date.now(),
+      })
+    }
+  } catch {
+    return null
+  }
+
+  return null
+}
+
+async function getPastedImageSource(dataTransfer?: DataTransfer | null): Promise<PastedImageSource | null> {
+  const file = getClipboardImageFile(dataTransfer)
+  if (file) {
+    return file
+  }
+
+  const browserClipboardFile = await readBrowserClipboardImageFile()
+  if (browserClipboardFile) {
+    return browserClipboardFile
+  }
+
+  const candidate = await readDesktopClipboardCandidate()
+  if (!candidate || (candidate.kind !== 'image_bytes' && candidate.kind !== 'image_file')) {
+    return null
+  }
+
+  return candidate
+}
+
+function hasReadableClipboardText(dataTransfer: DataTransfer) {
+  if (typeof dataTransfer.getData !== 'function') {
+    return false
+  }
+
+  return ['text/markdown', 'text/plain', 'text/html', 'Text'].some((type) => {
+    try {
+      return dataTransfer.getData(type).length > 0
+    } catch {
+      return false
+    }
+  })
+}
+
 function getSelectionOffsets(root: HTMLElement): SelectionOffsets | null {
   const selection = window.getSelection()
 
@@ -526,9 +655,13 @@ export function RichTextEditable({
   ariaLabel,
   onChange,
   onKeyDown,
+  onPasteImage,
+  onPasteStructuredContent,
+  onPasteDesktopContent,
   relationPages = [],
   onOpenPageRelation,
   onCreatePageRelation,
+  linkOpenMode = 'modifier',
 }: RichTextEditableProps) {
   const editableRef = useRef<HTMLDivElement | null>(null)
   const toolbarRef = useRef<HTMLDivElement | null>(null)
@@ -551,7 +684,7 @@ export function RichTextEditable({
     null,
   )
   const [isCreatingPageRelation, setIsCreatingPageRelation] = useState(false)
-  const isLinkOpenReady = Boolean(hoveredLinkHref && isModifierPressed)
+  const isLinkOpenReady = Boolean(hoveredLinkHref && (linkOpenMode === 'direct' || isModifierPressed))
 
   useLayoutEffect(() => {
     const element = editableRef.current
@@ -1057,7 +1190,7 @@ export function RichTextEditable({
       return
     }
 
-    if (event.ctrlKey || event.metaKey) {
+    if (linkOpenMode === 'direct' || event.ctrlKey || event.metaKey) {
       event.preventDefault()
     }
   }
@@ -1077,7 +1210,7 @@ export function RichTextEditable({
       return
     }
 
-    if (event.ctrlKey || event.metaKey) {
+    if (linkOpenMode === 'direct' || event.ctrlKey || event.metaKey) {
       event.preventDefault()
       event.stopPropagation()
       void openExternalLink(link.getAttribute('href') ?? link.href)
@@ -1200,6 +1333,55 @@ export function RichTextEditable({
     onKeyDown?.(event)
   }
 
+  function handlePaste(event: ReactClipboardEvent<HTMLDivElement>) {
+    const directFile = getClipboardImageFile(event.clipboardData)
+    if (directFile && onPasteImage) {
+      event.preventDefault()
+      void Promise.resolve(onPasteImage(directFile)).catch(() => undefined)
+      return
+    }
+
+    if (onPasteStructuredContent?.(event.clipboardData)) {
+      event.preventDefault()
+      return
+    }
+
+    if (!hasReadableClipboardText(event.clipboardData) && onPasteDesktopContent) {
+      void onPasteDesktopContent()
+        .then(({ handled, imageSource }) => {
+          if (handled || !onPasteImage) {
+            return
+          }
+
+          if (imageSource) {
+            return onPasteImage(imageSource)
+          }
+
+          return getPastedImageSource(event.clipboardData).then((source) => {
+            if (source) {
+              return onPasteImage(source)
+            }
+          })
+        })
+        .catch(() => undefined)
+      return
+    }
+
+    if (!onPasteImage) {
+      return
+    }
+
+    void getPastedImageSource(event.clipboardData)
+      .then((source) => {
+        if (!source) {
+          return
+        }
+
+        return onPasteImage(source)
+      })
+      .catch(() => undefined)
+  }
+
   return (
     <>
       <div
@@ -1227,6 +1409,7 @@ export function RichTextEditable({
         onMouseUp={refreshToolbar}
         onKeyUp={refreshToolbar}
         onKeyDown={handleEditorKeyDown}
+        onPaste={handlePaste}
       />
       {relationAutocomplete ? (
         <PageRelationAutocomplete

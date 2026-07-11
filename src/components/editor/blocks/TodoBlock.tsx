@@ -1,7 +1,12 @@
 import type { CSSProperties, KeyboardEventHandler } from 'react'
-import type { RichTextSegment } from '../../../domain/types'
+import type { ExternalLinkOpenMode, RichTextSegment } from '../../../domain/types'
 import type { PageRelationAutocompleteItem } from '../PageRelationAutocomplete'
-import { RichTextEditable, type RichTextEditableChange } from '../RichTextEditable'
+import {
+  RichTextEditable,
+  type DesktopPasteFallback,
+  type PastedImageSource,
+  type RichTextEditableChange,
+} from '../RichTextEditable'
 
 interface TodoBlockProps {
   text: string
@@ -10,9 +15,13 @@ interface TodoBlockProps {
   style?: CSSProperties
   onChange: (next: RichTextEditableChange & { checked: boolean }) => void
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>
+  onPasteImage?: (source: PastedImageSource) => Promise<void> | void
+  onPasteStructuredContent?: (clipboardData: DataTransfer) => boolean
+  onPasteDesktopContent?: () => Promise<DesktopPasteFallback>
   relationPages?: PageRelationAutocompleteItem[]
   onOpenPageRelation?: (pageId: string) => void
   onCreatePageRelation?: (title: string) => Promise<PageRelationAutocompleteItem>
+  linkOpenMode?: ExternalLinkOpenMode
 }
 
 export function TodoBlock({
@@ -22,9 +31,13 @@ export function TodoBlock({
   style,
   onChange,
   onKeyDown,
+  onPasteImage,
+  onPasteStructuredContent,
+  onPasteDesktopContent,
   relationPages,
   onOpenPageRelation,
   onCreatePageRelation,
+  linkOpenMode,
 }: TodoBlockProps) {
   return (
     <div className="todo-row">
@@ -42,9 +55,13 @@ export function TodoBlock({
         style={style}
         onChange={(next) => onChange({ ...next, checked })}
         onKeyDown={onKeyDown}
+        onPasteImage={onPasteImage}
+        onPasteStructuredContent={onPasteStructuredContent}
+        onPasteDesktopContent={onPasteDesktopContent}
         relationPages={relationPages}
         onOpenPageRelation={onOpenPageRelation}
         onCreatePageRelation={onCreatePageRelation}
+        linkOpenMode={linkOpenMode}
         placeholder="待办事项"
       />
     </div>

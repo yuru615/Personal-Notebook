@@ -20,6 +20,7 @@ interface DataTablePageProps {
   basePath: string
   breadcrumbs?: PageBreadcrumbItem[]
   headerActions?: ReactNode
+  adaptiveWidth?: boolean
   onChange: (snapshot: AppState) => void
   onRename: (title: string) => void
   onChangeIcon: (icon: string | null) => void
@@ -56,6 +57,7 @@ export function DataTablePage({
   basePath,
   breadcrumbs = [],
   headerActions,
+  adaptiveWidth = false,
   onChange,
   onRename,
   onChangeIcon,
@@ -84,7 +86,7 @@ export function DataTablePage({
   }, [dataTable?.id, route])
 
   return (
-    <section className="data-table-route-page">
+    <section className={adaptiveWidth ? 'data-table-route-page data-table-route-page-adaptive' : 'data-table-route-page'}>
       <div className="data-table-route-breadcrumb-row">
         <PageBreadcrumbs items={breadcrumbs} />
       </div>

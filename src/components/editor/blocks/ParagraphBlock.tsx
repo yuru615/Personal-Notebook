@@ -1,7 +1,12 @@
 import type { CSSProperties, KeyboardEventHandler } from 'react'
-import type { RichTextSegment } from '../../../domain/types'
+import type { ExternalLinkOpenMode, RichTextSegment } from '../../../domain/types'
 import type { PageRelationAutocompleteItem } from '../PageRelationAutocomplete'
-import { RichTextEditable, type RichTextEditableChange } from '../RichTextEditable'
+import {
+  RichTextEditable,
+  type DesktopPasteFallback,
+  type PastedImageSource,
+  type RichTextEditableChange,
+} from '../RichTextEditable'
 
 interface ParagraphBlockProps {
   value: string
@@ -12,9 +17,13 @@ interface ParagraphBlockProps {
   insertMode?: boolean
   onChange: (next: RichTextEditableChange) => void
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>
+  onPasteImage?: (source: PastedImageSource) => Promise<void> | void
+  onPasteStructuredContent?: (clipboardData: DataTransfer) => boolean
+  onPasteDesktopContent?: () => Promise<DesktopPasteFallback>
   relationPages?: PageRelationAutocompleteItem[]
   onOpenPageRelation?: (pageId: string) => void
   onCreatePageRelation?: (title: string) => Promise<PageRelationAutocompleteItem>
+  linkOpenMode?: ExternalLinkOpenMode
 }
 
 export function ParagraphBlock({
@@ -26,9 +35,13 @@ export function ParagraphBlock({
   insertMode = false,
   onChange,
   onKeyDown,
+  onPasteImage,
+  onPasteStructuredContent,
+  onPasteDesktopContent,
   relationPages,
   onOpenPageRelation,
   onCreatePageRelation,
+  linkOpenMode,
 }: ParagraphBlockProps) {
   const blockClassName =
     variant === 'paragraph' ? 'paragraph-block' : `paragraph-block ${variant}-block`
@@ -42,9 +55,13 @@ export function ParagraphBlock({
       style={style}
       onChange={onChange}
       onKeyDown={onKeyDown}
+      onPasteImage={onPasteImage}
+      onPasteStructuredContent={onPasteStructuredContent}
+      onPasteDesktopContent={onPasteDesktopContent}
       relationPages={relationPages}
       onOpenPageRelation={onOpenPageRelation}
       onCreatePageRelation={onCreatePageRelation}
+      linkOpenMode={linkOpenMode}
       placeholder={placeholder}
     />
   )

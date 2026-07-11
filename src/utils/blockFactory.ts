@@ -134,6 +134,7 @@ export function createBlock(
       }
     case 'video':
     case 'audio':
+    case 'file':
       return {
         id: createId('block'),
         type,

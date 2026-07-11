@@ -46,7 +46,9 @@ function toParagraphBlock(text: string, richText?: RichTextSegment[]): BlockReco
 }
 
 function hasApprovedMarks(segments: RichTextSegment[]) {
-  return segments.some((segment) => segment.bold || segment.italic || segment.underline || segment.link)
+  return segments.some(
+    (segment) => segment.bold || segment.italic || segment.underline || segment.strike || segment.link,
+  )
 }
 
 function keepApprovedMarks(segments: RichTextSegment[]) {
@@ -56,6 +58,7 @@ function keepApprovedMarks(segments: RichTextSegment[]) {
       ...(segment.bold ? { bold: true } : {}),
       ...(segment.italic ? { italic: true } : {}),
       ...(segment.underline ? { underline: true } : {}),
+      ...(segment.strike ? { strike: true } : {}),
       ...(segment.link ? { link: segment.link } : {}),
     })),
   )
@@ -86,6 +89,161 @@ function hasUnsupportedHtml(root: HTMLElement) {
 
 function readParagraphSegments(element: HTMLElement) {
   return keepApprovedMarks(readRichTextSegmentsFromElement(element))
+}
+
+function toStructuredTextBlock(
+  type: 'paragraph' | 'heading_1' | 'heading_2' | 'heading_3',
+  element: HTMLElement,
+): BlockRecord | null {
+  const richText = readParagraphSegments(element)
+  const text = richTextToPlainText(richText).trim()
+
+  if (!text) {
+    return null
+  }
+
+  return {
+    id: createId('block'),
+    type,
+    text,
+    ...(hasApprovedMarks(richText) ? { richText } : {}),
+  }
+}
+
+function getStructuredListItem(item: HTMLElement, type: 'bulleted_list' | 'numbered_list'): BlockRecord | null {
+  const content = item.cloneNode(true) as HTMLElement
+  const nestedLists = content.querySelectorAll('ul, ol')
+  nestedLists.forEach((list) => list.remove())
+  const checkbox = content.querySelector<HTMLInputElement>('input[type="checkbox"]')
+  const checked = checkbox?.checked ?? false
+  checkbox?.remove()
+  const richText = readParagraphSegments(content)
+  const text = richTextToPlainText(richText).trim()
+
+  if (!text) {
+    return null
+  }
+
+  if (checkbox) {
+    return {
+      id: createId('block'),
+      type: 'todo',
+      text,
+      checked,
+      ...(hasApprovedMarks(richText) ? { richText } : {}),
+    }
+  }
+
+  return {
+    id: createId('block'),
+    type,
+    items: [text],
+    ...(hasApprovedMarks(richText) ? { richText } : {}),
+  }
+}
+
+function getStructuredCodeBlock(element: HTMLElement): BlockRecord | null {
+  const code = element.querySelector('code')
+  const text = (code?.textContent ?? element.textContent ?? '').replace(/\r\n?/g, '\n').replace(/^\n+|\n+$/g, '')
+
+  if (!text) {
+    return null
+  }
+
+  const language =
+    code?.className.match(/(?:^|\s)language-([^\s]+)/)?.[1] ||
+    code?.getAttribute('data-language') ||
+    'text'
+
+  return { id: createId('block'), type: 'code', language, text }
+}
+
+function getStructuredTableBlock(element: HTMLElement): BlockRecord | null {
+  const rows = Array.from(element.querySelectorAll('tr'))
+    .map((row) =>
+      Array.from(row.querySelectorAll('th, td')).map((cell) => (cell.textContent ?? '').trim()),
+    )
+    .filter((row) => row.length > 0)
+
+  return rows.length > 0 ? { id: createId('block'), type: 'table', rows } : null
+}
+
+export function clipboardHtmlToStructuredBlocks(html: string): BlockRecord[] | null {
+  const container = document.createElement('div')
+  container.innerHTML = html
+
+  if (!container.querySelector('h1, h2, h3, ul, ol, pre, table')) {
+    return null
+  }
+
+  const blocks: BlockRecord[] = []
+  const appendElement = (element: HTMLElement): void => {
+    const tag = element.tagName.toLowerCase()
+
+    if (tag === 'h1' || tag === 'h2' || tag === 'h3') {
+      const block = toStructuredTextBlock(`heading_${tag[1]}` as 'heading_1' | 'heading_2' | 'heading_3', element)
+      if (block) {
+        blocks.push(block)
+      }
+      return
+    }
+
+    if (tag === 'ul' || tag === 'ol') {
+      const type = tag === 'ul' ? 'bulleted_list' : 'numbered_list'
+      Array.from(element.children)
+        .filter((child): child is HTMLElement => child instanceof HTMLElement && child.tagName.toLowerCase() === 'li')
+        .forEach((item) => {
+          const block = getStructuredListItem(item, type)
+          if (block) {
+            blocks.push(block)
+          }
+          Array.from(item.children)
+            .filter((child): child is HTMLElement => child instanceof HTMLElement && ['ul', 'ol'].includes(child.tagName.toLowerCase()))
+            .forEach(appendElement)
+        })
+      return
+    }
+
+    if (tag === 'pre') {
+      const block = getStructuredCodeBlock(element)
+      if (block) {
+        blocks.push(block)
+      }
+      return
+    }
+
+    if (tag === 'table') {
+      const block = getStructuredTableBlock(element)
+      if (block) {
+        blocks.push(block)
+      }
+      return
+    }
+
+    if (tag === 'div') {
+      const structuredChildren = Array.from(element.children).filter(
+        (child): child is HTMLElement =>
+          child instanceof HTMLElement && ['h1', 'h2', 'h3', 'p', 'div', 'ul', 'ol', 'pre', 'table'].includes(child.tagName.toLowerCase()),
+      )
+      if (structuredChildren.length > 0) {
+        structuredChildren.forEach(appendElement)
+        return
+      }
+    }
+
+    const block = toStructuredTextBlock('paragraph', element)
+    if (block) {
+      blocks.push(block)
+    }
+  }
+
+  Array.from(container.childNodes).forEach((child) => {
+    if (child instanceof HTMLElement) {
+      appendElement(child)
+    }
+  })
+
+  return blocks.length > 0 ? blocks : null
 }
 
 function sliceRichTextSegments(segments: RichTextSegment[], start: number, end: number) {

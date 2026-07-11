@@ -23,6 +23,7 @@ describe('media block layout', () => {
     const surface = cssRule('.media-block-surface')
     const image = cssRule('img.media-block-image')
     const trigger = cssRule('.media-block-image-trigger')
+    const focusedBlock = cssRule('.media-block:focus-visible')
 
     expect(preview).toContain('display: grid;')
     expect(preview).toContain('justify-items: start;')
@@ -35,6 +36,8 @@ describe('media block layout', () => {
     expect(image).toContain('height: auto;')
     expect(image).toContain('max-height: min(540px, 70vh);')
     expect(trigger).toContain('cursor: zoom-in;')
+    expect(focusedBlock).toContain('outline: 0;')
+    expect(focusedBlock).toContain('box-shadow:')
     expect(styles).not.toMatch(/(^|\n)\.media-block-image\s*[{,]/)
     expect(styles).not.toMatch(/(^|\n)\.media-block-video\s*[{,]/)
   })

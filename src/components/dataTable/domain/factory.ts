@@ -110,6 +110,7 @@ export function createDefaultDatabaseView(
     boardShowPropertyNames: true,
     ganttStartPropertyId: null,
     ganttEndPropertyId: null,
+    ganttTimelineScale: "day",
     calendarDatePropertyId: null,
     openMode: "sidePeek",
     tableWidthMode: "fitPage",

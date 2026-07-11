@@ -45,6 +45,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
             open_external_url,
+            open_asset_file,
             clipboard_capture::read_clipboard_candidate,
             clipboard_capture::set_clipboard_capture_enabled,
             clipboard_capture::take_confirmed_clipboard_capture,
@@ -112,6 +113,18 @@ fn open_external_url(url: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn open_asset_file(
+    state: tauri::State<'_, storage::StorageState>,
+    asset_id: String,
+) -> Result<(), String> {
+    let path = state
+        .with_storage(|storage| storage.get_asset_file_path(&asset_id))
+        .map_err(|error| error.to_string())?;
+
+    open_external_url_with_system(&path)
+}
+
+#[tauri::command]
 fn quit_app_after_pending_saves(app: tauri::AppHandle) {
     app.exit(0);
 }
@@ -128,7 +141,7 @@ fn open_external_url_with_system(url: &str) -> Result<(), String> {
     command
         .spawn()
         .map(|_| ())
-        .map_err(|error| format!("failed to open external URL: {error}"))
+        .map_err(|error| format!("failed to open with system: {error}"))
 }
 
 #[cfg(target_os = "windows")]

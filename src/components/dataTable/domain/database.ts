@@ -618,6 +618,10 @@ function normalizeDatabaseView(
     ganttEndPropertyId: canUseAsGanttDate(view?.ganttEndPropertyId)
       ? view?.ganttEndPropertyId ?? null
       : null,
+    ganttTimelineScale:
+      view?.ganttTimelineScale === "week" || view?.ganttTimelineScale === "month"
+        ? view.ganttTimelineScale
+        : "day",
     calendarDatePropertyId: canUseAsGanttDate(view?.calendarDatePropertyId)
       ? view?.calendarDatePropertyId ?? null
       : null,

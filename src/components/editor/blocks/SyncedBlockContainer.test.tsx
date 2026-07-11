@@ -196,7 +196,7 @@ describe('SyncedBlockContainer', () => {
       />,
     )
 
-    const image = await screen.findByRole('img', { name: 'Shared image' })
+    const image = await screen.findByRole('img', { name: 'shared.png' })
 
     expect(image).toHaveClass('media-block-image')
     expect(container.querySelector('.synced-block-complex-shell')).not.toBeInTheDocument()

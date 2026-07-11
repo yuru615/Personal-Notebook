@@ -106,6 +106,48 @@ describe('asset helpers', () => {
     expect(invoke).not.toHaveBeenCalled()
   })
 
+  it('imports a Markdown-relative image through the existing desktop asset pipeline', async () => {
+    Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    })
+    invoke.mockResolvedValue({
+      id: 'asset_markdown_image',
+      sha256: 'sha',
+      name: 'cover.png',
+      mimeType: 'image/png',
+      byteSize: 10,
+      relativePath: 'sh/sha.png',
+      createdAt: '2026-07-10T00:00:00.000Z',
+    })
+
+    const { importMarkdownImageAsset } = await import('./assets')
+
+    await expect(
+      importMarkdownImageAsset('C:\\notes\\guide.md', './images/cover.png'),
+    ).resolves.toMatchObject({ id: 'asset_markdown_image' })
+    expect(invoke).toHaveBeenCalledWith('import_asset_file', {
+      input: {
+        path: 'C:\\notes\\images\\cover.png',
+        mimeType: 'image/png',
+      },
+    })
+  })
+
+  it('does not import remote or non-image Markdown references', async () => {
+    Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    })
+    const { importMarkdownImageAsset } = await import('./assets')
+
+    await expect(
+      importMarkdownImageAsset('C:\\notes\\guide.md', 'https://example.com/cover.png'),
+    ).resolves.toBeNull()
+    await expect(importMarkdownImageAsset('C:\\notes\\guide.md', './notes.txt')).resolves.toBeNull()
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
   it('stores browser preview assets without Tauri', async () => {
     const { getAssetUrl, readAsset, writeAssetBytes } = await import('./assets')
 

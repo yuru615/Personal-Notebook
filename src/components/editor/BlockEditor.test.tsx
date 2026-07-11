@@ -1,10 +1,34 @@
 import { act, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import { BlockEditor } from './BlockEditor'
 import { createDefaultAppState } from '../dataTable/domain/factory'
+
+const assets = vi.hoisted(() => ({
+  writeAssetBytes: vi.fn(async () => ({
+    id: 'asset_pasted_image',
+    sha256: 'sha-pasted-image',
+    name: 'pasted-image.png',
+    mimeType: 'image/png',
+    byteSize: 4,
+    relativePath: 'paste/d-image.png',
+    createdAt: '2026-07-09T00:00:00.000Z',
+  })),
+}))
+
+const desktopLifecycle = vi.hoisted(() => ({
+  readDesktopClipboardCandidate: vi.fn(async () => null),
+}))
+
+vi.mock('../../lib/assets', () => ({
+  writeAssetBytes: assets.writeAssetBytes,
+}))
+
+vi.mock('../../lib/desktopLifecycle', () => ({
+  readDesktopClipboardCandidate: desktopLifecycle.readDesktopClipboardCandidate,
+}))
 
 const page = {
   id: 'page_a',
@@ -26,6 +50,24 @@ function dragOverAt(element: Element, clientY: number) {
   const event = createEvent.dragOver(element)
   Object.defineProperty(event, 'clientY', { value: clientY })
   fireEvent(element, event)
+}
+
+function pointerDownAt(element: Element | Window, clientX: number, clientY: number) {
+  act(() => {
+    fireEvent.pointerDown(element, { button: 0, clientX, clientY })
+  })
+}
+
+function pointerMoveAt(element: Element | Window, clientX: number, clientY: number) {
+  act(() => {
+    fireEvent.pointerMove(element, { buttons: 1, clientX, clientY })
+  })
+}
+
+function pointerUpAt(element: Element | Window, clientX: number, clientY: number) {
+  act(() => {
+    fireEvent.pointerUp(element, { button: 0, clientX, clientY })
+  })
 }
 
 function findTextNode(element: Node): Text {
@@ -69,6 +111,89 @@ function placeCaretAtEnd(element: HTMLElement) {
   window.getSelection()?.addRange(range)
 }
 
+function createClipboardImageFile(name = 'clipboard-source.png') {
+  return new File([new Uint8Array([137, 80, 78, 71])], name, {
+    type: 'image/png',
+  })
+}
+
+function createUnreadableClipboardImageFile(name = 'clipboard-source.png') {
+  const file = createClipboardImageFile(name)
+  Object.defineProperty(file, 'arrayBuffer', {
+    value: vi.fn(async () => {
+      throw new Error('clipboard file bytes unavailable')
+    }),
+  })
+  return file
+}
+
+function pasteImageInto(element: HTMLElement, file = createClipboardImageFile()) {
+  fireEvent.paste(element, {
+    clipboardData: {
+      files: [file],
+      items: [
+        {
+          kind: 'file',
+          type: file.type,
+          getAsFile: () => file,
+        },
+      ],
+    },
+  })
+}
+
+function pasteStructuredTextInto(
+  element: HTMLElement,
+  {
+    markdown = '',
+    html = '',
+    text = markdown,
+  }: { markdown?: string; html?: string; text?: string },
+) {
+  fireEvent.paste(element, {
+    clipboardData: {
+      files: [],
+      items: [],
+      getData: (type: string) =>
+        type === 'text/markdown' ? markdown : type === 'text/html' ? html : type === 'text/plain' ? text : '',
+    },
+  })
+}
+
+function pasteWithoutBrowserImagePayload(element: HTMLElement) {
+  fireEvent.paste(element, {
+    clipboardData: {
+      files: [],
+      items: [],
+    },
+  })
+}
+
+function mockBrowserClipboardImageRead(mimeType = 'image/png') {
+  const originalClipboard = navigator.clipboard
+  const read = vi.fn(async () => [
+    {
+      types: [mimeType],
+      getType: async () => new Blob([new Uint8Array([137, 80, 78, 71])], { type: mimeType }),
+    },
+  ])
+
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { read },
+  })
+
+  return {
+    read,
+    restore() {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: originalClipboard,
+      })
+    },
+  }
+}
+
 function getParagraphEditorByText(text: string) {
   const editor = screen
     .getAllByRole('textbox', { name: '输入正文' })
@@ -82,6 +207,434 @@ function getParagraphEditorByText(text: string) {
 }
 
 describe('BlockEditor', () => {
+  it('turns pasted markdown into blocks while retaining the source formatting', async () => {
+    const onUpdateBlock = vi.fn()
+    const onInsertBlockAfter = vi
+      .fn()
+      .mockResolvedValueOnce('pasted_paragraph')
+      .mockResolvedValueOnce('pasted_todo')
+    const emptyPage = {
+      ...page,
+      blocks: [{ id: 'b1', type: 'paragraph' as const, text: '' }],
+    }
+
+    render(
+      <BlockEditor
+        page={emptyPage as never}
+        allPages={[emptyPage as never]}
+        onUpdateBlock={onUpdateBlock}
+        onInsertBlockAfter={onInsertBlockAfter}
+      />,
+    )
+
+    pasteStructuredTextInto(screen.getByRole('textbox', { name: '输入正文' }), {
+      markdown: ['# 项目计划', '', '正文包含 **重点**。', '', '- [ ] 完成测试'].join('\n'),
+    })
+
+    await waitFor(() => {
+      expect(onUpdateBlock).toHaveBeenCalledWith(
+        'b1',
+        expect.objectContaining({ id: 'b1', type: 'heading_1', text: '项目计划' }),
+      )
+    })
+    expect(onInsertBlockAfter).toHaveBeenNthCalledWith(1, 'b1', 'paragraph')
+    expect(onInsertBlockAfter).toHaveBeenNthCalledWith(2, 'pasted_paragraph', 'todo')
+    expect(onUpdateBlock).toHaveBeenCalledWith(
+      'pasted_paragraph',
+      expect.objectContaining({
+        id: 'pasted_paragraph',
+        type: 'paragraph',
+        text: '正文包含 重点。',
+        richText: [{ text: '正文包含 ' }, { text: '重点', bold: true }, { text: '。' }],
+      }),
+    )
+    expect(onUpdateBlock).toHaveBeenCalledWith(
+      'pasted_todo',
+      expect.objectContaining({ id: 'pasted_todo', type: 'todo', text: '完成测试', checked: false }),
+    )
+  })
+
+  it('turns pasted markdown from the trailing empty row into blocks', async () => {
+    const onUpdateBlock = vi.fn()
+    const onInsert = vi.fn(async () => 'pasted_heading')
+    const onInsertBlockAfter = vi.fn(async () => 'pasted_paragraph')
+
+    render(
+      <BlockEditor
+        page={{ ...page, blocks: [] } as never}
+        allPages={[page as never]}
+        onUpdateBlock={onUpdateBlock}
+        onInsert={onInsert}
+        onInsertBlockAfter={onInsertBlockAfter}
+      />,
+    )
+
+    pasteStructuredTextInto(screen.getByPlaceholderText('输入 / 打开命令菜单') as HTMLElement, {
+      markdown: ['# 项目计划', '', '正文内容'].join('\n'),
+    })
+
+    await waitFor(() => {
+      expect(onInsert).toHaveBeenCalledWith('heading_1')
+    })
+    expect(onUpdateBlock).toHaveBeenCalledWith(
+      'pasted_heading',
+      expect.objectContaining({ id: 'pasted_heading', type: 'heading_1', text: '项目计划' }),
+    )
+    expect(onInsertBlockAfter).toHaveBeenCalledWith('pasted_heading', 'paragraph')
+    expect(onUpdateBlock).toHaveBeenCalledWith(
+      'pasted_paragraph',
+      expect.objectContaining({ id: 'pasted_paragraph', type: 'paragraph', text: '正文内容' }),
+    )
+  })
+
+  it('prefers formatted HTML when the markdown clipboard payload is plain text', async () => {
+    const onPasteBlocks = vi.fn()
+    const emptyPage = {
+      ...page,
+      blocks: [{ id: 'b1', type: 'paragraph' as const, text: '' }],
+    }
+
+    render(
+      <BlockEditor
+        page={emptyPage as never}
+        allPages={[emptyPage as never]}
+        onUpdateBlock={vi.fn()}
+        onPasteBlocks={onPasteBlocks}
+      />,
+    )
+
+    pasteStructuredTextInto(screen.getByRole('textbox', { name: '输入正文' }), {
+      markdown: '项目计划',
+      html: '<h1>项目计划</h1><p>这是 <strong>重点</strong>。</p>',
+      text: '项目计划\n这是重点。',
+    })
+
+    await waitFor(() => {
+      expect(onPasteBlocks).toHaveBeenCalledWith(
+        'b1',
+        [
+          expect.objectContaining({ type: 'heading_1', text: '项目计划' }),
+          expect.objectContaining({
+            type: 'paragraph',
+            text: '这是 重点。',
+            richText: [{ text: '这是 ' }, { text: '重点', bold: true }, { text: '。' }],
+          }),
+        ],
+        true,
+      )
+    })
+  })
+
+  it('uses desktop clipboard markdown when the WebView paste payload has no readable text', async () => {
+    const onPasteBlocks = vi.fn()
+    const emptyPage = {
+      ...page,
+      blocks: [{ id: 'b1', type: 'paragraph' as const, text: '' }],
+    }
+    desktopLifecycle.readDesktopClipboardCandidate.mockResolvedValueOnce({
+      kind: 'text',
+      text: ['# 项目计划', '', '正文包含 **重点**。', '', '- [ ] 完成测试'].join('\n'),
+      html: null,
+    })
+
+    render(
+      <BlockEditor
+        page={emptyPage as never}
+        allPages={[emptyPage as never]}
+        onUpdateBlock={vi.fn()}
+        onPasteBlocks={onPasteBlocks}
+      />,
+    )
+
+    pasteWithoutBrowserImagePayload(screen.getByRole('textbox', { name: '输入正文' }))
+
+    await waitFor(() => {
+      expect(onPasteBlocks).toHaveBeenCalledWith(
+        'b1',
+        [
+          expect.objectContaining({ type: 'heading_1', text: '项目计划' }),
+          expect.objectContaining({ type: 'paragraph', text: '正文包含 重点。' }),
+          expect.objectContaining({ type: 'todo', text: '完成测试', checked: false }),
+        ],
+        true,
+      )
+    })
+  })
+
+  it('falls back to the desktop clipboard image bytes when the browser paste payload is empty', async () => {
+    const onUpdateBlock = vi.fn()
+    const onInsertBlockAfter = vi.fn(async () => 'image-block')
+    const textPage = {
+      ...page,
+      blocks: [{ id: 'b1', type: 'paragraph' as const, text: '第一段' }],
+    }
+    desktopLifecycle.readDesktopClipboardCandidate.mockResolvedValueOnce({
+      kind: 'image_bytes',
+      bytes: new Uint8Array([137, 80, 78, 71]),
+    })
+
+    render(
+      <BlockEditor
+        page={textPage as never}
+        allPages={[textPage as never]}
+        onUpdateBlock={onUpdateBlock}
+        onInsertBlockAfter={onInsertBlockAfter}
+      />,
+    )
+
+    pasteWithoutBrowserImagePayload(screen.getByRole('textbox', { name: '输入正文' }))
+
+    await waitFor(() => {
+      expect(onInsertBlockAfter).toHaveBeenCalledWith('b1', 'image')
+    })
+    await waitFor(() => {
+      expect(onUpdateBlock).toHaveBeenCalledWith(
+        'image-block',
+        expect.objectContaining({
+          id: 'image-block',
+          type: 'image',
+          assetId: 'asset_pasted_image',
+          mimeType: 'image/png',
+        }),
+      )
+    })
+  })
+
+  it('falls back to the browser clipboard image when the paste payload is empty', async () => {
+    const onUpdateBlock = vi.fn()
+    const onInsertBlockAfter = vi.fn(async () => 'image-block')
+    const textPage = {
+      ...page,
+      blocks: [{ id: 'b1', type: 'paragraph' as const, text: 'First block' }],
+    }
+    const clipboard = mockBrowserClipboardImageRead()
+
+    try {
+      render(
+        <BlockEditor
+          page={textPage as never}
+          allPages={[textPage as never]}
+          onUpdateBlock={onUpdateBlock}
+          onInsertBlockAfter={onInsertBlockAfter}
+        />,
+      )
+
+      pasteWithoutBrowserImagePayload(screen.getByRole('textbox', { name: '输入正文' }))
+
+      await waitFor(() => {
+        expect(clipboard.read).toHaveBeenCalledTimes(1)
+      })
+      await waitFor(() => {
+        expect(onInsertBlockAfter).toHaveBeenCalledWith('b1', 'image')
+      })
+      await waitFor(() => {
+        expect(onUpdateBlock).toHaveBeenCalledWith(
+          'image-block',
+          expect.objectContaining({
+            id: 'image-block',
+            type: 'image',
+            assetId: 'asset_pasted_image',
+            mimeType: 'image/png',
+          }),
+        )
+      })
+    } finally {
+      clipboard.restore()
+    }
+  })
+
+  it('falls back to the desktop clipboard image when the browser exposes an unreadable image file', async () => {
+    const onUpdateBlock = vi.fn()
+    const onInsertBlockAfter = vi.fn(async () => 'image-block')
+    /*
+    const textPage = {
+      ...page,
+      blocks: [{ id: 'b1', type: 'paragraph' as const, text: '绗竴娈? }],
+    }
+    */
+    const textPage = {
+      ...page,
+      blocks: [{ id: 'b1', type: 'paragraph' as const, text: 'First block' }],
+    }
+    desktopLifecycle.readDesktopClipboardCandidate.mockResolvedValueOnce({
+      kind: 'image_bytes',
+      bytes: new Uint8Array([137, 80, 78, 71]),
+    })
+
+    render(
+      <BlockEditor
+        page={textPage as never}
+        allPages={[textPage as never]}
+        onUpdateBlock={onUpdateBlock}
+        onInsertBlockAfter={onInsertBlockAfter}
+      />,
+    )
+
+    pasteImageInto(
+      screen.getByRole('textbox', { name: '输入正文' }),
+      createUnreadableClipboardImageFile(),
+    )
+
+    await waitFor(() => {
+      expect(onInsertBlockAfter).toHaveBeenCalledWith('b1', 'image')
+    })
+    await waitFor(() => {
+      expect(onUpdateBlock).toHaveBeenCalledWith(
+        'image-block',
+        expect.objectContaining({
+          id: 'image-block',
+          type: 'image',
+          assetId: 'asset_pasted_image',
+          mimeType: 'image/png',
+        }),
+      )
+    })
+  })
+
+  it('inserts a pasted image as an image block after a non-empty text block', async () => {
+    const onUpdateBlock = vi.fn()
+    const onInsertBlockAfter = vi.fn(async () => 'image-block')
+    const textPage = {
+      ...page,
+      blocks: [{ id: 'b1', type: 'paragraph' as const, text: '第一段' }],
+    }
+
+    render(
+      <BlockEditor
+        page={textPage as never}
+        allPages={[textPage as never]}
+        onUpdateBlock={onUpdateBlock}
+        onInsertBlockAfter={onInsertBlockAfter}
+      />,
+    )
+
+    pasteImageInto(screen.getByRole('textbox', { name: '输入正文' }))
+
+    await waitFor(() => {
+      expect(onInsertBlockAfter).toHaveBeenCalledWith('b1', 'image')
+    })
+    await waitFor(() => {
+      expect(onUpdateBlock).toHaveBeenCalledWith(
+        'image-block',
+        expect.objectContaining({
+          id: 'image-block',
+          type: 'image',
+          assetId: 'asset_pasted_image',
+          name: 'pasted-image.png',
+          mimeType: 'image/png',
+          alt: 'pasted-image.png',
+        }),
+      )
+    })
+  })
+
+  it('inserts a pasted image from the trailing empty row', async () => {
+    const onUpdateBlock = vi.fn()
+    const onInsert = vi.fn(async () => 'image-block')
+
+    render(
+      <BlockEditor
+        page={{ ...page, blocks: [] } as never}
+        allPages={[page as never]}
+        onUpdateBlock={onUpdateBlock}
+        onInsert={onInsert}
+      />,
+    )
+
+    pasteImageInto(screen.getByPlaceholderText('输入 / 打开命令菜单') as HTMLElement)
+
+    await waitFor(() => {
+      expect(onInsert).toHaveBeenCalledWith('image')
+    })
+    await waitFor(() => {
+      expect(onUpdateBlock).toHaveBeenCalledWith(
+        'image-block',
+        expect.objectContaining({
+          id: 'image-block',
+          type: 'image',
+          assetId: 'asset_pasted_image',
+          name: 'pasted-image.png',
+          mimeType: 'image/png',
+          alt: 'pasted-image.png',
+        }),
+      )
+    })
+  })
+
+  it('falls back to the browser clipboard image from the trailing empty row when the paste payload is empty', async () => {
+    const onUpdateBlock = vi.fn()
+    const onInsert = vi.fn(async () => 'image-block')
+    const clipboard = mockBrowserClipboardImageRead()
+
+    try {
+      render(
+        <BlockEditor
+          page={{ ...page, blocks: [] } as never}
+          allPages={[page as never]}
+          onUpdateBlock={onUpdateBlock}
+          onInsert={onInsert}
+        />,
+      )
+
+      pasteWithoutBrowserImagePayload(screen.getByPlaceholderText('输入 / 打开命令菜单') as HTMLElement)
+
+      await waitFor(() => {
+        expect(clipboard.read).toHaveBeenCalledTimes(1)
+      })
+      await waitFor(() => {
+        expect(onInsert).toHaveBeenCalledWith('image')
+      })
+      await waitFor(() => {
+        expect(onUpdateBlock).toHaveBeenCalledWith(
+          'image-block',
+          expect.objectContaining({
+            id: 'image-block',
+            type: 'image',
+            assetId: 'asset_pasted_image',
+            mimeType: 'image/png',
+          }),
+        )
+      })
+    } finally {
+      clipboard.restore()
+    }
+  })
+
+  it('turns an empty text block into an image block before applying a pasted image', async () => {
+    const onUpdateBlock = vi.fn()
+    const onTurnInto = vi.fn(async () => undefined)
+    const textPage = {
+      ...page,
+      blocks: [{ id: 'b1', type: 'paragraph' as const, text: '' }],
+    }
+
+    render(
+      <BlockEditor
+        page={textPage as never}
+        allPages={[textPage as never]}
+        onUpdateBlock={onUpdateBlock}
+        onTurnInto={onTurnInto}
+      />,
+    )
+
+    pasteImageInto(screen.getByRole('textbox', { name: '输入正文' }))
+
+    await waitFor(() => {
+      expect(onTurnInto).toHaveBeenCalledWith('b1', 'image')
+    })
+    await waitFor(() => {
+      expect(onUpdateBlock).toHaveBeenCalledWith(
+        'b1',
+        expect.objectContaining({
+          id: 'b1',
+          type: 'image',
+          assetId: 'asset_pasted_image',
+          mimeType: 'image/png',
+        }),
+      )
+    })
+  })
+
   it('renders all core block types', () => {
     render(<BlockEditor page={page as never} allPages={[page as never]} onUpdateBlock={vi.fn()} />)
 
@@ -927,6 +1480,912 @@ describe('BlockEditor', () => {
     expect(onReorderBlock).toHaveBeenCalledWith('b1', 'b2', 'after')
   })
 
+  it('selects rows with a marquee that starts in the safe zone', () => {
+    const { container } = render(
+      <BlockEditor
+        page={page as never}
+        allPages={[page as never]}
+        onUpdateBlock={vi.fn()}
+        blockSelectionStartMode="safe_zone_only"
+      />,
+    )
+
+    const surface = container.querySelector('.editor-surface')
+    const rows = Array.from(container.querySelectorAll('.editor-row'))
+    if (!(surface instanceof HTMLElement)) {
+      throw new Error('Expected editor surface')
+    }
+
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 480,
+      bottom: 320,
+      width: 480,
+      height: 320,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect)
+
+    rows.forEach((row, index) => {
+      vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({
+        left: 0,
+        top: 16 + index * 48,
+        right: 420,
+        bottom: 56 + index * 48,
+        width: 420,
+        height: 40,
+        x: 0,
+        y: 16 + index * 48,
+        toJSON: () => ({}),
+      } as DOMRect)
+    })
+
+    pointerDownAt(surface, 12, 18)
+    pointerMoveAt(surface, 220, 120)
+
+    expect(rows[0]).toHaveClass('editor-row-selected')
+    expect(rows[1]).toHaveClass('editor-row-selected')
+    expect(container.querySelector('.editor-selection-marquee')).toBeInTheDocument()
+
+    pointerUpAt(surface, 220, 120)
+    expect(container.querySelector('.editor-selection-marquee')).not.toBeInTheDocument()
+  })
+
+  it('starts marquee selection from the empty area below the final block when content selection is allowed', () => {
+    const getBoundingClientRect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function () {
+        const element = this as HTMLElement
+
+        if (element.classList.contains('editor-row')) {
+          return {
+            bottom: 120,
+            height: 24,
+            left: 0,
+            right: 760,
+            top: 96,
+            width: 760,
+            x: 0,
+            y: 96,
+            toJSON: () => ({}),
+          } as DOMRect
+        }
+
+        return {
+          bottom: 0,
+          height: 0,
+          left: 0,
+          right: 0,
+          top: 0,
+          width: 0,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect
+      })
+    const textPage = {
+      ...page,
+      blocks: [{ id: 'b1', type: 'paragraph' as const, text: '' }],
+    }
+
+    try {
+      const { container } = render(
+        <BlockEditor
+          page={textPage as never}
+          allPages={[textPage as never]}
+          onUpdateBlock={vi.fn()}
+          blockSelectionStartMode="content_allowed"
+        />,
+      )
+      const surface = container.querySelector('.editor-surface')
+      const row = container.querySelector('.editor-row')
+      if (!(surface instanceof HTMLElement) || !(row instanceof HTMLElement)) {
+        throw new Error('Expected editor surface and row')
+      }
+
+      pointerDownAt(surface, 180, 180)
+      pointerMoveAt(window, 220, 80)
+
+      expect(row).toHaveClass('editor-row-selected')
+    } finally {
+      getBoundingClientRect.mockRestore()
+    }
+  })
+
+  it('keeps every block in the marquee range while the page scrolls', () => {
+    const originalScrollY = Object.getOwnPropertyDescriptor(window, 'scrollY')
+    let scrollY = 0
+    Object.defineProperty(window, 'scrollY', {
+      configurable: true,
+      get: () => scrollY,
+    })
+
+    const { container } = render(
+      <BlockEditor
+        page={page as never}
+        allPages={[page as never]}
+        onUpdateBlock={vi.fn()}
+        blockSelectionStartMode="content_allowed"
+      />,
+    )
+    const surface = container.querySelector('.editor-surface')
+    const rows = Array.from(container.querySelectorAll<HTMLElement>('.editor-row'))
+    if (!(surface instanceof HTMLElement)) {
+      throw new Error('Expected editor surface')
+    }
+
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 480,
+      bottom: 320,
+      width: 480,
+      height: 320,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect)
+    rows.forEach((row, index) => {
+      vi.spyOn(row, 'getBoundingClientRect').mockImplementation(() => {
+        const top = 16 + index * 48 - scrollY
+        return {
+          left: 0,
+          top,
+          right: 420,
+          bottom: top + 40,
+          width: 420,
+          height: 40,
+          x: 0,
+          y: top,
+          toJSON: () => ({}),
+        } as DOMRect
+      })
+    })
+
+    try {
+      pointerDownAt(surface, 180, 18)
+      pointerMoveAt(window, 280, 100)
+
+      scrollY = 100
+      fireEvent.scroll(window)
+      pointerMoveAt(window, 280, 100)
+
+      rows.forEach((row) => {
+        expect(row).toHaveClass('editor-row-selected')
+      })
+    } finally {
+      if (originalScrollY) {
+        Object.defineProperty(window, 'scrollY', originalScrollY)
+      } else {
+        Reflect.deleteProperty(window, 'scrollY')
+      }
+    }
+  })
+
+  it('starts marquee selection from a dedicated block gutter without handing the drag to native text selection', () => {
+    const { container } = render(
+      <BlockEditor
+        page={page as never}
+        allPages={[page as never]}
+        onUpdateBlock={vi.fn()}
+        blockSelectionStartMode="safe_zone_only"
+      />,
+    )
+
+    const surface = container.querySelector('.editor-surface')
+    const rows = Array.from(container.querySelectorAll('.editor-row'))
+    const gutters = Array.from(container.querySelectorAll('.block-selection-gutter'))
+    if (!(surface instanceof HTMLElement)) {
+      throw new Error('Expected editor surface')
+    }
+
+    expect(gutters).toHaveLength(page.blocks.length)
+
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 480,
+      bottom: 320,
+      width: 480,
+      height: 320,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect)
+
+    rows.forEach((row, index) => {
+      vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({
+        left: 0,
+        top: 16 + index * 48,
+        right: 420,
+        bottom: 56 + index * 48,
+        width: 420,
+        height: 40,
+        x: 0,
+        y: 16 + index * 48,
+        toJSON: () => ({}),
+      } as DOMRect)
+    })
+
+    const pointerDown = createEvent.pointerDown(gutters[0], { button: 0, clientX: 12, clientY: 18 })
+    fireEvent(gutters[0], pointerDown)
+    pointerMoveAt(window, 220, 120)
+
+    expect(pointerDown.defaultPrevented).toBe(true)
+    expect(rows[0]).toHaveClass('editor-row-selected')
+    expect(rows[1]).toHaveClass('editor-row-selected')
+  })
+
+  it('starts marquee selection from the page side area outside a centered body', () => {
+    function SelectionHost() {
+      const selectionHostRef = useRef<HTMLDivElement>(null)
+
+      return (
+        <div ref={selectionHostRef} data-testid="selection-host">
+          <BlockEditor
+            page={page as never}
+            allPages={[page as never]}
+            onUpdateBlock={vi.fn()}
+            blockSelectionStartMode="safe_zone_only"
+            selectionHostRef={selectionHostRef}
+          />
+        </div>
+      )
+    }
+
+    const { container } = render(<SelectionHost />)
+    const host = screen.getByTestId('selection-host')
+    const surface = container.querySelector('.editor-surface')
+    const rows = Array.from(container.querySelectorAll('.editor-row'))
+    if (!(surface instanceof HTMLElement)) {
+      throw new Error('Expected editor surface')
+    }
+
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      left: 120,
+      top: 0,
+      right: 880,
+      bottom: 320,
+      width: 760,
+      height: 320,
+      x: 120,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect)
+
+    rows.forEach((row, index) => {
+      vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({
+        left: 120,
+        top: 16 + index * 48,
+        right: 840,
+        bottom: 56 + index * 48,
+        width: 720,
+        height: 40,
+        x: 120,
+        y: 16 + index * 48,
+        toJSON: () => ({}),
+      } as DOMRect)
+    })
+
+    fireEvent.pointerDown(host, { button: 0, clientX: 28, clientY: 18 })
+    pointerMoveAt(window, 220, 120)
+
+    expect(rows[0]).toHaveClass('editor-row-selected')
+    expect(rows[1]).toHaveClass('editor-row-selected')
+  })
+
+  it('clears a marquee selection when clicking a text block in safe-zone mode', () => {
+    const { container } = render(
+      <BlockEditor
+        page={page as never}
+        allPages={[page as never]}
+        onUpdateBlock={vi.fn()}
+        blockSelectionStartMode="safe_zone_only"
+      />,
+    )
+
+    const surface = container.querySelector('.editor-surface')
+    const rows = Array.from(container.querySelectorAll('.editor-row'))
+    const gutter = container.querySelector('.block-selection-gutter')
+    const textBlock = screen.getByRole('textbox', { name: '输入正文' })
+    if (!(surface instanceof HTMLElement) || !(gutter instanceof HTMLElement)) {
+      throw new Error('Expected selection surface and gutter')
+    }
+
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 480,
+      bottom: 320,
+      width: 480,
+      height: 320,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect)
+
+    rows.forEach((row, index) => {
+      vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({
+        left: 0,
+        top: 16 + index * 48,
+        right: 420,
+        bottom: 56 + index * 48,
+        width: 420,
+        height: 40,
+        x: 0,
+        y: 16 + index * 48,
+        toJSON: () => ({}),
+      } as DOMRect)
+    })
+
+    pointerDownAt(gutter, 12, 18)
+    pointerMoveAt(window, 220, 120)
+    pointerUpAt(window, 220, 120)
+    expect(container.querySelector('.editor-row-selected')).toBeInTheDocument()
+
+    fireEvent.pointerDown(textBlock, { button: 0, clientX: 180, clientY: 18 })
+    fireEvent.pointerUp(textBlock, { button: 0, clientX: 180, clientY: 18 })
+
+    expect(container.querySelector('.editor-row-selected')).not.toBeInTheDocument()
+  })
+
+  it('deletes a finished marquee selection with the Delete key', () => {
+    const onDeleteBlocks = vi.fn()
+    const { container } = render(
+      <BlockEditor
+        page={page as never}
+        allPages={[page as never]}
+        onUpdateBlock={vi.fn()}
+        onDeleteBlocks={onDeleteBlocks}
+        blockSelectionStartMode="safe_zone_only"
+      />,
+    )
+
+    const surface = container.querySelector('.editor-surface')
+    const rows = Array.from(container.querySelectorAll('.editor-row'))
+    const gutter = container.querySelector('.block-selection-gutter')
+    if (!(surface instanceof HTMLElement) || !(gutter instanceof HTMLElement)) {
+      throw new Error('Expected selection surface and gutter')
+    }
+
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 480,
+      bottom: 320,
+      width: 480,
+      height: 320,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect)
+
+    rows.forEach((row, index) => {
+      vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({
+        left: 0,
+        top: 16 + index * 48,
+        right: 420,
+        bottom: 56 + index * 48,
+        width: 420,
+        height: 40,
+        x: 0,
+        y: 16 + index * 48,
+        toJSON: () => ({}),
+      } as DOMRect)
+    })
+
+    pointerDownAt(gutter, 12, 18)
+    pointerMoveAt(window, 220, 120)
+    pointerUpAt(window, 220, 120)
+
+    expect(surface).toHaveFocus()
+    fireEvent.keyDown(surface, { key: 'Delete' })
+
+    expect(onDeleteBlocks).toHaveBeenCalledWith(['b1', 'b2', 'b3'])
+  })
+
+  it('does not start selection from the content area in safe-zone mode, but does in content-allowed mode', () => {
+    const first = render(
+      <BlockEditor
+        page={page as never}
+        allPages={[page as never]}
+        onUpdateBlock={vi.fn()}
+        blockSelectionStartMode="safe_zone_only"
+      />,
+    )
+
+    const firstSurface = first.container.querySelector('.editor-surface')
+    if (!(firstSurface instanceof HTMLElement)) {
+      throw new Error('Expected first editor surface')
+    }
+
+    pointerDownAt(firstSurface, 180, 18)
+    pointerMoveAt(firstSurface, 280, 120)
+    expect(first.container.querySelector('.editor-row-selected')).not.toBeInTheDocument()
+    pointerUpAt(firstSurface, 280, 120)
+
+    const second = render(
+      <BlockEditor
+        page={page as never}
+        allPages={[page as never]}
+        onUpdateBlock={vi.fn()}
+        blockSelectionStartMode="content_allowed"
+      />,
+    )
+
+    const secondSurface = second.container.querySelector('.editor-surface')
+    const secondRows = Array.from(second.container.querySelectorAll('.editor-row'))
+    if (!(secondSurface instanceof HTMLElement)) {
+      throw new Error('Expected second editor surface')
+    }
+
+    vi.spyOn(secondSurface, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 480,
+      bottom: 320,
+      width: 480,
+      height: 320,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect)
+
+    secondRows.forEach((row, index) => {
+      vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({
+        left: 0,
+        top: 16 + index * 48,
+        right: 420,
+        bottom: 56 + index * 48,
+        width: 420,
+        height: 40,
+        x: 0,
+        y: 16 + index * 48,
+        toJSON: () => ({}),
+      } as DOMRect)
+    })
+
+    pointerDownAt(secondSurface, 180, 18)
+    pointerMoveAt(secondSurface, 280, 120)
+
+    expect(secondRows[0]).toHaveClass('editor-row-selected')
+    pointerUpAt(secondSurface, 280, 120)
+  })
+
+  it('preserves native text selection in editable content when content selection is allowed', () => {
+    const { container } = render(
+      <BlockEditor
+        page={page as never}
+        allPages={[page as never]}
+        onUpdateBlock={vi.fn()}
+        blockSelectionStartMode="content_allowed"
+      />,
+    )
+
+    const surface = container.querySelector('.editor-surface')
+    const rows = Array.from(container.querySelectorAll('.editor-row'))
+    const editable = screen.getByRole('textbox', { name: '输入正文' })
+    if (!(surface instanceof HTMLElement)) {
+      throw new Error('Expected editor surface')
+    }
+
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 480,
+      bottom: 320,
+      width: 480,
+      height: 320,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect)
+
+    rows.forEach((row, index) => {
+      vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({
+        left: 0,
+        top: 16 + index * 48,
+        right: 420,
+        bottom: 56 + index * 48,
+        width: 420,
+        height: 40,
+        x: 0,
+        y: 16 + index * 48,
+        toJSON: () => ({}),
+      } as DOMRect)
+    })
+
+    const pointerDown = createEvent.pointerDown(editable, { button: 0, clientX: 180, clientY: 18 })
+    fireEvent(editable, pointerDown)
+    pointerMoveAt(window, 280, 40)
+
+    expect(pointerDown.defaultPrevented).toBe(false)
+    expect(container.querySelector('.editor-row-selected')).not.toBeInTheDocument()
+    pointerUpAt(window, 280, 120)
+  })
+
+  it('keeps a text range across adjacent rich-text blocks in safe selection mode', () => {
+    const selectionPage = {
+      ...page,
+      blocks: [
+        { id: 'selection_first', type: 'paragraph' as const, text: '第一段文字' },
+        { id: 'selection_second', type: 'paragraph' as const, text: '第二段文字' },
+      ],
+    }
+    const { container } = render(
+      <BlockEditor
+        page={selectionPage as never}
+        allPages={[selectionPage as never]}
+        onUpdateBlock={vi.fn()}
+        blockSelectionStartMode="safe_zone_only"
+      />,
+    )
+
+    const surface = container.querySelector('.editor-surface')
+    const rows = Array.from(container.querySelectorAll('.editor-row'))
+    const editables = screen.getAllByRole('textbox', { name: '输入正文' })
+    if (!(surface instanceof HTMLElement) || editables.length < 2) {
+      throw new Error('Expected two rich-text blocks')
+    }
+
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 480,
+      bottom: 320,
+      width: 480,
+      height: 320,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect)
+    rows.forEach((row, index) => {
+      vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({
+        left: 0,
+        top: 16 + index * 48,
+        right: 420,
+        bottom: 56 + index * 48,
+        width: 420,
+        height: 40,
+        x: 0,
+        y: 16 + index * 48,
+        toJSON: () => ({}),
+      } as DOMRect)
+    })
+
+    const firstEditable = editables[0]
+    const secondEditable = editables[1]
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: (_x: number, y: number) => (y < 64 ? firstEditable : secondEditable),
+    })
+    const caretRangeFromPoint = vi.fn((_x: number, y: number) => {
+      const range = document.createRange()
+      range.selectNodeContents(y < 64 ? firstEditable : secondEditable)
+      range.collapse(y < 64)
+      return range
+    })
+    Object.defineProperty(document, 'caretRangeFromPoint', {
+      configurable: true,
+      value: caretRangeFromPoint,
+    })
+
+    pointerDownAt(firstEditable, 180, 20)
+    pointerMoveAt(window, 280, 82)
+
+    expect(container.querySelector('.editor-row-selected')).not.toBeInTheDocument()
+    expect(caretRangeFromPoint).toHaveBeenCalledTimes(2)
+    expect(window.getSelection()?.toString()).toContain(firstEditable.textContent)
+    expect(window.getSelection()?.toString()).toContain(secondEditable.textContent)
+    pointerUpAt(window, 280, 82)
+  })
+
+  it('switches to marquee selection when an editable drag leaves its starting block row', () => {
+    const { container } = render(
+      <BlockEditor
+        page={page as never}
+        allPages={[page as never]}
+        onUpdateBlock={vi.fn()}
+        blockSelectionStartMode="content_allowed"
+      />,
+    )
+
+    const surface = container.querySelector('.editor-surface')
+    const rows = Array.from(container.querySelectorAll('.editor-row'))
+    const editable = screen.getByRole('textbox', { name: '输入正文' })
+    if (!(surface instanceof HTMLElement)) {
+      throw new Error('Expected editor surface')
+    }
+
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 480,
+      bottom: 320,
+      width: 480,
+      height: 320,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect)
+
+    rows.forEach((row, index) => {
+      vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({
+        left: 0,
+        top: 16 + index * 48,
+        right: 420,
+        bottom: 56 + index * 48,
+        width: 420,
+        height: 40,
+        x: 0,
+        y: 16 + index * 48,
+        toJSON: () => ({}),
+      } as DOMRect)
+    })
+
+    pointerDownAt(editable, 180, 18)
+    pointerMoveAt(window, 280, 120)
+
+    expect(rows[0]).toHaveClass('editor-row-selected')
+    expect(rows[1]).toHaveClass('editor-row-selected')
+    pointerUpAt(window, 280, 120)
+  })
+
+  it('clears the selection with Escape, plain content click, and page change', async () => {
+    const user = userEvent.setup()
+    const firstPage = page
+    const secondPage = { ...page, id: 'page_b', blocks: page.blocks.slice(0, 2) }
+    const { container, rerender } = render(
+      <BlockEditor
+        page={firstPage as never}
+        allPages={[firstPage as never, secondPage as never]}
+        onUpdateBlock={vi.fn()}
+        blockSelectionStartMode="content_allowed"
+      />,
+    )
+
+    const surface = container.querySelector('.editor-surface')
+    const rows = Array.from(container.querySelectorAll('.editor-row'))
+    if (!(surface instanceof HTMLElement)) {
+      throw new Error('Expected editor surface')
+    }
+
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 480,
+      bottom: 320,
+      width: 480,
+      height: 320,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect)
+
+    rows.forEach((row, index) => {
+      vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({
+        left: 0,
+        top: 16 + index * 48,
+        right: 420,
+        bottom: 56 + index * 48,
+        width: 420,
+        height: 40,
+        x: 0,
+        y: 16 + index * 48,
+        toJSON: () => ({}),
+      } as DOMRect)
+    })
+
+    pointerDownAt(surface, 180, 18)
+    pointerMoveAt(surface, 280, 103)
+    pointerUpAt(surface, 280, 103)
+    expect(container.querySelector('.editor-row-selected')).toBeInTheDocument()
+
+    fireEvent.keyDown(surface, { key: 'Escape' })
+    expect(container.querySelector('.editor-row-selected')).not.toBeInTheDocument()
+
+    pointerDownAt(surface, 180, 18)
+    pointerMoveAt(surface, 280, 103)
+    pointerUpAt(surface, 280, 103)
+    expect(container.querySelector('.editor-row-selected')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('textbox', { name: '输入正文' }))
+    expect(container.querySelector('.editor-row-selected')).not.toBeInTheDocument()
+
+    pointerDownAt(surface, 180, 18)
+    pointerMoveAt(surface, 280, 103)
+    pointerUpAt(surface, 280, 103)
+    expect(container.querySelector('.editor-row-selected')).toBeInTheDocument()
+
+    rerender(
+      <BlockEditor
+        page={secondPage as never}
+        allPages={[firstPage as never, secondPage as never]}
+        onUpdateBlock={vi.fn()}
+        blockSelectionStartMode="content_allowed"
+      />,
+    )
+
+    expect(container.querySelector('.editor-row-selected')).not.toBeInTheDocument()
+  })
+
+  it('deletes the selected block group when pressing Delete', () => {
+    const onDeleteBlocks = vi.fn()
+    const { container } = render(
+      <BlockEditor
+        page={page as never}
+        allPages={[page as never]}
+        onUpdateBlock={vi.fn()}
+        onDeleteBlocks={onDeleteBlocks}
+        blockSelectionStartMode="content_allowed"
+      />,
+    )
+
+    const surface = container.querySelector('.editor-surface')
+    const rows = Array.from(container.querySelectorAll('.editor-row'))
+    if (!(surface instanceof HTMLElement)) {
+      throw new Error('Expected editor surface')
+    }
+
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 480,
+      bottom: 320,
+      width: 480,
+      height: 320,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect)
+
+    rows.forEach((row, index) => {
+      vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({
+        left: 0,
+        top: 16 + index * 48,
+        right: 420,
+        bottom: 56 + index * 48,
+        width: 420,
+        height: 40,
+        x: 0,
+        y: 16 + index * 48,
+        toJSON: () => ({}),
+      } as DOMRect)
+    })
+
+    pointerDownAt(surface, 180, 18)
+    pointerMoveAt(surface, 280, 120)
+    pointerUpAt(surface, 280, 120)
+
+    fireEvent.keyDown(surface, { key: 'Delete' })
+
+    expect(onDeleteBlocks).toHaveBeenCalledWith(['b1', 'b2', 'b3'])
+  })
+
+  it('reorders the selected block group when dragging from a selected handle', () => {
+    const onReorderBlockGroup = vi.fn()
+    const onReorderBlock = vi.fn()
+    const { container } = render(
+      <BlockEditor
+        page={page as never}
+        allPages={[page as never]}
+        onUpdateBlock={vi.fn()}
+        onReorderBlock={onReorderBlock}
+        onReorderBlockGroup={onReorderBlockGroup}
+        blockSelectionStartMode="content_allowed"
+      />,
+    )
+
+    const surface = container.querySelector('.editor-surface')
+    const rows = Array.from(container.querySelectorAll('.editor-row'))
+    const handles = screen.getAllByRole('button', { name: '拖动块' })
+    if (!(surface instanceof HTMLElement)) {
+      throw new Error('Expected editor surface')
+    }
+
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 480,
+      bottom: 320,
+      width: 480,
+      height: 320,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect)
+
+    rows.forEach((row, index) => {
+      vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({
+        left: 0,
+        top: 16 + index * 48,
+        right: 420,
+        bottom: 56 + index * 48,
+        width: 420,
+        height: 40,
+        x: 0,
+        y: 16 + index * 48,
+        toJSON: () => ({}),
+      } as DOMRect)
+    })
+
+    rows[3].getBoundingClientRect = () => ({ top: 180, bottom: 220, height: 40 } as DOMRect)
+
+    pointerDownAt(surface, 180, 18)
+    pointerMoveAt(surface, 280, 120)
+    pointerUpAt(surface, 280, 120)
+
+    fireEvent.dragStart(handles[0])
+    dragOverAt(rows[3], 190)
+    fireEvent.drop(rows[3])
+
+    expect(onReorderBlockGroup).toHaveBeenCalledWith(['b1', 'b2', 'b3'], 'b4', 'before')
+    expect(onReorderBlock).not.toHaveBeenCalled()
+  })
+
+  it('keeps single-block drag when the handle belongs to an unselected row', () => {
+    const onReorderBlockGroup = vi.fn()
+    const onReorderBlock = vi.fn()
+    const { container } = render(
+      <BlockEditor
+        page={page as never}
+        allPages={[page as never]}
+        onUpdateBlock={vi.fn()}
+        onReorderBlock={onReorderBlock}
+        onReorderBlockGroup={onReorderBlockGroup}
+        blockSelectionStartMode="content_allowed"
+      />,
+    )
+
+    const surface = container.querySelector('.editor-surface')
+    const rows = Array.from(container.querySelectorAll('.editor-row'))
+    const handles = screen.getAllByRole('button', { name: '拖动块' })
+    if (!(surface instanceof HTMLElement)) {
+      throw new Error('Expected editor surface')
+    }
+
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 480,
+      bottom: 320,
+      width: 480,
+      height: 320,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect)
+
+    rows.forEach((row, index) => {
+      vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({
+        left: 0,
+        top: 16 + index * 48,
+        right: 420,
+        bottom: 56 + index * 48,
+        width: 420,
+        height: 40,
+        x: 0,
+        y: 16 + index * 48,
+        toJSON: () => ({}),
+      } as DOMRect)
+    })
+
+    rows[0].getBoundingClientRect = () => ({ top: 60, bottom: 100, height: 40 } as DOMRect)
+
+    pointerDownAt(surface, 180, 18)
+    pointerMoveAt(surface, 280, 120)
+    pointerUpAt(surface, 280, 120)
+
+    fireEvent.dragStart(handles[3])
+    dragOverAt(rows[0], 70)
+    fireEvent.drop(rows[0])
+
+    expect(onReorderBlock).toHaveBeenCalledWith('b4', 'b1', 'before')
+    expect(onReorderBlockGroup).not.toHaveBeenCalled()
+  })
+
   it('creates a paragraph block after a text block when pressing Enter', () => {
     const onInsertBlockAfter = vi.fn(() => 'new-block')
 
@@ -1069,7 +2528,7 @@ describe('BlockEditor', () => {
     )
 
     const editor = screen.getByRole('textbox', { name: '每行一个列表项' })
-    editor.setSelectionRange(editor.value.length, editor.value.length)
+    placeCaretAtEnd(editor)
     fireEvent.keyDown(editor, { key: 'ArrowDown' })
 
     expect(screen.getByPlaceholderText('输入 / 打开命令菜单')).toHaveFocus()
@@ -1384,7 +2843,7 @@ describe('BlockEditor', () => {
       />,
     )
 
-    fireEvent.keyDown(screen.getByDisplayValue('第一项'), { key: 'Enter' })
+    fireEvent.keyDown(screen.getByRole('textbox', { name: '每行一个列表项' }), { key: 'Enter' })
 
     expect(onInsertBlockAfter).toHaveBeenCalledWith('b1', 'bulleted_list')
   })
@@ -1408,7 +2867,7 @@ describe('BlockEditor', () => {
     )
 
     const editor = screen.getByRole('textbox', { name: '每行一个列表项' })
-    fireEvent.change(editor, { target: { value: '风格化' } })
+    editor.textContent = '风格化'
     fireEvent.keyDown(editor, { key: 'Enter' })
 
     expect(onInsertBlockAfter).toHaveBeenCalledWith('b1', 'bulleted_list')
@@ -1431,9 +2890,9 @@ describe('BlockEditor', () => {
       />,
     )
 
-    fireEvent.change(screen.getByRole('textbox', { name: '每行一个列表项' }), {
-      target: { value: '第一行\n第二行' },
-    })
+    const editor = screen.getByRole('textbox', { name: '每行一个列表项' })
+    editor.textContent = '第一行\n第二行'
+    fireEvent.input(editor)
 
     expect(onUpdateBlock).toHaveBeenCalledWith('b1', {
       ...listBlock,
@@ -1526,6 +2985,77 @@ describe('BlockEditor', () => {
     fireEvent.keyDown(emptyInput, { key: 'Backspace' })
 
     expect(onDeleteBlock).toHaveBeenCalledWith('b2')
+  })
+
+  it('continues deleting upward through an image block when Backspace starts from the empty paragraph below it', async () => {
+    function MediaDeleteHarness() {
+      const [currentPage, setCurrentPage] = useState({
+        ...page,
+        blocks: [
+          { id: 'b1', type: 'paragraph' as const, text: 'Alpha' },
+          {
+            id: 'b2',
+            type: 'image' as const,
+            assetId: null,
+            name: '',
+            mimeType: '',
+            caption: '',
+            alt: '',
+          },
+          { id: 'b3', type: 'paragraph' as const, text: '' },
+        ],
+      })
+
+      return (
+        <BlockEditor
+          page={currentPage as never}
+          allPages={[currentPage as never]}
+          onUpdateBlock={vi.fn()}
+          onDeleteBlock={(blockId) => {
+            setCurrentPage((previousPage) => ({
+              ...previousPage,
+              blocks: previousPage.blocks.filter((block) => block.id !== blockId),
+            }))
+          }}
+        />
+      )
+    }
+
+    const { container } = render(<MediaDeleteHarness />)
+
+    const emptyInput = container.querySelector(
+      '.editor-row[data-block-id="b3"] [role="textbox"]',
+    )
+
+    if (!(emptyInput instanceof HTMLElement)) {
+      throw new Error('Expected empty paragraph editor')
+    }
+
+    placeCaretAtStart(emptyInput)
+    fireEvent.keyDown(emptyInput, { key: 'Backspace' })
+
+    const imageBlock = await waitFor(() => {
+      const mediaBlock = container.querySelector(
+        '.editor-row[data-block-id="b2"] figure.media-block',
+      )
+
+      if (!(mediaBlock instanceof HTMLElement)) {
+        throw new Error('Expected image media block')
+      }
+
+      expect(mediaBlock).toHaveFocus()
+      return mediaBlock
+    })
+
+    fireEvent.keyDown(imageBlock, { key: 'Backspace' })
+
+    await waitFor(() => {
+      expect(
+        container.querySelector('.editor-row[data-block-id="b2"]'),
+      ).not.toBeInTheDocument()
+    })
+
+    expect(screen.getByRole('textbox', { name: '输入正文' })).toHaveFocus()
   })
 
   it('merges a non-empty text block into the previous block when pressing Backspace at the start', () => {

@@ -39,10 +39,14 @@ function createTableState(recordCount: number, tablePageSize = 10): AppState {
   return state
 }
 
-function renderTablePage(state: AppState, isEmbedded = true) {
+function renderTablePage(
+  state: AppState,
+  isEmbedded = true,
+  onChange: (nextState: AppState) => void = vi.fn(),
+) {
   return render(
     <MemoryRouter>
-      <AppStoreProvider initialState={state} saveStatus="saved">
+      <AppStoreProvider initialState={state} onChange={onChange} saveStatus="saved">
         <TablePage
           basePath="/pages/page-1/data-tables/database-1"
           showSidebar={false}
@@ -254,5 +258,36 @@ describe('TablePage embedded row loading', () => {
 
     const betaOption = await screen.findByRole('option', { name: 'Beta' })
     expect(betaOption).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('persists the selected gantt timeline scale in the active view', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    const state = createTableState(1)
+    const startProperty = createProperty({ key: 'start', name: 'Start', type: 'date' })
+    const endProperty = createProperty({ key: 'end', name: 'End', type: 'date' })
+    const activeViewId = state.database.activeViewId
+
+    addProperty(state, startProperty)
+    addProperty(state, endProperty)
+    state.records['record-1'].values = {
+      [startProperty.id]: '2026-07-10',
+      [endProperty.id]: '2026-07-12',
+    }
+    state.database.views[activeViewId] = {
+      ...state.database.views[activeViewId],
+      layout: 'gantt',
+      ganttStartPropertyId: startProperty.id,
+      ganttEndPropertyId: endProperty.id,
+    }
+
+    renderTablePage(state, false, onChange)
+
+    await user.click(screen.getByRole('button', { name: '月' }))
+
+    await waitFor(() => {
+      const latestState = onChange.mock.calls.at(-1)?.[0] as AppState
+      expect(latestState.database.views[activeViewId].ganttTimelineScale).toBe('month')
+    })
   })
 })

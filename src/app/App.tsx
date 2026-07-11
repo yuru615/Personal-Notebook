@@ -43,6 +43,7 @@ import { isWhiteboardSnapshot } from '../components/whiteboard/whiteboardModel'
 import { WhiteboardPage } from '../components/whiteboard/WhiteboardPage'
 import type {
   BlockType,
+  BlockRecord,
   BoardRecord,
   DataTableRecord,
   MindmapRecord,
@@ -58,7 +59,10 @@ import type {
   WorkspaceSettings,
   WorkspaceSnapshot,
 } from '../domain/types'
+import type { AppAccentTheme } from '../domain/theme'
 import { collectPageRelationMatches } from '../domain/pageRelations'
+import { createInboxFileBlock } from '../domain/inboxFileImport'
+import { parseMarkdownPage, type MarkdownImportBlock } from '../domain/markdownImport'
 import {
   createStorageWorkspaceRepository,
   type WorkspaceRepository,
@@ -69,6 +73,8 @@ import {
   exportPagePackage,
   importPagePackageFromPath,
   importPagePackage,
+  importMarkdownImageAsset,
+  writeFileAsset,
 } from '../lib/assets'
 import {
   registerDesktopPendingSaveFlush,
@@ -87,6 +93,7 @@ import { type WorkspaceArchiveProgress } from '../lib/storageClient'
 import { createWorkspaceStore } from '../store/createWorkspaceStore'
 import { uiCopy } from '../ui/copy'
 import { sanitizeFileNameSegment } from '../utils/fileName'
+import { createId } from '../utils/id'
 import { deletePageBranch } from '../utils/pageTree'
 import type { ReorderPosition } from '../utils/reorder'
 import { useDesktopClipboardCapture } from './useDesktopClipboardCapture'
@@ -105,6 +112,7 @@ const DELETE_PAGE_DESCRIPTION_SUFFIX =
   '\u201d\u53ca\u5176\u6240\u6709\u5b50\u9875\u9762\u5c06\u88ab\u5220\u9664\u3002\u672a\u88ab\u5176\u4ed6\u9875\u9762\u6216\u8d44\u6e90\u4f7f\u7528\u7684\u5173\u8054\u6587\u4ef6\u3001\u767d\u677f\u3001\u6570\u636e\u8868\u683c\u548c\u601d\u7ef4\u5bfc\u56fe\u4e5f\u4f1a\u88ab\u6e05\u7406\u3002'
 const JSON_FILE_FILTER = [{ name: 'JSON', extensions: ['json'] }]
 const ZIP_FILE_FILTER = [{ name: 'ZIP', extensions: ['zip'] }]
+const MARKDOWN_FILE_FILTER = [{ name: 'Markdown', extensions: ['md', 'markdown'] }]
 const DataTablePage = lazy(() =>
   import('../components/dataTable/DataTablePage').then((module) => ({
     default: module.DataTablePage,
@@ -497,6 +505,42 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
     }
   }
 
+  async function importDroppedFiles(files: File[]) {
+    const blocks = await Promise.all(
+      files.map(async (file) => {
+        const asset = await writeFileAsset(file)
+        return createInboxFileBlock({
+          assetId: asset.id,
+          name: asset.name,
+          mimeType: asset.mimeType,
+        })
+      }),
+    )
+    await store.getState().appendClipboardCaptureToInbox(blocks, undefined, '拖拽导入')
+  }
+
+  async function importMarkdownPage() {
+    const file = await openTextFile({ filters: MARKDOWN_FILE_FILTER })
+
+    if (!file) {
+      return store.getState().currentPageId
+    }
+
+    try {
+      const parsed = parseMarkdownPage(file.name, file.contents)
+      const blocks = await resolveMarkdownImportBlocks(parsed.blocks, file.path)
+      await store.getState().flushPendingSaves()
+      const page = await store.getState().createPage(undefined, {
+        title: parsed.title,
+        blocks,
+      })
+      return page.id
+    } catch {
+      window.alert('Markdown 导入失败，请检查文件内容后重试。')
+      return store.getState().currentPageId
+    }
+  }
+
   if (!isBootstrapped) {
     return <div className="page-empty">{uiCopy.app.loading}</div>
   }
@@ -527,7 +571,12 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onSetSidebarLayout={(layout) => store.getState().setSidebarLayout(layout)}
       onSetSidebarWidth={(width) => store.getState().setSidebarWidth(width)}
       onSetAppCloseAction={(closeAction) => store.getState().setAppCloseAction(closeAction)}
+      onSetAppAccentTheme={(theme) => store.getState().setAppAccentTheme(theme)}
       onSetClipboardCaptureMode={(mode) => store.getState().setClipboardCaptureMode(mode)}
+      onSetBlockSelectionStartMode={(mode) =>
+        store.getState().setBlockSelectionStartMode(mode)
+      }
+      onSetLinkOpenMode={(mode) => store.getState().setLinkOpenMode(mode)}
       onSetPageDefaults={(defaults) => store.getState().setPageDefaults(defaults)}
       onSetSearchPreferences={(preferences) => store.getState().setSearchPreferences(preferences)}
       onTogglePinnedSidebarItem={(item) => store.getState().togglePinnedSidebarItem(item)}
@@ -613,6 +662,9 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onTogglePageOutlineVisible={(pageId, showOutline) =>
         store.getState().setPageOutlineVisible(pageId, showOutline)
       }
+      onTogglePagePropertiesVisible={(pageId, showProperties) =>
+        store.getState().setPagePropertiesVisible(pageId, showProperties)
+      }
       onSetPagePropertyValue={(pageId, propertyId, value) =>
         store.getState().setPagePropertyValue(pageId, propertyId, value)
       }
@@ -623,13 +675,16 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onUpdateBlock={(pageId, blockId, nextBlock) =>
         store.getState().updateBlock(pageId, blockId, nextBlock)
       }
+      onPasteBlocks={(pageId, targetBlockId, blocks, replaceTarget) =>
+        store.getState().pasteBlocks(pageId, targetBlockId, blocks, replaceTarget)
+      }
       onInsertBlock={async (pageId, type) => {
         const block = await store.getState().insertBlock(pageId, type)
         return block?.id ?? null
       }}
       onInsertParagraphBlock={(pageId, text) => store.getState().insertParagraphBlock(pageId, text)}
-      onInsertBlockAfter={async (pageId, blockId, type) => {
-        const block = await store.getState().insertBlockAfter(pageId, blockId, type)
+      onInsertBlockAfter={async (pageId, blockId, type, position) => {
+        const block = await store.getState().insertBlockAfter(pageId, blockId, type, position)
         return block?.id ?? null
       }}
       onReorderPage={(activePageId, overPageId) =>
@@ -638,6 +693,10 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onReorderBlock={(pageId, activeBlockId, overBlockId, position) =>
         store.getState().reorderBlocks(pageId, activeBlockId, overBlockId, position)
       }
+      onReorderBlockGroup={(pageId, activeBlockIds, overBlockId, position) =>
+        store.getState().reorderBlockGroup(pageId, activeBlockIds, overBlockId, position)
+      }
+      onDeleteBlocks={(pageId, blockIds) => store.getState().deleteBlocks(pageId, blockIds)}
       onDeleteBlock={(pageId, blockId) => store.getState().deleteBlock(pageId, blockId)}
       onMergeBlockWithPrevious={(pageId, blockId) =>
         store.getState().mergeBlockWithPrevious(pageId, blockId)
@@ -660,6 +719,8 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onExportPage={(pageId) => exportPageArchive(pageId)}
       onExportWorkspace={exportWorkspaceSnapshot}
       onImportWorkspace={importWorkspaceSnapshot}
+      onImportMarkdown={importMarkdownPage}
+      onDropFiles={importDroppedFiles}
       onImportArchive={async () => {
         if (isDesktopRuntime()) {
           const file = await openLocalFilePath({ filters: ZIP_FILE_FILTER })
@@ -728,6 +789,39 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
   return <HashRouter>{router}</HashRouter>
 }
 
+async function resolveMarkdownImportBlocks(
+  blocks: MarkdownImportBlock[],
+  markdownPath: string | undefined,
+): Promise<BlockRecord[]> {
+  return Promise.all(
+    blocks.map(async (block) => {
+      if (block.type !== 'image_candidate') {
+        return block
+      }
+
+      const asset = await importMarkdownImageAsset(markdownPath, block.source)
+
+      if (!asset) {
+        return {
+          id: createId('block'),
+          type: 'paragraph' as const,
+          text: block.fallbackText,
+        }
+      }
+
+      return {
+        id: createId('block'),
+        type: 'image' as const,
+        assetId: asset.id,
+        name: asset.name,
+        mimeType: asset.mimeType,
+        caption: '',
+        alt: block.alt,
+      }
+    }),
+  )
+}
+
 interface AppRoutesProps {
   boards: BoardRecord[]
   dataTables: DataTableRecord[]
@@ -747,11 +841,16 @@ interface AppRoutesProps {
   archiveTask: ArchiveTaskStatus | null
   onCreatePage: (parentId?: string, options?: CreatePageOptions) => Promise<PageRecord>
   onSetAppCloseAction: (closeAction: 'hide_to_tray' | 'quit') => Promise<void>
+  onSetAppAccentTheme: (theme: AppAccentTheme) => Promise<void>
   onSetSidebarLayout: (layout: NonNullable<WorkspaceSettings['sidebarLayout']>) => Promise<void>
   onSetSidebarWidth: (width: number) => Promise<void>
   onSetClipboardCaptureMode: (
     mode: NonNullable<WorkspaceSettings['clipboardCaptureMode']>,
   ) => Promise<void>
+  onSetBlockSelectionStartMode: (
+    mode: NonNullable<WorkspaceSettings['blockSelectionStartMode']>,
+  ) => Promise<void>
+  onSetLinkOpenMode: (mode: NonNullable<WorkspaceSettings['linkOpenMode']>) => Promise<void>
   onSetPageDefaults: (defaults: Partial<PageDisplayDefaults>) => Promise<void>
   onSetSearchPreferences: (
     preferences: Partial<NonNullable<WorkspaceSettings['searchPreferences']>>,
@@ -759,6 +858,8 @@ interface AppRoutesProps {
   onTogglePinnedSidebarItem: (item: SidebarPinnedItem) => Promise<void>
   onEnsureInboxPage: () => Promise<PageRecord>
   onImportWorkspace: () => Promise<string | null>
+  onImportMarkdown: () => Promise<string | null>
+  onDropFiles: (files: File[]) => Promise<void>
   onRoutePageChange: (pageId: string) => Promise<void>
   onRenamePage: (pageId: string, title: string) => Promise<void>
   onDuplicatePage: (pageId: string) => Promise<PageRecord | null>
@@ -809,6 +910,7 @@ interface AppRoutesProps {
   onChangePageIcon: (pageId: string, icon: string | null) => Promise<void>
   onChangePageCover: (pageId: string, cover: string | null) => Promise<void>
   onTogglePageOutlineVisible: (pageId: string, showOutline: boolean) => Promise<void>
+  onTogglePagePropertiesVisible: (pageId: string, showProperties: boolean) => Promise<void>
   onSetPagePropertyValue: (
     pageId: string,
     propertyId: string,
@@ -824,6 +926,12 @@ interface AppRoutesProps {
     blockId: string,
     nextBlock: PageRecord['blocks'][number],
   ) => Promise<void>
+  onPasteBlocks: (
+    pageId: string,
+    targetBlockId: string | null,
+    blocks: PageRecord['blocks'],
+    replaceTarget?: boolean,
+  ) => Promise<void>
   onInsertBlock: (
     pageId: string,
     type: BlockType,
@@ -833,6 +941,7 @@ interface AppRoutesProps {
     pageId: string,
     blockId: string,
     type: BlockType,
+    position?: 'before' | 'after',
   ) => Promise<string | null>
   onReorderPage: (activePageId: string, overPageId: string) => Promise<void>
   onReorderBlock: (
@@ -841,6 +950,13 @@ interface AppRoutesProps {
     overBlockId: string,
     position?: ReorderPosition,
   ) => Promise<void>
+  onReorderBlockGroup: (
+    pageId: string,
+    activeBlockIds: string[],
+    overBlockId: string,
+    position?: ReorderPosition,
+  ) => Promise<void>
+  onDeleteBlocks: (pageId: string, blockIds: string[]) => Promise<void>
   onDeleteBlock: (pageId: string, blockId: string) => Promise<void>
   onMergeBlockWithPrevious: (pageId: string, blockId: string) => Promise<string | null>
   onDuplicateBlock: (pageId: string, blockId: string) => Promise<void>
@@ -882,14 +998,18 @@ function AppRoutes({
   archiveTask,
   onCreatePage,
   onSetAppCloseAction,
+  onSetAppAccentTheme,
   onSetSidebarLayout,
   onSetSidebarWidth,
   onSetClipboardCaptureMode,
+  onSetBlockSelectionStartMode,
+  onSetLinkOpenMode,
   onSetPageDefaults,
   onSetSearchPreferences,
   onTogglePinnedSidebarItem,
   onEnsureInboxPage,
   onImportWorkspace,
+  onDropFiles,
   onRoutePageChange,
   onRenamePage,
   onDuplicatePage,
@@ -918,15 +1038,19 @@ function AppRoutes({
   onChangePageIcon,
   onChangePageCover,
   onTogglePageOutlineVisible,
+  onTogglePagePropertiesVisible,
   onSetPagePropertyValue,
   onSetPagePropertyOptions,
   onAddDefaultPageProperty,
   onUpdateBlock,
+  onPasteBlocks,
   onInsertBlock,
   onInsertParagraphBlock,
   onInsertBlockAfter,
   onReorderPage,
   onReorderBlock,
+  onReorderBlockGroup,
+  onDeleteBlocks,
   onDeleteBlock,
   onMergeBlockWithPrevious,
   onDuplicateBlock,
@@ -936,6 +1060,7 @@ function AppRoutes({
   onExportPage,
   onExportWorkspace,
   onImportArchive,
+  onImportMarkdown,
   onCleanupOrphanBoards,
   onCleanupOrphanDataTables,
   onCleanupOrphanAssets,
@@ -980,6 +1105,14 @@ function AppRoutes({
 
   async function handleImportArchiveFromSidebar() {
     const nextPageId = await onImportArchive()
+
+    if (nextPageId) {
+      navigate(`/pages/${nextPageId}`)
+    }
+  }
+
+  async function handleImportMarkdownFromSidebar() {
+    const nextPageId = await onImportMarkdown()
 
     if (nextPageId) {
       navigate(`/pages/${nextPageId}`)
@@ -1031,11 +1164,13 @@ function AppRoutes({
   return (
     <AppShell
       hideSidebar={isWhiteboardRoute || isMindmapRoute || isSettingsRoute}
+      accentTheme={appSettings.accentTheme ?? 'blue_gray'}
       sidebarClassName={sidebarLayout === 'compact' ? 'sidebar sidebar-compact' : 'sidebar'}
       sidebarWidth={sidebarWidth}
       onSidebarWidthChange={(width) => {
         void onSetSidebarWidth(width)
       }}
+      onDropFiles={onDropFiles}
       sidebar={
         <SidebarTree
           pages={pages}
@@ -1050,6 +1185,9 @@ function AppRoutes({
           onSearch={() => setIsSearchOpen(true)}
           onImportArchive={() => {
             void handleImportArchiveFromSidebar()
+          }}
+          onImportMarkdown={() => {
+            void handleImportMarkdownFromSidebar()
           }}
           onExportWorkspace={() => {
             void onExportWorkspace()
@@ -1126,13 +1264,17 @@ function AppRoutes({
                 appSettings={appSettings}
                 workspaceSettings={workspaceSettings}
                 onSetAppCloseAction={onSetAppCloseAction}
+                onSetAppAccentTheme={onSetAppAccentTheme}
                 onSetSidebarLayout={onSetSidebarLayout}
                 onSetSidebarWidth={onSetSidebarWidth}
                 onSetClipboardCaptureMode={onSetClipboardCaptureMode}
+                onSetBlockSelectionStartMode={onSetBlockSelectionStartMode}
+                onSetLinkOpenMode={onSetLinkOpenMode}
                 onSetPageDefaults={onSetPageDefaults}
                 onSetSearchPreferences={onSetSearchPreferences}
                 onExportWorkspace={onExportWorkspace}
                 onImportWorkspace={onImportWorkspace}
+                onImportMarkdown={onImportMarkdown}
                 onImportArchive={onImportArchive}
                 onCleanupOrphanBoards={onCleanupOrphanBoards}
                 onCleanupOrphanDataTables={onCleanupOrphanDataTables}
@@ -1159,6 +1301,8 @@ function AppRoutes({
                 pages={pages}
                 pageProperties={pageProperties}
                 currentPageId={currentPageId}
+                blockSelectionStartMode={workspaceSettings.blockSelectionStartMode}
+                linkOpenMode={workspaceSettings.linkOpenMode}
                 archiveTask={archiveTask}
                 onCreatePage={onCreatePage}
                 onRoutePageChange={onRoutePageChange}
@@ -1170,14 +1314,18 @@ function AppRoutes({
                 onChangePageIcon={onChangePageIcon}
                 onChangePageCover={onChangePageCover}
                 onTogglePageOutlineVisible={onTogglePageOutlineVisible}
+                onTogglePagePropertiesVisible={onTogglePagePropertiesVisible}
                 onSetPagePropertyValue={onSetPagePropertyValue}
                 onSetPagePropertyOptions={onSetPagePropertyOptions}
                 onAddDefaultPageProperty={onAddDefaultPageProperty}
                 onUpdateBlock={onUpdateBlock}
+                onPasteBlocks={onPasteBlocks}
                 onInsertBlock={onInsertBlock}
                 onInsertParagraphBlock={onInsertParagraphBlock}
                 onInsertBlockAfter={onInsertBlockAfter}
                 onReorderBlock={onReorderBlock}
+                onReorderBlockGroup={onReorderBlockGroup}
+                onDeleteBlocks={onDeleteBlocks}
                 onDeleteBlock={onDeleteBlock}
                 onMergeBlockWithPrevious={onMergeBlockWithPrevious}
                 onDuplicateBlock={onDuplicateBlock}
@@ -1186,6 +1334,7 @@ function AppRoutes({
                 onExportArchive={onExportArchive}
                 onExportWorkspace={onExportWorkspace}
                 onImportWorkspace={onImportWorkspace}
+                onImportMarkdown={onImportMarkdown}
                 onImportArchive={onImportArchive}
                 onCleanupOrphanBoards={onCleanupOrphanBoards}
                 onCleanupOrphanDataTables={onCleanupOrphanDataTables}
@@ -1237,9 +1386,11 @@ function AppRoutes({
                 onTogglePageSmallText={onTogglePageSmallText}
                 onTogglePageFontFamily={onTogglePageFontFamily}
                 onTogglePageOutlineVisible={onTogglePageOutlineVisible}
+                onTogglePagePropertiesVisible={onTogglePagePropertiesVisible}
                 onExportArchive={onExportArchive}
                 onExportWorkspace={onExportWorkspace}
                 onImportWorkspace={onImportWorkspace}
+                onImportMarkdown={onImportMarkdown}
                 onImportArchive={onImportArchive}
                 onCleanupOrphanBoards={onCleanupOrphanBoards}
                 onCleanupOrphanDataTables={onCleanupOrphanDataTables}
@@ -1266,9 +1417,11 @@ function AppRoutes({
                 onTogglePageSmallText={onTogglePageSmallText}
                 onTogglePageFontFamily={onTogglePageFontFamily}
                 onTogglePageOutlineVisible={onTogglePageOutlineVisible}
+                onTogglePagePropertiesVisible={onTogglePagePropertiesVisible}
                 onExportArchive={onExportArchive}
                 onExportWorkspace={onExportWorkspace}
                 onImportWorkspace={onImportWorkspace}
+                onImportMarkdown={onImportMarkdown}
                 onImportArchive={onImportArchive}
                 onCleanupOrphanBoards={onCleanupOrphanBoards}
                 onCleanupOrphanDataTables={onCleanupOrphanDataTables}
@@ -1311,17 +1464,23 @@ interface SettingsRouteProps {
   appSettings: AppState['appSettings']
   workspaceSettings: WorkspaceSettings
   onSetAppCloseAction: (closeAction: 'hide_to_tray' | 'quit') => Promise<void>
+  onSetAppAccentTheme: (theme: AppAccentTheme) => Promise<void>
   onSetSidebarLayout: (layout: NonNullable<WorkspaceSettings['sidebarLayout']>) => Promise<void>
   onSetSidebarWidth: (width: number) => Promise<void>
   onSetClipboardCaptureMode: (
     mode: NonNullable<WorkspaceSettings['clipboardCaptureMode']>,
   ) => Promise<void>
+  onSetBlockSelectionStartMode: (
+    mode: NonNullable<WorkspaceSettings['blockSelectionStartMode']>,
+  ) => Promise<void>
+  onSetLinkOpenMode: (mode: NonNullable<WorkspaceSettings['linkOpenMode']>) => Promise<void>
   onSetPageDefaults: (defaults: Partial<PageDisplayDefaults>) => Promise<void>
   onSetSearchPreferences: (
     preferences: Partial<NonNullable<WorkspaceSettings['searchPreferences']>>,
   ) => Promise<void>
   onExportWorkspace: () => Promise<void>
   onImportWorkspace: () => Promise<string | null>
+  onImportMarkdown: () => Promise<string | null>
   onImportArchive: () => Promise<string | null>
   onCleanupOrphanBoards: () => Promise<void>
   onCleanupOrphanDataTables: () => Promise<void>
@@ -1334,13 +1493,17 @@ function SettingsRoute({
   appSettings,
   workspaceSettings,
   onSetAppCloseAction,
+  onSetAppAccentTheme,
   onSetSidebarLayout,
   onSetSidebarWidth,
   onSetClipboardCaptureMode,
+  onSetBlockSelectionStartMode,
+  onSetLinkOpenMode,
   onSetPageDefaults,
   onSetSearchPreferences,
   onExportWorkspace,
   onImportWorkspace,
+  onImportMarkdown,
   onImportArchive,
   onCleanupOrphanBoards,
   onCleanupOrphanDataTables,
@@ -1366,6 +1529,9 @@ function SettingsRoute({
       onSetAppCloseAction={(closeAction) => {
         void onSetAppCloseAction(closeAction)
       }}
+      onSetAppAccentTheme={(theme) => {
+        void onSetAppAccentTheme(theme)
+      }}
       onSetSidebarLayout={(layout) => {
         void onSetSidebarLayout(layout)
       }}
@@ -1374,6 +1540,12 @@ function SettingsRoute({
       }}
       onSetClipboardCaptureMode={(mode) => {
         void onSetClipboardCaptureMode(mode)
+      }}
+      onSetBlockSelectionStartMode={(mode) => {
+        void onSetBlockSelectionStartMode(mode)
+      }}
+      onSetLinkOpenMode={(mode) => {
+        void onSetLinkOpenMode(mode)
       }}
       onSetSearchPreferences={(preferences) => {
         void onSetSearchPreferences(preferences)
@@ -1386,6 +1558,9 @@ function SettingsRoute({
       }}
       onImportArchive={() => {
         void onImportArchive()
+      }}
+      onImportMarkdown={() => {
+        void onImportMarkdown()
       }}
       onCleanupOrphanBoards={() => {
         void onCleanupOrphanBoards()
@@ -1412,6 +1587,8 @@ interface PageRouteProps {
   pages: PageRecord[]
   pageProperties: PagePropertyDefinition[]
   currentPageId: string | null
+  blockSelectionStartMode?: NonNullable<WorkspaceSettings['blockSelectionStartMode']>
+  linkOpenMode?: NonNullable<WorkspaceSettings['linkOpenMode']>
   archiveTask: ArchiveTaskStatus | null
   onCreatePage: (parentId?: string, options?: CreatePageOptions) => Promise<PageRecord>
   onRoutePageChange: (pageId: string) => Promise<void>
@@ -1423,6 +1600,7 @@ interface PageRouteProps {
   onChangePageIcon: (pageId: string, icon: string | null) => Promise<void>
   onChangePageCover: (pageId: string, cover: string | null) => Promise<void>
   onTogglePageOutlineVisible: (pageId: string, showOutline: boolean) => Promise<void>
+  onTogglePagePropertiesVisible: (pageId: string, showProperties: boolean) => Promise<void>
   onSetPagePropertyValue: (
     pageId: string,
     propertyId: string,
@@ -1438,6 +1616,12 @@ interface PageRouteProps {
     blockId: string,
     nextBlock: PageRecord['blocks'][number],
   ) => Promise<void>
+  onPasteBlocks: (
+    pageId: string,
+    targetBlockId: string | null,
+    blocks: PageRecord['blocks'],
+    replaceTarget?: boolean,
+  ) => Promise<void>
   onInsertBlock: (
     pageId: string,
     type: BlockType,
@@ -1447,6 +1631,7 @@ interface PageRouteProps {
     pageId: string,
     blockId: string,
     type: BlockType,
+    position?: 'before' | 'after',
   ) => Promise<string | null>
   onReorderBlock: (
     pageId: string,
@@ -1454,6 +1639,13 @@ interface PageRouteProps {
     overBlockId: string,
     position?: ReorderPosition,
   ) => Promise<void>
+  onReorderBlockGroup: (
+    pageId: string,
+    activeBlockIds: string[],
+    overBlockId: string,
+    position?: ReorderPosition,
+  ) => Promise<void>
+  onDeleteBlocks: (pageId: string, blockIds: string[]) => Promise<void>
   onDeleteBlock: (pageId: string, blockId: string) => Promise<void>
   onMergeBlockWithPrevious: (pageId: string, blockId: string) => Promise<string | null>
   onDuplicateBlock: (pageId: string, blockId: string) => Promise<void>
@@ -1466,6 +1658,7 @@ interface PageRouteProps {
   onExportArchive: () => Promise<void>
   onExportWorkspace: () => Promise<void>
   onImportWorkspace: () => Promise<string | null>
+  onImportMarkdown: () => Promise<string | null>
   onImportArchive: () => Promise<string | null>
   onCleanupOrphanBoards: () => Promise<void>
   onCleanupOrphanDataTables: () => Promise<void>
@@ -1507,6 +1700,8 @@ function PageRoute({
   pages,
   pageProperties,
   currentPageId,
+  blockSelectionStartMode,
+  linkOpenMode,
   archiveTask,
   onCreatePage,
   onRoutePageChange,
@@ -1518,14 +1713,18 @@ function PageRoute({
   onChangePageIcon,
   onChangePageCover,
   onTogglePageOutlineVisible,
+  onTogglePagePropertiesVisible,
   onSetPagePropertyValue,
   onSetPagePropertyOptions,
   onAddDefaultPageProperty,
   onUpdateBlock,
+  onPasteBlocks,
   onInsertBlock,
   onInsertParagraphBlock,
   onInsertBlockAfter,
   onReorderBlock,
+  onReorderBlockGroup,
+  onDeleteBlocks,
   onDeleteBlock,
   onMergeBlockWithPrevious,
   onDuplicateBlock,
@@ -1534,6 +1733,7 @@ function PageRoute({
   onExportArchive,
   onExportWorkspace,
   onImportWorkspace,
+  onImportMarkdown,
   onImportArchive,
   onCleanupOrphanBoards,
   onCleanupOrphanDataTables,
@@ -1553,6 +1753,7 @@ function PageRoute({
   const page = pages.find((item) => item.id === pageId)
   const outlineVisible = page?.showOutline !== false
   const [topbarScrolled, setTopbarScrolled] = useState(false)
+  const editorSelectionAreaRef = useRef<HTMLDivElement | null>(null)
   const focusBlockId = (location.state as SearchFocusLocationState | null)?.focusBlockId
   const relationMatches = useMemo(() => {
     if (!page) {
@@ -1622,6 +1823,7 @@ function PageRoute({
       smallText={page.isSmallText === true}
       fontFamily={page.fontFamily ?? 'default'}
       outlineVisible={outlineVisible}
+      propertiesVisible={page.showProperties !== false}
       archiveTask={archiveTask}
       onToggleAdaptiveWidth={(value) => {
         void onTogglePageFullWidth(page.id, value)
@@ -1635,6 +1837,9 @@ function PageRoute({
       onToggleOutlineVisible={(value) => {
         void onTogglePageOutlineVisible(page.id, value)
       }}
+      onTogglePropertiesVisible={(value) => {
+        void onTogglePagePropertiesVisible(page.id, value)
+      }}
       onExportArchive={() => void onExportArchive()}
       onExportWorkspace={() => void onExportWorkspace()}
       onImportWorkspace={async () => {
@@ -1643,6 +1848,10 @@ function PageRoute({
       }}
       onImportArchive={async () => {
         const nextPageId = await onImportArchive()
+        navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
+      }}
+      onImportMarkdown={async () => {
+        const nextPageId = await onImportMarkdown()
         navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
       }}
       onCleanupOrphanBoards={() => void onCleanupOrphanBoards()}
@@ -1685,7 +1894,7 @@ function PageRoute({
       <PageHeader
         page={page}
         bodyClassName={pageContentClassName}
-        meta={
+        meta={page.showProperties !== false ? (
           <PagePropertiesPanel
             definitions={pageProperties}
             values={page.properties ?? {}}
@@ -1699,7 +1908,7 @@ function PageRoute({
               void onAddDefaultPageProperty(key)
             }}
           />
-        }
+        ) : null}
         showTopRow={false}
         showCover={false}
         onRename={(title) => {
@@ -1719,26 +1928,41 @@ function PageRoute({
         }
       >
         {outlineVisible ? <PageOutline blocks={page.blocks} /> : null}
-        <div className={pageContentClassName}>
-          <BlockEditor
+        <div ref={editorSelectionAreaRef} className="page-editor-selection-area">
+          <div className={pageContentClassName}>
+            <BlockEditor
             page={page}
             allPages={pages}
             boards={boards}
             dataTables={dataTables}
             mindmaps={mindmaps}
             syncedBlockGroups={syncedBlockGroups}
+            blockSelectionStartMode={blockSelectionStartMode}
+            linkOpenMode={linkOpenMode}
+            selectionHostRef={editorSelectionAreaRef}
             onUpdateBlock={(blockId, nextBlock) => {
               void onUpdateBlock(page.id, blockId, nextBlock)
             }}
+            onPasteBlocks={(targetBlockId, blocks, replaceTarget) =>
+              onPasteBlocks(page.id, targetBlockId, blocks, replaceTarget)
+            }
             onInsert={(type) => {
               return onInsertBlock(page.id, type)
             }}
             onInsertParagraph={(text) => {
               void onInsertParagraphBlock(page.id, text)
             }}
-            onInsertBlockAfter={(blockId, type) => onInsertBlockAfter(page.id, blockId, type)}
+            onInsertBlockAfter={(blockId, type, position) =>
+              onInsertBlockAfter(page.id, blockId, type, position)
+            }
             onReorderBlock={(activeBlockId, overBlockId, position) => {
               void onReorderBlock(page.id, activeBlockId, overBlockId, position)
+            }}
+            onReorderBlockGroup={(activeBlockIds, overBlockId, position) => {
+              void onReorderBlockGroup(page.id, activeBlockIds, overBlockId, position)
+            }}
+            onDeleteBlocks={(blockIds) => {
+              void onDeleteBlocks(page.id, blockIds)
             }}
             onDeleteBlock={(blockId) => {
               void onDeleteBlock(page.id, blockId)
@@ -1821,8 +2045,8 @@ function PageRoute({
                 targetBlockId ? { state: { focusBlockId: targetBlockId } } : undefined,
               )
             }}
-          />
-          <PageRelationsPanel
+            />
+            <PageRelationsPanel
             links={linkMatches}
             mentions={mentionMatches}
             onOpenSource={(sourcePageId, sourceBlockId) => {
@@ -1831,7 +2055,8 @@ function PageRoute({
                 sourceBlockId ? { state: { focusBlockId: sourceBlockId } } : undefined,
               )
             }}
-          />
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -1921,9 +2146,11 @@ interface DataTableRouteProps {
   onTogglePageSmallText: (pageId: string, isSmallText: boolean) => Promise<void>
   onTogglePageFontFamily: (pageId: string, fontFamily: PageFontFamily) => Promise<void>
   onTogglePageOutlineVisible: (pageId: string, showOutline: boolean) => Promise<void>
+  onTogglePagePropertiesVisible: (pageId: string, showProperties: boolean) => Promise<void>
   onExportArchive: () => Promise<void>
   onExportWorkspace: () => Promise<void>
   onImportWorkspace: () => Promise<string | null>
+  onImportMarkdown: () => Promise<string | null>
   onImportArchive: () => Promise<string | null>
   onCleanupOrphanBoards: () => Promise<void>
   onCleanupOrphanDataTables: () => Promise<void>
@@ -1946,9 +2173,11 @@ function DataTableRoute({
   onTogglePageSmallText,
   onTogglePageFontFamily,
   onTogglePageOutlineVisible,
+  onTogglePagePropertiesVisible,
   onExportArchive,
   onExportWorkspace,
   onImportWorkspace,
+  onImportMarkdown,
   onImportArchive,
   onCleanupOrphanBoards,
   onCleanupOrphanDataTables,
@@ -2007,6 +2236,7 @@ function DataTableRoute({
         route={route}
         basePath={basePath}
         breadcrumbs={breadcrumbs}
+        adaptiveWidth={page.isFullWidth === true}
         headerActions={
           <ExportImportPanel
             status={saveStatus}
@@ -2014,6 +2244,7 @@ function DataTableRoute({
             smallText={page.isSmallText === true}
             fontFamily={page.fontFamily ?? 'default'}
             outlineVisible={outlineVisible}
+            propertiesVisible={page.showProperties !== false}
             archiveTask={archiveTask}
             onToggleAdaptiveWidth={(value) => {
               void onTogglePageFullWidth(page.id, value)
@@ -2027,6 +2258,9 @@ function DataTableRoute({
             onToggleOutlineVisible={(value) => {
               void onTogglePageOutlineVisible(page.id, value)
             }}
+            onTogglePropertiesVisible={(value) => {
+              void onTogglePagePropertiesVisible(page.id, value)
+            }}
             onExportArchive={() => void onExportArchive()}
             onExportWorkspace={() => void onExportWorkspace()}
             onImportWorkspace={async () => {
@@ -2035,6 +2269,10 @@ function DataTableRoute({
             }}
             onImportArchive={async () => {
               const nextPageId = await onImportArchive()
+              navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
+            }}
+            onImportMarkdown={async () => {
+              const nextPageId = await onImportMarkdown()
               navigate(nextPageId ? `/pages/${nextPageId}` : '/', { replace: true })
             }}
             onCleanupOrphanBoards={() => void onCleanupOrphanBoards()}

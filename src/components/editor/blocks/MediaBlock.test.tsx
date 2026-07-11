@@ -28,7 +28,7 @@ describe('MediaBlock', () => {
     expect(screen.getByText('图片')).toBeInTheDocument()
     expect(screen.getByText('上传图片')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('添加说明')).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('替代文本')).toBeInTheDocument()
+    expect(screen.queryByPlaceholderText('替代文本')).not.toBeInTheDocument()
 
     rerender(
       <MediaBlock
@@ -106,7 +106,7 @@ describe('MediaBlock', () => {
       />,
     )
 
-    const image = await screen.findByRole('img', { name: 'Garden' })
+    const image = await screen.findByRole('img', { name: 'garden.png' })
     const surface = container.querySelector('.media-block-surface')
 
     expect(surface).toBeInTheDocument()
@@ -132,11 +132,11 @@ describe('MediaBlock', () => {
       />,
     )
 
-    const image = await screen.findByRole('img', { name: 'Garden' })
+    const image = await screen.findByRole('img', { name: 'garden.png' })
     await user.click(image)
 
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByRole('img', { name: 'Garden' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('img', { name: 'garden.png' })).toBeInTheDocument()
 
     fireEvent.keyDown(window, { key: 'Escape' })
 
@@ -163,10 +163,10 @@ describe('MediaBlock', () => {
       />,
     )
 
-    await user.click(await screen.findByRole('img', { name: 'Garden' }))
+    await user.click(await screen.findByRole('img', { name: 'garden.png' }))
 
     const dialog = await screen.findByRole('dialog')
-    const previewImage = within(dialog).getByRole('img', { name: 'Garden' })
+    const previewImage = within(dialog).getByRole('img', { name: 'garden.png' })
     const previewBody = previewImage.closest('.media-block-image-preview-body')
 
     expect(document.body.style.overflow).toBe('hidden')
@@ -201,10 +201,10 @@ describe('MediaBlock', () => {
       />,
     )
 
-    await user.click(await screen.findByRole('img', { name: 'Garden' }))
+    await user.click(await screen.findByRole('img', { name: 'garden.png' }))
 
     const dialog = await screen.findByRole('dialog')
-    const previewImage = within(dialog).getByRole('img', { name: 'Garden' })
+    const previewImage = within(dialog).getByRole('img', { name: 'garden.png' })
     const previewBody = previewImage.closest('.media-block-image-preview-body')
 
     expect(previewBody).toBeInTheDocument()

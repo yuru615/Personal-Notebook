@@ -6,6 +6,7 @@ import { ParagraphBlock } from './ParagraphBlock'
 import { TodoBlock } from './TodoBlock'
 import type {
   BlockRecord,
+  ExternalLinkOpenMode,
   RichTextSegment,
   SyncedBlockGroupRecord,
   SyncedBlockInstanceBlock,
@@ -23,6 +24,7 @@ interface SyncedBlockContainerProps {
   relationPages?: PageRelationAutocompleteItem[]
   onOpenPageRelation?: (pageId: string) => void
   onCreatePageRelation?: (title: string) => Promise<PageRelationAutocompleteItem>
+  linkOpenMode?: ExternalLinkOpenMode
   onDeleteContainer?: () => void
 }
 
@@ -38,6 +40,7 @@ export function SyncedBlockContainer({
   relationPages,
   onOpenPageRelation,
   onCreatePageRelation,
+  linkOpenMode,
   onDeleteContainer,
 }: SyncedBlockContainerProps) {
   void allPages
@@ -106,6 +109,7 @@ export function SyncedBlockContainer({
               relationPages,
               onOpenPageRelation,
               onCreatePageRelation,
+              linkOpenMode,
             })}
           </div>
         ))}
@@ -125,6 +129,7 @@ function renderSyncedInnerBlock({
   relationPages,
   onOpenPageRelation,
   onCreatePageRelation,
+  linkOpenMode,
 }: {
   block: BlockRecord
   index: number
@@ -136,6 +141,7 @@ function renderSyncedInnerBlock({
   relationPages?: PageRelationAutocompleteItem[]
   onOpenPageRelation?: (pageId: string) => void
   onCreatePageRelation?: (title: string) => Promise<PageRelationAutocompleteItem>
+  linkOpenMode?: ExternalLinkOpenMode
 }) {
   const isReference = mode === 'reference'
 
@@ -160,6 +166,7 @@ function renderSyncedInnerBlock({
           relationPages={relationPages}
           onOpenPageRelation={onOpenPageRelation}
           onCreatePageRelation={onCreatePageRelation}
+          linkOpenMode={linkOpenMode}
           onChange={({ text, richText }) =>
             onUpdateGroupBlock(groupId, block.id, { ...block, text, richText })
           }
@@ -186,6 +193,7 @@ function renderSyncedInnerBlock({
           relationPages={relationPages}
           onOpenPageRelation={onOpenPageRelation}
           onCreatePageRelation={onCreatePageRelation}
+          linkOpenMode={linkOpenMode}
           onChange={({ text, richText, checked }) =>
             onUpdateGroupBlock(groupId, block.id, { ...block, text, richText, checked })
           }
@@ -209,11 +217,17 @@ function renderSyncedInnerBlock({
         <ListBlock
           type={block.type}
           value={block.items[0] ?? ''}
+          richText={block.richText}
           index={index}
-          onChange={(value) =>
+          relationPages={relationPages}
+          onOpenPageRelation={onOpenPageRelation}
+          onCreatePageRelation={onCreatePageRelation}
+          linkOpenMode={linkOpenMode}
+          onChange={({ text, richText }) =>
             onUpdateGroupBlock(groupId, block.id, {
               ...block,
-              items: [value],
+              items: [text],
+              richText,
             })
           }
         />

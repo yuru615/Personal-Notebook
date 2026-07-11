@@ -8,6 +8,8 @@ describe('BlockHandleMenu', () => {
     render(
       <BlockHandleMenu
         onTurnInto={vi.fn()}
+        onInsertAbove={vi.fn()}
+        onInsertBelow={vi.fn()}
         onDuplicate={vi.fn()}
         onDelete={vi.fn()}
       />,
@@ -17,6 +19,39 @@ describe('BlockHandleMenu', () => {
     expect(screen.getByText('操作')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '复制' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '删除' })).toBeInTheDocument()
+  })
+
+  it('offers inserting a paragraph above or below the current block', () => {
+    render(
+      <BlockHandleMenu
+        onTurnInto={vi.fn()}
+        onInsertAbove={vi.fn()}
+        onInsertBelow={vi.fn()}
+        onDuplicate={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: '在上方插入块' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '在下方插入块' })).toBeInTheDocument()
+  })
+
+  it('places insert actions before conversion and other block actions', () => {
+    const { container } = render(
+      <BlockHandleMenu
+        onTurnInto={vi.fn()}
+        onInsertAbove={vi.fn()}
+        onInsertBelow={vi.fn()}
+        onDuplicate={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    )
+
+    const labels = Array.from(container.querySelectorAll('.block-menu-action')).map((item) =>
+      item.textContent?.trim(),
+    )
+
+    expect(labels.slice(0, 2)).toEqual(['在上方插入块', '在下方插入块'])
   })
 
   it('locks page scrolling while the menu is open', () => {

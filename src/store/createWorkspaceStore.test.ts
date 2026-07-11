@@ -244,6 +244,27 @@ function createWorkspaceWithSyncedGroupAsset(blocks: BlockRecord[]): WorkspaceSn
   return workspace
 }
 
+describe('createWorkspaceStore page creation', () => {
+  it('persists initial blocks when creating an imported page', async () => {
+    const store = createWorkspaceStore(createMemoryRepository(createWorkspace()))
+    await store.getState().bootstrap()
+    const blocks: BlockRecord[] = [
+      { id: 'block_imported', type: 'paragraph', text: '从 Markdown 导入的正文' },
+    ]
+
+    const page = await store.getState().createPage(undefined, {
+      title: '导入页面',
+      blocks,
+    })
+
+    expect(store.getState().pages.find((item) => item.id === page.id)).toMatchObject({
+      id: page.id,
+      title: '导入页面',
+      blocks,
+    })
+  })
+})
+
 describe('createWorkspaceStore data tables', () => {
   it('preserves linked resources when saving page-only changes', async () => {
     const counted = createCountingRepository(createWorkspaceWithLinkedAssets())
@@ -317,6 +338,98 @@ describe('createWorkspaceStore data tables', () => {
     })
   })
 
+  it("defaults block selection start mode to 'safe_zone_only' and persists changes", async () => {
+    const workspace = createWorkspace()
+    const counted = createCountingRepository({
+      ...workspace,
+      settings: {
+        lastOpenedPageId: 'page_1',
+      },
+    })
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+
+    expect(store.getState().settings.blockSelectionStartMode).toBe('safe_zone_only')
+    expect(counted.getReplaceCalls()).toBe(1)
+
+    await store.getState().setBlockSelectionStartMode('content_allowed')
+
+    expect(store.getState().settings.blockSelectionStartMode).toBe('content_allowed')
+    expect(counted.getSnapshot()?.settings).toMatchObject({
+      lastOpenedPageId: 'page_1',
+      blockSelectionStartMode: 'content_allowed',
+    })
+  })
+
+  it("defaults external links to modifier activation and persists the user's choice", async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+
+    expect(store.getState().settings.linkOpenMode).toBe('modifier')
+
+    await store.getState().setLinkOpenMode('direct')
+
+    expect(store.getState().settings.linkOpenMode).toBe('direct')
+    expect(counted.getSnapshot()?.settings.linkOpenMode).toBe('direct')
+  })
+
+  it('reorders a selected block group while preserving original order', async () => {
+    const workspace = createWorkspace()
+    workspace.pages[0] = {
+      ...workspace.pages[0],
+      blocks: [
+        { id: 'b1', type: 'paragraph', text: 'A' },
+        { id: 'b2', type: 'paragraph', text: 'B' },
+        { id: 'b3', type: 'paragraph', text: 'C' },
+        { id: 'b4', type: 'paragraph', text: 'D' },
+      ],
+    }
+    const counted = createCountingRepository(workspace)
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+    await store.getState().reorderBlockGroup('page_1', ['b1', 'b3'], 'b4', 'before')
+
+    expect(
+      store.getState().pages.find((page) => page.id === 'page_1')?.blocks.map((block) => block.id),
+    ).toEqual(['b2', 'b1', 'b3', 'b4'])
+  })
+
+  it('deletes multiple blocks in one action and removes synced containers safely', async () => {
+    const workspace = createWorkspaceWithSyncedGroupAsset([
+      { id: 'group_block_1', type: 'paragraph', text: 'Shared source' },
+    ])
+    workspace.pages = workspace.pages.map((page) =>
+      page.id === 'page_1'
+        ? {
+            ...page,
+            blocks: [
+              ...page.blocks,
+              { id: 'block_tail', type: 'paragraph', text: 'Tail block' },
+            ],
+          }
+        : page,
+    )
+    const counted = createCountingRepository(workspace)
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+    await store.getState().deleteBlocks('page_1', ['container_1', 'block_tail'])
+
+    expect(
+      store.getState().pages.find((page) => page.id === 'page_1')?.blocks.map((block) => block.id),
+    ).toEqual([])
+    expect(store.getState().syncedBlockGroups).toMatchObject([
+      {
+        id: 'group_1',
+        primaryInstanceId: 'instance_2',
+      },
+    ])
+  })
+
   it('loads app settings defaults and persists close action changes', async () => {
     const counted = createCountingRepository(createWorkspace())
     const appSettings = createMemoryAppSettingsRepository()
@@ -329,7 +442,10 @@ describe('createWorkspaceStore data tables', () => {
     await store.getState().setAppCloseAction('quit')
 
     expect(store.getState().appSettings.closeAction).toBe('quit')
-    expect(appSettings.getSettings()).toEqual({ closeAction: 'quit' })
+    expect(appSettings.getSettings()).toEqual({
+      closeAction: 'quit',
+      accentTheme: 'blue_gray',
+    })
     expect(appSettings.getSaveCalls()).toBe(1)
   })
 
@@ -374,6 +490,7 @@ describe('createWorkspaceStore data tables', () => {
       isSmallText: true,
       fontFamily: 'serif',
       showOutline: false,
+      showProperties: true,
     })
 
     const created = await store.getState().createPage(undefined, { setCurrent: false })
@@ -384,12 +501,31 @@ describe('createWorkspaceStore data tables', () => {
       isSmallText: true,
       fontFamily: 'serif',
       showOutline: false,
+      showProperties: true,
     })
     expect(original).toMatchObject({
       isFullWidth: false,
       isSmallText: false,
       fontFamily: 'default',
       showOutline: true,
+      showProperties: true,
+    })
+  })
+
+  it('persists the current page property-panel visibility without changing its values', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+    await store.getState().setPagePropertiesVisible('page_1', false)
+
+    expect(store.getState().pages.find((page) => page.id === 'page_1')).toMatchObject({
+      id: 'page_1',
+      showProperties: false,
+    })
+    expect(counted.getSnapshot()?.pages.find((page) => page.id === 'page_1')).toMatchObject({
+      id: 'page_1',
+      showProperties: false,
     })
   })
 
@@ -1349,7 +1485,7 @@ describe('createWorkspaceStore data tables', () => {
       cover: 'ocean',
     })
     expect(store.getState().pages[0]).toMatchObject({
-      icon: null,
+      icon: '📄',
       cover: null,
     })
   })
@@ -1451,6 +1587,29 @@ describe('createWorkspaceStore autosave', () => {
       },
     ]
   }
+
+  it('replaces an empty block with pasted structured blocks in one save', async () => {
+    const workspace = createWorkspace()
+    workspace.pages[0].blocks = [{ id: 'block_1', type: 'paragraph', text: '' }]
+    const counted = createCountingRepository(workspace)
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+    const saveCallsBeforePaste = counted.getSaveCalls()
+
+    await store.getState().pasteBlocks('page_1', 'block_1', [
+      { id: 'pasted_heading', type: 'heading_1', text: '项目计划' },
+      { id: 'pasted_paragraph', type: 'paragraph', text: '正文内容' },
+      { id: 'pasted_todo', type: 'todo', text: '完成测试', checked: false },
+    ], true)
+
+    expect(store.getState().pages[0].blocks).toMatchObject([
+      { id: 'block_1', type: 'heading_1', text: '项目计划' },
+      { id: 'pasted_paragraph', type: 'paragraph', text: '正文内容' },
+      { id: 'pasted_todo', type: 'todo', text: '完成测试', checked: false },
+    ])
+    expect(counted.getSaveCalls()).toBe(saveCallsBeforePaste + 1)
+  })
 
   it('debounces block persistence while applying the latest block state immediately', async () => {
     vi.useFakeTimers()
@@ -2209,6 +2368,31 @@ describe('createWorkspaceStore mindmaps', () => {
       mindmapId: (block as { mindmapId: string }).mindmapId,
     })
     expect(state.mindmaps).toHaveLength(1)
+  })
+
+  it('inserts a block before the selected block when requested', async () => {
+    const repository = createMemoryRepository(createWorkspace())
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    await store.getState().insertParagraphBlock('page_1', 'alpha')
+    await store.getState().insertParagraphBlock('page_1', 'beta')
+    const targetBlockId = store.getState().pages[0]?.blocks[1]?.id
+
+    const inserted = await (
+      store.getState().insertBlockAfter as (
+        pageId: string,
+        blockId: string,
+        type: 'paragraph',
+        position: 'before',
+      ) => Promise<{ id: string } | null>
+    )('page_1', targetBlockId!, 'paragraph', 'before')
+
+    expect(store.getState().pages[0]?.blocks.map((block) => block.id)).toEqual([
+      store.getState().pages[0]?.blocks[0]?.id,
+      inserted?.id,
+      targetBlockId,
+    ])
   })
 
   it('turns a block into a mindmap and preserves the block id', async () => {

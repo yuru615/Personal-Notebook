@@ -9,6 +9,7 @@ export const DEFAULT_PAGE_DISPLAY_DEFAULTS: PageDisplayDefaults = {
   isSmallText: false,
   fontFamily: 'default',
   showOutline: true,
+  showProperties: false,
 }
 
 export function createInboxPage(now = new Date().toISOString()): PageRecord {

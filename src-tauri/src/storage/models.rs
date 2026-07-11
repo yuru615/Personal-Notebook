@@ -44,6 +44,8 @@ pub struct WorkspaceSettings {
     pub pinned_sidebar_items: Vec<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clipboard_capture_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_selection_start_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -51,6 +53,8 @@ pub struct WorkspaceSettings {
 pub struct AppSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub close_action: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accent_theme: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

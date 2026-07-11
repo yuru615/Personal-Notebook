@@ -14,6 +14,9 @@ node_modules
 dist
 dist-ssr
 src-tauri/target
+.cargo-target
+.cargo-target-local
+.tmp
 
 # Test and coverage outputs
 coverage

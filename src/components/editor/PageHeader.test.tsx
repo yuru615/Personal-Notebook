@@ -88,6 +88,19 @@ describe('PageHeader', () => {
     expect(onChangeIcon).toHaveBeenCalledWith(null)
   })
 
+  it('does not restore the default icon after a page icon was removed', () => {
+    render(
+      <PageHeader
+        page={{ ...page, icon: null, iconHidden: true }}
+        onRename={vi.fn()}
+        onChangeIcon={vi.fn()}
+        onChangeCover={vi.fn()}
+      />,
+    )
+
+    expect(document.querySelector('.page-header-icon')?.textContent).toBe('')
+  })
+
   it('opens the cover picker and updates the page cover', async () => {
     const user = userEvent.setup()
     const onChangeCover = vi.fn()

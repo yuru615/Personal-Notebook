@@ -113,6 +113,23 @@ export async function importImageAssetFromPath(path: string): Promise<AssetMeta 
   })
 }
 
+export async function importMarkdownImageAsset(
+  markdownPath: string | undefined,
+  source: string,
+): Promise<AssetMeta | null> {
+  const imagePath = resolveMarkdownRelativePath(markdownPath, source)
+
+  if (!imagePath) {
+    return null
+  }
+
+  try {
+    return await importImageAssetFromPath(imagePath)
+  } catch {
+    return null
+  }
+}
+
 export function writeAssetBytes(input: {
   name: string
   mimeType: string
@@ -215,6 +232,40 @@ function readBrowserAssetRecord(assetId: string): BrowserAssetRecord {
 
 function createBrowserAssetId() {
   return `asset_${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}_${Math.random().toString(36).slice(2)}`}`
+}
+
+function resolveMarkdownRelativePath(markdownPath: string | undefined, source: string) {
+  const normalizedSource = source.trim()
+
+  if (
+    !markdownPath ||
+    !normalizedSource ||
+    /^(?:[a-z][a-z0-9+.-]*:|[\\/])\/\//i.test(normalizedSource) ||
+    /^[\\/]/.test(normalizedSource) ||
+    /^[a-z]:[\\/]/i.test(normalizedSource)
+  ) {
+    return null
+  }
+
+  const separator = markdownPath.includes('\\') ? '\\' : '/'
+  const pathParts = markdownPath.split(/[\\/]+/).slice(0, -1)
+
+  for (const part of normalizedSource.split(/[\\/]+/)) {
+    if (!part || part === '.') {
+      continue
+    }
+
+    if (part === '..') {
+      if (pathParts.length > 1) {
+        pathParts.pop()
+      }
+      continue
+    }
+
+    pathParts.push(part)
+  }
+
+  return pathParts.join(separator)
 }
 
 function bytesToBase64(bytes: Uint8Array) {

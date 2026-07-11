@@ -25,10 +25,12 @@ function renderPanel(overrides: Partial<ComponentProps<typeof ExportImportPanel>
       smallText={false}
       fontFamily="default"
       outlineVisible={true}
+      propertiesVisible={true}
       onToggleAdaptiveWidth={vi.fn()}
       onToggleSmallText={vi.fn()}
       onToggleFontFamily={vi.fn()}
       onToggleOutlineVisible={vi.fn()}
+      onTogglePropertiesVisible={vi.fn()}
       onExportArchive={vi.fn()}
       onExportWorkspace={vi.fn()}
       onImportWorkspace={vi.fn()}
@@ -180,6 +182,18 @@ describe('ExportImportPanel', () => {
     await user.click(screen.getByLabelText(uiCopy.page.outlineVisible))
 
     expect(onToggleOutlineVisible).toHaveBeenCalledWith(false)
+  })
+
+  it('toggles page property visibility from the page menu', async () => {
+    const user = userEvent.setup()
+    const onTogglePropertiesVisible = vi.fn()
+
+    renderPanel({ propertiesVisible: true, onTogglePropertiesVisible })
+
+    await user.click(screen.getByRole('button', { name: uiCopy.page.menu }))
+    await user.click(screen.getByLabelText('显示页面属性'))
+
+    expect(onTogglePropertiesVisible).toHaveBeenCalledWith(false)
   })
 
   it('triggers orphan whiteboard cleanup from the page menu', async () => {

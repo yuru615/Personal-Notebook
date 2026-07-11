@@ -104,6 +104,7 @@ describe('fileAccess', () => {
     expect(result).toEqual({
       name: 'backup.json',
       contents: '{"pages":[]}',
+      path: '/tmp/backup.json',
     })
   })
 

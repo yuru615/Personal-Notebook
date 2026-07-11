@@ -128,6 +128,28 @@ describe('RichTextEditable', () => {
     expect(vi.mocked(openExternalLink)).toHaveBeenCalledWith('https://example.com')
   })
 
+  it('opens the linked URL on a normal click when direct activation is selected', () => {
+    vi.mocked(openExternalLink).mockClear()
+    render(
+      <RichTextEditable
+        ariaLabel="body"
+        className="block-input paragraph-block"
+        value="hello world"
+        richText={[
+          { text: 'hello ' },
+          { text: 'world', link: 'https://example.com' },
+        ]}
+        linkOpenMode="direct"
+        onChange={vi.fn()}
+      />,
+    )
+
+    const link = screen.getByRole('link', { name: 'world' })
+    fireEvent.click(link)
+
+    expect(vi.mocked(openExternalLink)).toHaveBeenCalledWith('https://example.com')
+  })
+
   it('marks the editor as link-open-ready while ctrl-hovering a link', () => {
     render(
       <RichTextEditable

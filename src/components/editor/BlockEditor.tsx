@@ -1,23 +1,31 @@
 ﻿import type { KeyboardEvent, ReactNode } from 'react'
+import type { RefObject } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { Suspense, lazy } from 'react'
 import { getTextBlockStyle, isTextStyleableBlock } from '../../domain/blockTextStyle'
 import type {
   BlockRecord,
+  BlockSelectionStartMode,
   BlockType,
   BoardRecord,
   DataTableRecord,
+  ExternalLinkOpenMode,
   MindmapRecord,
   PageRecord,
   SyncedBlockGroupRecord,
   SyncedBlockMode,
   TextBlockStyle,
 } from '../../domain/types'
+import { clipboardHtmlToStructuredBlocks } from '../../domain/clipboardCapture'
+import { parseMarkdownBlocks } from '../../domain/markdownImport'
 import {
   buildSyncedPickerItems,
   collectSyncedGroupInstances,
   findPrimaryInstanceLocation,
 } from '../../domain/syncedBlocks'
+import type { AssetMeta } from '../../lib/storageClient'
+import { importImageAssetFromPath, writeAssetBytes } from '../../lib/assets'
+import { readDesktopClipboardCandidate } from '../../lib/desktopLifecycle'
 import { uiCopy } from '../../ui/copy'
 import { buildMindmapPreviewSvgDataUrl } from '../mindmap/mindmapPreview'
 import { buildWhiteboardPreviewSvgDataUrl } from '../whiteboard/whiteboardPreview'
@@ -35,12 +43,16 @@ import { SyncedBlockContainer } from './blocks/SyncedBlockContainer'
 import { TableBlock } from './blocks/TableBlock'
 import { TodoBlock } from './blocks/TodoBlock'
 import { MediaBlock } from './blocks/MediaBlock'
+import { FileBlock } from './blocks/FileBlock'
+import { openAssetFile } from '../../lib/assetFiles'
 import { MindmapBlock } from './blocks/MindmapBlock'
 import { WhiteboardBlock } from './blocks/WhiteboardBlock'
+import type { DesktopPasteFallback, PastedImageSource } from './RichTextEditable'
 import { SyncedBlockPickerDialog } from './SyncedBlockPickerDialog'
 import { getSlashMenuOptions, SlashMenu, type SlashMenuCommand } from './SlashMenu'
 import type { ReorderPosition } from '../../utils/reorder'
 import type { PageRelationAutocompleteItem } from './PageRelationAutocomplete'
+import { createBlock } from '../../utils/blockFactory'
 
 const EmbeddedDataTableBlock = lazy(() =>
   import('./blocks/EmbeddedDataTableBlock').then((module) => ({
@@ -54,7 +66,7 @@ interface DropTarget {
 }
 interface FocusRequest {
   blockId: string
-  mode: 'any' | 'rich_text' | 'textarea'
+  mode: 'any' | 'rich_text' | 'textarea' | 'delete_target'
 }
 interface BlockSlashCommand {
   blockId: string
@@ -67,6 +79,37 @@ interface PendingSyncedPicker {
   target: { kind: 'replace'; blockId: string } | { kind: 'append' }
 }
 
+interface SelectionRect {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+interface MarqueePoint {
+  x: number
+  y: number
+  documentY: number
+}
+
+function getCaretRangeAtPoint(clientX: number, clientY: number) {
+  const documentWithCaretRange = document as Document & {
+    caretRangeFromPoint?: (x: number, y: number) => Range | null
+  }
+
+  return documentWithCaretRange.caretRangeFromPoint?.(clientX, clientY) ?? null
+}
+
+const MARQUEE_START_THRESHOLD = 6
+const SAFE_SELECTION_ZONE_WIDTH = 44
+
+type PasteTargetBlock = Extract<
+  BlockRecord,
+  {
+    type: 'paragraph' | 'heading_1' | 'heading_2' | 'heading_3' | 'todo'
+  }
+>
+
 function isPlainEmptyParagraphBlock(block: BlockRecord) {
   return (
     block.type === 'paragraph' &&
@@ -75,6 +118,21 @@ function isPlainEmptyParagraphBlock(block: BlockRecord) {
     !block.textColor &&
     !block.backgroundColor &&
     !block.textAlign
+  )
+}
+
+function isEmptyPasteTargetBlock(block: PasteTargetBlock) {
+  return (
+    block.text.trim().length === 0 &&
+    (!block.richText || block.richText.every((segment) => segment.text.trim().length === 0))
+  )
+}
+
+function isMarkdownClipboardText(value: string) {
+  return (
+    /(^|\n)\s{0,3}(?:#{1,3}\s+|[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+|`{3,}|~{3,}|\|.+\|\s*\n\s*\|\s*:?-{3,})/.test(
+      value,
+    ) || /\*\*[^*]+\*\*|~~[^~]+~~|`[^`]+`|\*[^*\n]+\*|\[[^\]]+\]\(https?:\/\//.test(value)
   )
 }
 
@@ -87,18 +145,36 @@ interface BlockEditorProps {
   syncedBlockGroups?: SyncedBlockGroupRecord[]
   allowedBlockTypes?: BlockType[]
   onUpdateBlock: (blockId: string, nextBlock: BlockRecord) => void
+  onPasteBlocks?: (
+    targetBlockId: string | null,
+    blocks: BlockRecord[],
+    replaceTarget?: boolean,
+  ) => Promise<void> | void
   onInsert?: (type: BlockType) => Promise<string | null> | string | null | void
   onInsertParagraph?: (text: string) => void
-  onInsertBlockAfter?: (blockId: string, type: BlockType) => Promise<string | null> | string | null
+  onInsertBlockAfter?: (
+    blockId: string,
+    type: BlockType,
+    position?: 'before' | 'after',
+  ) => Promise<string | null> | string | null
   onDeleteBlock?: (blockId: string) => void
+  onDeleteBlocks?: (blockIds: string[]) => Promise<void> | void
   onMergeBlockWithPrevious?: (blockId: string) => Promise<string | null> | string | null
   onDuplicateBlock?: (blockId: string) => void
   onTurnInto?: (blockId: string, type: BlockType) => Promise<void> | void
+  blockSelectionStartMode?: BlockSelectionStartMode
+  linkOpenMode?: ExternalLinkOpenMode
+  selectionHostRef?: RefObject<HTMLElement | null>
   onReorderBlock?: (
     activeBlockId: string,
     overBlockId: string,
     position: ReorderPosition,
   ) => void
+  onReorderBlockGroup?: (
+    activeBlockIds: string[],
+    overBlockId: string,
+    position: ReorderPosition,
+  ) => Promise<void> | void
   onOpenChildPage?: (pageId: string) => void
   onOpenWhiteboard?: (boardId: string) => void
   onRestoreWhiteboard?: (boardId: string) => void
@@ -137,14 +213,20 @@ export function BlockEditor({
   syncedBlockGroups = [],
   allowedBlockTypes,
   onUpdateBlock,
+  onPasteBlocks,
   onInsert,
   onInsertParagraph,
   onInsertBlockAfter,
   onDeleteBlock,
+  onDeleteBlocks,
   onMergeBlockWithPrevious,
   onDuplicateBlock,
   onTurnInto,
+  blockSelectionStartMode,
+  linkOpenMode = 'modifier',
+  selectionHostRef,
   onReorderBlock,
+  onReorderBlockGroup,
   onOpenChildPage,
   onOpenWhiteboard,
   onRestoreWhiteboard,
@@ -177,13 +259,26 @@ export function BlockEditor({
   const draggingBlockId = useRef<string | null>(null)
   const pendingFocusBlockId = useRef<FocusRequest | null>(null)
   const scrollFrameId = useRef<number | null>(null)
+  const surfaceRef = useRef<HTMLElement | null>(null)
   const slashMenuAnchorRef = useRef<HTMLDivElement | null>(null)
   const slashMenuRef = useRef<HTMLDivElement | null>(null)
+  const marqueeStartRef = useRef<MarqueePoint | null>(null)
+  const editableMarqueeCandidateRef = useRef<{
+    row: HTMLElement
+    start: MarqueePoint
+  } | null>(null)
+  const marqueePointerRef = useRef<{ x: number; y: number } | null>(null)
+  const trailingSurfaceMarqueeCandidateRef = useRef(false)
+  const textSelectionStartRef = useRef<{ range: Range; root: HTMLElement } | null>(null)
+  const marqueeActiveRef = useRef(false)
   const [draggingVisualBlockId, setDraggingVisualBlockId] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
   const [blockSlashCommand, setBlockSlashCommand] = useState<BlockSlashCommand | null>(null)
   const [syncedRangeStartBlockId, setSyncedRangeStartBlockId] = useState<string | null>(null)
   const [pendingSyncedPicker, setPendingSyncedPicker] = useState<PendingSyncedPicker | null>(null)
+  const [selectedBlockIds, setSelectedBlockIds] = useState<string[]>([])
+  const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null)
+  const [draggingSelectionBlockIds, setDraggingSelectionBlockIds] = useState<string[] | null>(null)
   const [focusRequestVersion, setFocusRequestVersion] = useState(0)
   const blockSlashMenuOptions = blockSlashCommand
     ? getSlashMenuOptions(blockSlashCommand.query, allowedBlockTypes)
@@ -200,6 +295,9 @@ export function BlockEditor({
     menuRef: slashMenuRef,
   })
   const trailingBlock = page.blocks.length > 0 ? page.blocks[page.blocks.length - 1] : null
+  const orderedSelectedBlockIds = page.blocks
+    .map((block) => block.id)
+    .filter((id) => selectedBlockIds.includes(id))
   const syncedPickerItems = buildSyncedPickerItems(allPages, syncedBlockGroups)
 
   useEffect(() => {
@@ -243,15 +341,323 @@ export function BlockEditor({
   )
 
   useEffect(() => {
+    marqueeStartRef.current = null
+    editableMarqueeCandidateRef.current = null
+    marqueePointerRef.current = null
+    trailingSurfaceMarqueeCandidateRef.current = false
+    marqueeActiveRef.current = false
+    setSelectedBlockIds([])
+    setSelectionRect(null)
+    setDraggingSelectionBlockIds(null)
     setSyncedRangeStartBlockId(null)
     setPendingSyncedPicker(null)
     setBlockSlashCommand(null)
   }, [page.id])
 
+  useEffect(() => {
+    setSelectedBlockIds((current) => current.filter((id) => page.blocks.some((block) => block.id === id)))
+  }, [page.blocks])
+
+  useEffect(() => {
+    function handlePointerMove(event: PointerEvent) {
+      marqueePointerRef.current = { x: event.clientX, y: event.clientY }
+      if (
+        updateMarqueeSelection(event.clientX, event.clientY) ||
+        updateCrossBlockTextSelection(event.clientX, event.clientY)
+      ) {
+        event.preventDefault()
+      }
+    }
+
+    function handlePointerUp() {
+      finishMarqueeSelection()
+    }
+
+    function handleWindowScroll() {
+      const pointer = marqueePointerRef.current
+
+      if (pointer && marqueeStartRef.current) {
+        updateMarqueeSelection(pointer.x, pointer.y)
+      }
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+    window.addEventListener('scroll', handleWindowScroll, true)
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('scroll', handleWindowScroll, true)
+    }
+  }, [])
+
+  useEffect(() => {
+    const selectionHost = selectionHostRef?.current
+
+    if (!selectionHost) {
+      return
+    }
+
+    function handleSelectionHostPointerDown(event: PointerEvent) {
+      const target = event.target
+      const surface = surfaceRef.current
+
+      if (!(target instanceof Element) || !surface || surface.contains(target)) {
+        return
+      }
+
+      const surfaceRect = surface.getBoundingClientRect()
+      const startsBesideBody = event.clientX < surfaceRect.left || event.clientX > surfaceRect.right
+      const isWithinEditorHeight =
+        event.clientY >= surfaceRect.top && event.clientY <= surfaceRect.bottom
+
+      if (event.button !== 0 || !startsBesideBody || !isWithinEditorHeight) {
+        return
+      }
+
+      event.preventDefault()
+      clearBlockSelection()
+      marqueeStartRef.current = createMarqueePoint(event.clientX, event.clientY)
+    }
+
+    selectionHost.addEventListener('pointerdown', handleSelectionHostPointerDown, true)
+
+    return () => {
+      selectionHost.removeEventListener('pointerdown', handleSelectionHostPointerDown, true)
+    }
+  }, [page.id, selectionHostRef])
+
   function clearDragState() {
     draggingBlockId.current = null
     setDraggingVisualBlockId(null)
     setDropTarget(null)
+  }
+
+  function clearBlockSelection() {
+    marqueeStartRef.current = null
+    editableMarqueeCandidateRef.current = null
+    marqueePointerRef.current = null
+    trailingSurfaceMarqueeCandidateRef.current = false
+    textSelectionStartRef.current = null
+    marqueeActiveRef.current = false
+    setSelectionRect(null)
+    setSelectedBlockIds([])
+  }
+
+  function canStartMarqueeFrom(surface: HTMLElement, clientX: number) {
+    if (blockSelectionStartMode === 'content_allowed') {
+      return true
+    }
+
+    const surfaceRect = surface.getBoundingClientRect()
+    return clientX - surfaceRect.left <= SAFE_SELECTION_ZONE_WIDTH
+  }
+
+  function createMarqueePoint(clientX: number, clientY: number): MarqueePoint {
+    return {
+      x: clientX,
+      y: clientY,
+      documentY: clientY + window.scrollY,
+    }
+  }
+
+  function updateMarqueeSelection(clientX: number, clientY: number) {
+    marqueePointerRef.current = { x: clientX, y: clientY }
+
+    if (!marqueeStartRef.current && editableMarqueeCandidateRef.current) {
+      const { row, start } = editableMarqueeCandidateRef.current
+      const rowRect = row.getBoundingClientRect()
+
+      if (clientY >= rowRect.top && clientY <= rowRect.bottom) {
+        return false
+      }
+
+      marqueeStartRef.current = start
+      editableMarqueeCandidateRef.current = null
+    }
+
+    const start = marqueeStartRef.current
+    const surface = surfaceRef.current
+
+    if (!start || !surface) {
+      return false
+    }
+
+    if (!marqueeActiveRef.current) {
+      const distance = Math.hypot(
+        clientX - start.x,
+        clientY + window.scrollY - start.documentY,
+      )
+      if (distance < MARQUEE_START_THRESHOLD) {
+        return false
+      }
+      marqueeActiveRef.current = true
+      trailingSurfaceMarqueeCandidateRef.current = false
+      window.getSelection()?.removeAllRanges()
+    }
+
+    const left = Math.min(start.x, clientX)
+    const startViewportY = start.documentY - window.scrollY
+    const top = Math.min(startViewportY, clientY)
+    const right = Math.max(start.x, clientX)
+    const bottom = Math.max(startViewportY, clientY)
+    const documentTop = Math.min(start.documentY, clientY + window.scrollY)
+    const documentBottom = Math.max(start.documentY, clientY + window.scrollY)
+
+    setSelectionRect({
+      left,
+      top: Math.max(0, top),
+      width: right - left,
+      height: Math.max(0, Math.min(window.innerHeight, bottom) - Math.max(0, top)),
+    })
+
+    const nextSelected = Array.from(surface.querySelectorAll<HTMLElement>('.editor-row[data-block-id]'))
+      .filter((row) => {
+        const rect = row.getBoundingClientRect()
+        const rowTop = rect.top + window.scrollY
+        const rowBottom = rect.bottom + window.scrollY
+        return !(
+          rect.right < left ||
+          rect.left > right ||
+          rowBottom < documentTop ||
+          rowTop > documentBottom
+        )
+      })
+      .map((row) => row.dataset.blockId)
+      .filter((value): value is string => Boolean(value))
+
+    setSelectedBlockIds(nextSelected)
+    return true
+  }
+
+  function updateCrossBlockTextSelection(clientX: number, clientY: number) {
+    const start = textSelectionStartRef.current
+
+    if (!start) {
+      return false
+    }
+
+    const target = document.elementFromPoint?.(clientX, clientY)
+    const targetEditable = target?.closest<HTMLElement>('[contenteditable="true"]')
+
+    if (!targetEditable || targetEditable === start.root) {
+      return false
+    }
+
+    const end = getCaretRangeAtPoint(clientX, clientY)
+    const selection = window.getSelection()
+
+    if (!end || !selection) {
+      return false
+    }
+
+    const range = document.createRange()
+    range.setStart(start.range.startContainer, start.range.startOffset)
+    range.setEnd(end.startContainer, end.startOffset)
+
+    if (range.collapsed) {
+      range.setStart(end.startContainer, end.startOffset)
+      range.setEnd(start.range.startContainer, start.range.startOffset)
+    }
+
+    selection.removeAllRanges()
+    selection.addRange(range)
+    return true
+  }
+
+  function finishMarqueeSelection() {
+    const didSelectBlocks = marqueeActiveRef.current
+    const shouldFocusTrailingInsertTarget =
+      trailingSurfaceMarqueeCandidateRef.current && !didSelectBlocks
+    marqueeStartRef.current = null
+    editableMarqueeCandidateRef.current = null
+    textSelectionStartRef.current = null
+    marqueePointerRef.current = null
+    trailingSurfaceMarqueeCandidateRef.current = false
+    marqueeActiveRef.current = false
+    setSelectionRect(null)
+
+    if (didSelectBlocks) {
+      surfaceRef.current?.focus({ preventScroll: true })
+    } else if (shouldFocusTrailingInsertTarget) {
+      focusTrailingInsertTarget()
+    }
+  }
+
+  function handleSurfacePress(
+    surface: HTMLElement,
+    target: Element,
+    clientX: number,
+    clientY: number,
+    button: number | undefined,
+    preventDefault: () => void,
+  ) {
+    editableMarqueeCandidateRef.current = null
+    textSelectionStartRef.current = null
+    trailingSurfaceMarqueeCandidateRef.current = false
+
+    if (blockSlashCommand) {
+      const targetRow = target.closest<HTMLElement>('.editor-row')
+      if (
+        !slashMenuRef.current?.contains(target) &&
+        targetRow?.dataset.blockId !== blockSlashCommand.blockId
+      ) {
+        setBlockSlashCommand(null)
+      }
+    }
+
+    if (target === surface && isPointerInTrailingSurfaceGap(surface, clientY)) {
+      preventDefault()
+      clearBlockSelection()
+      if (blockSelectionStartMode === 'content_allowed' && button === 0) {
+        trailingSurfaceMarqueeCandidateRef.current = true
+        marqueeStartRef.current = createMarqueePoint(clientX, clientY)
+      } else {
+        focusTrailingInsertTarget()
+      }
+      return
+    }
+
+    if (target.closest('.block-handle')) {
+      return
+    }
+
+    if (target.closest('.editor-row')) {
+      clearBlockSelection()
+    }
+
+    if (target.closest('.empty-block-row')) {
+      return
+    }
+
+    const editableRow = target.closest<HTMLElement>('.editor-row')
+    if (target.closest('[contenteditable="true"], input, textarea, button, a, select')) {
+      if (blockSelectionStartMode === 'content_allowed' && button === 0 && editableRow) {
+        editableMarqueeCandidateRef.current = {
+          row: editableRow,
+          start: createMarqueePoint(clientX, clientY),
+        }
+      } else if (blockSelectionStartMode !== 'content_allowed' && button === 0) {
+        const editable = target.closest<HTMLElement>('[contenteditable="true"]')
+        const range = getCaretRangeAtPoint(clientX, clientY)
+
+        if (editable && range) {
+          textSelectionStartRef.current = { root: editable, range }
+        }
+      }
+      return
+    }
+
+    if ((typeof button === 'number' && button > 0) || !canStartMarqueeFrom(surface, clientX)) {
+      return
+    }
+
+    if (blockSelectionStartMode !== 'content_allowed') {
+      preventDefault()
+    }
+
+    marqueeStartRef.current = createMarqueePoint(clientX, clientY)
   }
 
   function getDropPosition(element: HTMLElement, clientY: number): ReorderPosition {
@@ -304,6 +710,7 @@ export function BlockEditor({
       children
     )
     const isDragging = draggingVisualBlockId === blockId
+    const isSelected = selectedBlockIds.includes(blockId)
     const dropPosition = dropTarget?.blockId === blockId ? dropTarget.position : null
     const rowKindClassName =
       block.type === 'heading_1' || block.type === 'heading_2' || block.type === 'heading_3'
@@ -318,6 +725,7 @@ export function BlockEditor({
     const rowClassName = [
       'editor-row',
       rowKindClassName,
+      isSelected ? 'editor-row-selected' : '',
       isDragging ? 'editor-row-dragging' : '',
       dropPosition === 'before' ? 'editor-row-drop-target-before' : '',
       dropPosition === 'after' ? 'editor-row-drop-target-after' : '',
@@ -393,6 +801,18 @@ export function BlockEditor({
         onDrop={(event) => {
           event.preventDefault()
 
+          if (draggingSelectionBlockIds && draggingSelectionBlockIds.length > 0) {
+            const position =
+              dropTarget?.blockId === blockId
+                ? dropTarget.position
+                : getDropPosition(event.currentTarget, event.clientY)
+            void onReorderBlockGroup?.(draggingSelectionBlockIds, blockId, position)
+            setDraggingSelectionBlockIds(null)
+            clearBlockSelection()
+            clearDragState()
+            return
+          }
+
           if (draggingBlockId.current && draggingBlockId.current !== blockId) {
             const position =
               dropTarget?.blockId === blockId
@@ -412,9 +832,17 @@ export function BlockEditor({
           onDragStart={() => {
             draggingBlockId.current = blockId
             setDraggingVisualBlockId(blockId)
+            setDraggingSelectionBlockIds(
+              orderedSelectedBlockIds.includes(blockId) && orderedSelectedBlockIds.length > 1
+                ? orderedSelectedBlockIds
+                : null,
+            )
             setDropTarget(null)
           }}
-          onDragEnd={clearDragState}
+          onDragEnd={() => {
+            setDraggingSelectionBlockIds(null)
+            clearDragState()
+          }}
           onChangeTextStyle={
             textStyleableBlock
               ? (nextStyle) => handleChangeTextStyle(textStyleableBlock, nextStyle)
@@ -423,11 +851,20 @@ export function BlockEditor({
           onInsertPick={(type) => {
             void handleInsertMenuCommand(blockId, type)
           }}
+          onInsertAbove={() => {
+            void insertBlockAfter(blockId, 'paragraph', 'before')
+          }}
+          onInsertBelow={() => {
+            void insertBlockAfter(blockId, 'paragraph')
+          }}
           onTurnInto={(type) => {
             void turnBlockInto(blockId, type)
           }}
           onDuplicate={() => onDuplicateBlock?.(blockId)}
-          onDelete={() => onDeleteBlock?.(blockId)}
+          onDelete={() => {
+            focusPreviousBlockAfterDelete(blockId)
+            onDeleteBlock?.(blockId)
+          }}
         >
           {content}
         </BlockFrame>
@@ -474,8 +911,15 @@ export function BlockEditor({
     setFocusRequestVersion((version) => version + 1)
   }
 
-  async function insertBlockAfter(blockId: string, type: BlockType) {
-    const nextBlockId = await onInsertBlockAfter?.(blockId, type)
+  async function insertBlockAfter(
+    blockId: string,
+    type: BlockType,
+    position: 'before' | 'after' = 'after',
+  ) {
+    const nextBlockId =
+      position === 'after'
+        ? await onInsertBlockAfter?.(blockId, type)
+        : await onInsertBlockAfter?.(blockId, type, position)
 
     if (nextBlockId) {
       requestBlockFocus(nextBlockId)
@@ -501,6 +945,209 @@ export function BlockEditor({
   async function turnBlockInto(blockId: string, type: BlockType) {
     await onTurnInto?.(blockId, type)
     requestBlockFocus(blockId, getFocusModeForBlockType(type))
+  }
+
+  async function createImageBlockFromPasteSource(source: PastedImageSource, blockId: string) {
+    if (source instanceof File) {
+      try {
+        const bytes = new Uint8Array(await source.arrayBuffer())
+        if (bytes.byteLength > 0) {
+          const mimeType = source.type || 'image/png'
+          const asset = await writeAssetBytes({
+            name: getPastedImageName(source, mimeType),
+            mimeType,
+            bytes,
+          })
+
+          return createImageBlock(blockId, asset)
+        }
+      } catch {
+        // Fall through to the desktop clipboard fallback below.
+      }
+
+      const fallbackCandidate = await readDesktopClipboardCandidate()
+      if (fallbackCandidate?.kind === 'image_file') {
+        const asset = await importImageAssetFromPath(fallbackCandidate.path)
+        if (!asset) {
+          throw new Error('pasted image path could not be imported')
+        }
+
+        return createImageBlock(blockId, asset)
+      }
+
+      if (fallbackCandidate?.kind === 'image_bytes') {
+        const asset = await writeAssetBytes({
+          name: 'pasted-image.png',
+          mimeType: 'image/png',
+          bytes: fallbackCandidate.bytes,
+        })
+        return createImageBlock(blockId, asset)
+      }
+
+      throw new Error('pasted image could not be read')
+    }
+
+    if (source.kind === 'image_file') {
+      const asset = await importImageAssetFromPath(source.path)
+      if (!asset) {
+        throw new Error('pasted image path could not be imported')
+      }
+
+      return createImageBlock(blockId, asset)
+    }
+
+    const asset = await writeAssetBytes({
+      name: 'pasted-image.png',
+      mimeType: 'image/png',
+      bytes: source.bytes,
+    })
+
+    return createImageBlock(blockId, asset)
+  }
+
+  async function handlePasteImageIntoBlock(block: PasteTargetBlock, source: PastedImageSource) {
+    if (isEmptyPasteTargetBlock(block)) {
+      if (onTurnInto) {
+        await onTurnInto(block.id, 'image')
+      }
+      onUpdateBlock(block.id, await createImageBlockFromPasteSource(source, block.id))
+      return
+    }
+
+    const nextBlockId = await onInsertBlockAfter?.(block.id, 'image')
+    if (!nextBlockId) {
+      return
+    }
+
+    onUpdateBlock(nextBlockId, await createImageBlockFromPasteSource(source, nextBlockId))
+  }
+
+  async function handlePasteImageIntoTrailingRow(source: PastedImageSource) {
+    const nextBlockId = await onInsert?.('image')
+    if (!nextBlockId) {
+      return
+    }
+
+    onUpdateBlock(nextBlockId, await createImageBlockFromPasteSource(source, nextBlockId))
+  }
+
+  function getPastedStructuredBlocks(clipboardData: DataTransfer): BlockRecord[] | null {
+    if (typeof clipboardData.getData !== 'function') {
+      return null
+    }
+
+    return getPastedStructuredBlocksFromText(
+      clipboardData.getData('text/markdown'),
+      clipboardData.getData('text/plain') || clipboardData.getData('Text'),
+      clipboardData.getData('text/html'),
+    )
+  }
+
+  function getPastedStructuredBlocksFromText(
+    markdown: string,
+    text: string,
+    html: string | null | undefined,
+  ): BlockRecord[] | null {
+    if (isMarkdownClipboardText(markdown)) {
+      return parseMarkdownBlocks(markdown)
+    }
+
+    if (isMarkdownClipboardText(text)) {
+      return parseMarkdownBlocks(text)
+    }
+
+    return clipboardHtmlToStructuredBlocks(html ?? '')
+  }
+
+  async function insertStructuredBlocksAfter(blockId: string, blocks: BlockRecord[]) {
+    let previousBlockId = blockId
+
+    for (const block of blocks) {
+      const nextBlockId = await onInsertBlockAfter?.(previousBlockId, block.type)
+      if (!nextBlockId) {
+        return
+      }
+
+      onUpdateBlock(nextBlockId, { ...block, id: nextBlockId })
+      previousBlockId = nextBlockId
+    }
+  }
+
+  function applyPastedStructuredBlocks(target: PasteTargetBlock, blocks: BlockRecord[]) {
+    const [firstBlock, ...remainingBlocks] = blocks
+    if (onPasteBlocks) {
+      void onPasteBlocks(target.id, blocks, isEmptyPasteTargetBlock(target))
+      return true
+    }
+
+    if (isEmptyPasteTargetBlock(target)) {
+      onUpdateBlock(target.id, { ...firstBlock, id: target.id })
+      void insertStructuredBlocksAfter(target.id, remainingBlocks)
+    } else {
+      void insertStructuredBlocksAfter(target.id, blocks)
+    }
+
+    return true
+  }
+
+  function applyPastedStructuredBlocksIntoTrailingRow(blocks: BlockRecord[]) {
+    const [firstBlock, ...remainingBlocks] = blocks
+    if (onPasteBlocks) {
+      void onPasteBlocks(null, blocks)
+      return true
+    }
+
+    void Promise.resolve(onInsert?.(firstBlock.type)).then((firstBlockId) => {
+      if (!firstBlockId) {
+        return
+      }
+
+      onUpdateBlock(firstBlockId, { ...firstBlock, id: firstBlockId })
+      return insertStructuredBlocksAfter(firstBlockId, remainingBlocks)
+    })
+    return true
+  }
+
+  function handlePasteStructuredContent(target: PasteTargetBlock, clipboardData: DataTransfer) {
+    const blocks = getPastedStructuredBlocks(clipboardData)
+    return blocks && blocks.length > 0 ? applyPastedStructuredBlocks(target, blocks) : false
+  }
+
+  async function handleDesktopPasteStructuredContent(target: PasteTargetBlock) {
+    const candidate = await readDesktopClipboardCandidate()
+    if (candidate?.kind !== 'text') {
+      return {
+        handled: false,
+        imageSource:
+          candidate?.kind === 'image_bytes' || candidate?.kind === 'image_file' ? candidate : undefined,
+      } satisfies DesktopPasteFallback
+    }
+
+    const blocks = getPastedStructuredBlocksFromText('', candidate.text, candidate.html)
+    return {
+      handled: Boolean(blocks && blocks.length > 0 && applyPastedStructuredBlocks(target, blocks)),
+    } satisfies DesktopPasteFallback
+  }
+
+  function handlePasteStructuredContentIntoTrailingRow(clipboardData: DataTransfer) {
+    const blocks = getPastedStructuredBlocks(clipboardData)
+    return blocks && blocks.length > 0 ? applyPastedStructuredBlocksIntoTrailingRow(blocks) : false
+  }
+
+  async function handleDesktopPasteStructuredContentIntoTrailingRow() {
+    const candidate = await readDesktopClipboardCandidate()
+    if (candidate?.kind !== 'text') {
+      return {
+        handled: false,
+        imageSource:
+          candidate?.kind === 'image_bytes' || candidate?.kind === 'image_file' ? candidate : undefined,
+      } satisfies DesktopPasteFallback
+    }
+
+    const blocks = getPastedStructuredBlocksFromText('', candidate.text, candidate.html)
+    return {
+      handled: Boolean(blocks && blocks.length > 0 && applyPastedStructuredBlocksIntoTrailingRow(blocks)),
+    } satisfies DesktopPasteFallback
   }
 
   function openSyncedPicker(mode: SyncedBlockMode, target: PendingSyncedPicker['target']) {
@@ -611,8 +1258,22 @@ export function BlockEditor({
     const previousBlockId = currentIndex > 0 ? page.blocks[currentIndex - 1]?.id : null
 
     if (previousBlockId) {
-      requestBlockFocus(previousBlockId)
+      requestBlockFocus(previousBlockId, 'delete_target')
     }
+  }
+
+  function focusAfterBatchDelete(blockIds: string[]) {
+    const firstIndex = page.blocks.findIndex((block) => block.id === blockIds[0])
+    const previousBlockId = firstIndex > 0 ? page.blocks[firstIndex - 1]?.id : null
+
+    if (previousBlockId) {
+      requestBlockFocus(previousBlockId, 'delete_target')
+      return
+    }
+
+    window.setTimeout(() => {
+      focusTrailingInsertTarget()
+    }, 0)
   }
 
   function isAtInputStart(target: HTMLElement) {
@@ -694,7 +1355,13 @@ export function BlockEditor({
       return true
     }
 
-    return clientY >= lastChild.getBoundingClientRect().bottom
+    const lastChildRect = lastChild.getBoundingClientRect()
+
+    if (lastChildRect.bottom <= lastChildRect.top) {
+      return false
+    }
+
+    return clientY >= lastChildRect.bottom
   }
 
   function isFinalBlock(blockId: string) {
@@ -784,7 +1451,9 @@ export function BlockEditor({
         : target.value
     }
 
-    return target.isContentEditable ? target.textContent ?? '' : getEditableBlockText(block)
+    return target.isContentEditable || target.getAttribute('contenteditable') === 'true'
+      ? target.textContent ?? ''
+      : getEditableBlockText(block)
   }
 
   function handleEditableBlockKeyDown(
@@ -957,30 +1626,54 @@ export function BlockEditor({
 
   return (
     <section
+      ref={surfaceRef}
       className="editor-surface"
+      tabIndex={-1}
       onInput={keepInputInView}
+      onKeyDownCapture={(event) => {
+        if (event.key === 'Escape' && selectedBlockIds.length > 0) {
+          event.preventDefault()
+          clearBlockSelection()
+          return
+        }
+
+        if (
+          orderedSelectedBlockIds.length > 0 &&
+          !event.nativeEvent.isComposing &&
+          (event.key === 'Backspace' || event.key === 'Delete')
+        ) {
+          event.preventDefault()
+          const deletingIds = orderedSelectedBlockIds
+          clearBlockSelection()
+          void Promise.resolve(onDeleteBlocks?.(deletingIds)).then(() => {
+            focusAfterBatchDelete(deletingIds)
+          })
+        }
+      }}
       onPointerDownCapture={(event) => {
         if (!(event.target instanceof Element)) {
           return
         }
 
-        if (blockSlashCommand) {
-          const targetRow = event.target.closest<HTMLElement>('.editor-row')
-          if (
-            !slashMenuRef.current?.contains(event.target) &&
-            targetRow?.dataset.blockId !== blockSlashCommand.blockId
-          ) {
-            setBlockSlashCommand(null)
-          }
-        }
-
+        handleSurfacePress(
+          event.currentTarget,
+          event.target,
+          event.clientX,
+          event.clientY,
+          event.button,
+          () => event.preventDefault(),
+        )
+      }}
+      onPointerMoveCapture={(event) => {
         if (
-          event.target === event.currentTarget &&
-          isPointerInTrailingSurfaceGap(event.currentTarget, event.clientY)
+          updateMarqueeSelection(event.clientX, event.clientY) ||
+          updateCrossBlockTextSelection(event.clientX, event.clientY)
         ) {
           event.preventDefault()
-          focusTrailingInsertTarget()
         }
+      }}
+      onPointerUpCapture={() => {
+        finishMarqueeSelection()
       }}
     >
       {page.blocks.map((block) => {
@@ -1001,7 +1694,11 @@ export function BlockEditor({
                 style={getTextInputStyle(textStyle)}
                 placeholder={isInsertPlaceholderBlock ? uiCopy.page.typeSlash : '输入正文'}
                 insertMode={isInsertPlaceholderBlock}
+                onPasteImage={(source) => handlePasteImageIntoBlock(block, source)}
+                onPasteStructuredContent={(clipboardData) => handlePasteStructuredContent(block, clipboardData)}
+                onPasteDesktopContent={() => handleDesktopPasteStructuredContent(block)}
                 relationPages={relationPages}
+                linkOpenMode={linkOpenMode}
                 onOpenPageRelation={onOpenChildPage}
                 onCreatePageRelation={onCreatePageRelation}
                 onChange={({ text, richText }) => onUpdateBlock(block.id, { ...block, text, richText })}
@@ -1018,7 +1715,11 @@ export function BlockEditor({
                 richText={block.richText}
                 checked={block.checked}
                 style={getTextInputStyle(textStyle)}
+                onPasteImage={(source) => handlePasteImageIntoBlock(block, source)}
+                onPasteStructuredContent={(clipboardData) => handlePasteStructuredContent(block, clipboardData)}
+                onPasteDesktopContent={() => handleDesktopPasteStructuredContent(block)}
                 relationPages={relationPages}
+                linkOpenMode={linkOpenMode}
                 onOpenPageRelation={onOpenChildPage}
                 onCreatePageRelation={onCreatePageRelation}
                 onChange={({ text, richText, checked }) =>
@@ -1036,12 +1737,18 @@ export function BlockEditor({
               <ListBlock
                 type={block.type}
                 value={normalizeListItemText(block.items[0] ?? '')}
+                richText={block.richText}
                 index={getListBlockIndex(block.id, block.type)}
                 style={getTextInputStyle(textStyle)}
-                onChange={(value) =>
+                relationPages={relationPages}
+                onOpenPageRelation={onOpenChildPage}
+                onCreatePageRelation={onCreatePageRelation}
+                linkOpenMode={linkOpenMode}
+                onChange={({ text, richText }) =>
                   onUpdateBlock(block.id, {
                     ...block,
-                    items: [normalizeListItemText(value)],
+                    items: [normalizeListItemText(text)],
+                    richText,
                   })
                 }
                 onKeyDown={(event) => handleEditableBlockKeyDown(event, block)}
@@ -1084,8 +1791,22 @@ export function BlockEditor({
               <MediaBlock
                 block={block}
                 onChange={(nextBlock) => onUpdateBlock(block.id, nextBlock)}
+                onDelete={() => {
+                  focusPreviousBlockAfterDelete(block.id)
+                  onDeleteBlock?.(block.id)
+                }}
               />,
             )
+          case 'file': {
+            const assetId = block.assetId
+            return renderBlockRow(
+              block,
+              <FileBlock
+                block={block}
+                onOpen={assetId ? () => void openAssetFile(assetId) : undefined}
+              />,
+            )
+          }
           case 'child_page': {
             const childPage = childPageMap.get(block.pageId)
             return renderBlockRow(
@@ -1093,6 +1814,7 @@ export function BlockEditor({
               <ChildPageBlock
                 title={childPage?.title ?? uiCopy.page.untitled}
                 icon={childPage?.icon ?? null}
+                iconHidden={childPage?.iconHidden}
                 onOpen={() => onOpenChildPage?.(block.pageId)}
               />,
             )
@@ -1189,6 +1911,7 @@ export function BlockEditor({
                 canOpenPrimary={canOpenPrimary}
                 allPages={allPages}
                 relationPages={relationPages}
+                linkOpenMode={linkOpenMode}
                 onOpenPageRelation={onOpenChildPage}
                 onCreatePageRelation={onCreatePageRelation}
                 onUpdateGroupBlock={(groupId, blockId, nextBlock) => {
@@ -1244,6 +1967,17 @@ export function BlockEditor({
             return null
         }
       })}
+      {selectionRect ? (
+        <div
+          className="editor-selection-marquee"
+          style={{
+            left: `${selectionRect.left}px`,
+            top: `${selectionRect.top}px`,
+            width: `${selectionRect.width}px`,
+            height: `${selectionRect.height}px`,
+          }}
+        />
+      ) : null}
       {!trailingBlock || !isPlainEmptyParagraphBlock(trailingBlock) ? (
         <EmptyBlockRow
           allowedBlockTypes={allowedBlockTypes}
@@ -1253,6 +1987,9 @@ export function BlockEditor({
           onInsertParagraph={(text) => {
             onInsertParagraph?.(text)
           }}
+          onPasteImage={(source) => handlePasteImageIntoTrailingRow(source)}
+          onPasteStructuredContent={handlePasteStructuredContentIntoTrailingRow}
+          onPasteDesktopContent={handleDesktopPasteStructuredContentIntoTrailingRow}
         />
       ) : null}
       <SyncedBlockPickerDialog
@@ -1274,6 +2011,14 @@ function getFocusTargetForMode(row: HTMLElement, mode: FocusRequest['mode']) {
       return row.querySelector<HTMLElement>('.block-frame-content [contenteditable="true"]')
     case 'textarea':
       return row.querySelector<HTMLElement>('.block-frame-content textarea')
+    case 'delete_target':
+      return (
+        row.querySelector<HTMLElement>(
+          '.block-frame-content [contenteditable="true"], .block-frame-content textarea',
+        ) ??
+        row.querySelector<HTMLElement>('.block-frame-content .media-block') ??
+        row.querySelector<HTMLElement>('.block-handle')
+      )
     case 'any':
       return row.querySelector<HTMLElement>(
         '.block-frame-content [contenteditable="true"], .block-frame-content textarea, .block-frame-content input:not([type="checkbox"])',
@@ -1310,6 +2055,7 @@ function getFocusModeForBlockType(type: BlockType): FocusRequest['mode'] {
       return 'rich_text'
     case 'bulleted_list':
     case 'numbered_list':
+      return 'rich_text'
     case 'code':
       return 'textarea'
     default:
@@ -1319,6 +2065,47 @@ function getFocusModeForBlockType(type: BlockType): FocusRequest['mode'] {
 
 function normalizeListItemText(value: string) {
   return value.replace(/\r\n?/g, '\n').replace(/\n+/g, ' ')
+}
+
+function getPastedImageName(file: File, mimeType: string) {
+  const trimmedName = file.name.trim()
+  if (trimmedName.length > 0) {
+    return trimmedName
+  }
+
+  return `pasted-image.${getMimeTypeExtension(mimeType)}`
+}
+
+function getMimeTypeExtension(mimeType: string) {
+  switch (mimeType) {
+    case 'image/jpeg':
+      return 'jpg'
+    case 'image/gif':
+      return 'gif'
+    case 'image/webp':
+      return 'webp'
+    case 'image/svg+xml':
+      return 'svg'
+    default:
+      return 'png'
+  }
+}
+
+function createImageBlock(blockId: string, asset: Pick<AssetMeta, 'id' | 'name' | 'mimeType'>) {
+  const block = createBlock('image')
+
+  if (block.type !== 'image') {
+    throw new Error('Image block factory returned an unexpected block type')
+  }
+
+  return {
+    ...block,
+    id: blockId,
+    assetId: asset.id,
+    name: asset.name,
+    mimeType: asset.mimeType,
+    alt: asset.name,
+  }
 }
 
 function buildPageRelationPathLabel(
