@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildClipboardTextBlocks,
+  clipboardHtmlToStructuredPasteItems,
   clipboardHtmlToStructuredBlocks,
   clipboardHtmlToParagraphBlocks,
   clipboardPlainTextToParagraphBlocks,
@@ -40,6 +41,70 @@ describe('clipboardCapture', () => {
           { text: 'Link', link: 'https://example.com' },
           { text: '\nTail' },
         ],
+      },
+    ])
+  })
+
+  it('keeps inline formatting from Word style attributes', () => {
+    expect(
+      clipboardHtmlToParagraphBlocks(
+        '<p class="MsoNormal"><span style="font-weight: 700">Bold</span> <span style="font-style: italic">Italic</span> <span style="text-decoration: underline line-through">Marked</span> <span style="color: #d44c47">Red</span><o:p></o:p></p>',
+      ),
+    ).toMatchObject([
+      {
+        type: 'paragraph',
+        text: 'Bold Italic Marked Red',
+        richText: [
+          { text: 'Bold', bold: true },
+          { text: ' ' },
+          { text: 'Italic', italic: true },
+          { text: ' ' },
+          { text: 'Marked', underline: true, strike: true },
+          { text: ' ' },
+          { text: 'Red', color: 'red' },
+        ],
+      },
+    ])
+  })
+
+  it('maps Word heading paragraph styles to heading blocks', () => {
+    expect(
+      clipboardHtmlToStructuredBlocks(
+        '<p class="MsoHeading1">Main heading</p><p style="mso-style-name: Heading 2">Subheading</p><p>Body text</p>',
+      ),
+    ).toMatchObject([
+      { type: 'heading_1', text: 'Main heading' },
+      { type: 'heading_2', text: 'Subheading' },
+      { type: 'paragraph', text: 'Body text' },
+    ])
+  })
+
+  it('preserves Word outline headings, tables, and inline images as structured paste items', () => {
+    expect(
+      clipboardHtmlToStructuredPasteItems(
+        [
+          '<style>p.CustomWordHeading { mso-outline-level: 2; }</style>',
+          '<p class="CustomWordHeading">Outline heading</p>',
+          '<table><tr><td>Column A</td><td>Column B</td></tr><tr><td>One</td><td>Two</td></tr></table>',
+          '<p><img src="data:image/png;base64,iVBORw0KGgo=" alt="Word diagram"></p>',
+        ].join(''),
+      ),
+    ).toMatchObject([
+      { kind: 'block', block: { type: 'heading_2', text: 'Outline heading' } },
+      {
+        kind: 'block',
+        block: {
+          type: 'table',
+          rows: [
+            ['Column A', 'Column B'],
+            ['One', 'Two'],
+          ],
+        },
+      },
+      {
+        kind: 'image',
+        source: 'data:image/png;base64,iVBORw0KGgo=',
+        alt: 'Word diagram',
       },
     ])
   })

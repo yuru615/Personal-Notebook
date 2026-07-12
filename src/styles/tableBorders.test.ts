@@ -5,7 +5,7 @@ const styles = readFileSync('src/styles/index.css', 'utf8')
 
 function cssRule(selector: string) {
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const match = styles.match(new RegExp(`${escapedSelector}\\s*\\{(?<body>[^}]*)\\}`))
+  const match = styles.match(new RegExp(`(?:^|\\n)${escapedSelector}\\s*\\{(?<body>[^}]*)\\}`))
 
   if (!match?.groups?.body) {
     throw new Error(`Missing CSS rule for ${selector}`)

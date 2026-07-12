@@ -206,6 +206,115 @@
     panel.insertBefore(renameButton, panel.firstChild)
   }
 
+  function selectNextNodeInDirection(direction) {
+    const selectedNode = document.querySelector('.node-card-shell-selected[data-node-id]')
+    if (!(selectedNode instanceof HTMLElement)) {
+      return false
+    }
+
+    const selectedRect = selectedNode.getBoundingClientRect()
+    const selectedCenter = {
+      x: selectedRect.left + selectedRect.width / 2,
+      y: selectedRect.top + selectedRect.height / 2,
+    }
+    const horizontal = direction === 'left' || direction === 'right'
+    const sign = direction === 'left' || direction === 'up' ? -1 : 1
+
+    const target = Array.from(document.querySelectorAll('.node-card-shell[data-node-id]'))
+      .filter((node) => node instanceof HTMLElement && node !== selectedNode)
+      .map((node) => {
+        const rect = node.getBoundingClientRect()
+        const center = {
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+        }
+        const primaryDelta = (horizontal ? center.x - selectedCenter.x : center.y - selectedCenter.y) * sign
+
+        if (primaryDelta <= 4) {
+          return null
+        }
+
+        const crossDelta = Math.abs(horizontal ? center.y - selectedCenter.y : center.x - selectedCenter.x)
+        return { node, score: primaryDelta + crossDelta * 1.5 }
+      })
+      .filter(Boolean)
+      .sort((left, right) => left.score - right.score)[0]
+
+    if (!target || !(target.node instanceof HTMLElement)) {
+      return false
+    }
+
+    target.node.querySelector('.node-card')?.click()
+    return true
+  }
+
+  function handleNodeDirectionalNavigation(event) {
+    if (!event.key.startsWith('Arrow') || event.ctrlKey || event.metaKey || event.altKey) {
+      return
+    }
+
+    const workspace = document.getElementById('workspace-capture')
+    if (!(workspace instanceof HTMLElement) || event.target !== workspace) {
+      return
+    }
+
+    const direction = {
+      ArrowLeft: 'left',
+      ArrowRight: 'right',
+      ArrowUp: 'up',
+      ArrowDown: 'down',
+    }[event.key]
+
+    if (direction && selectNextNodeInDirection(direction)) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+  }
+
+  function handleNodeBackspaceDeletion(event) {
+    if (event.key !== 'Backspace' || event.ctrlKey || event.metaKey || event.altKey) {
+      return
+    }
+
+    const workspace = document.getElementById('workspace-capture')
+    if (!(workspace instanceof HTMLElement) || event.target !== workspace) {
+      return
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+    workspace.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Delete',
+        bubbles: true,
+        cancelable: true,
+      }),
+    )
+  }
+
+  function syncElbowLineStyleForStructuredLayouts(event) {
+    const target = event.target
+    if (!(target instanceof Element)) {
+      return
+    }
+
+    const structureButton = target.closest('.toolbar-structure-switch button')
+    if (!(structureButton instanceof HTMLButtonElement)) {
+      return
+    }
+
+    if (!['\u6811\u72b6\u56fe', '\u7ec4\u7ec7\u56fe'].includes(structureButton.textContent?.trim())) {
+      return
+    }
+
+    queueMicrotask(() => {
+      const elbowButton = Array.from(document.querySelectorAll('.toolbar-line-style-switch button')).find(
+        (button) => button.textContent?.trim() === '\u6298\u7ebf',
+      )
+      elbowButton?.click()
+    })
+  }
+
   function scanHostUi() {
     ensureTitleManaged()
     document.querySelectorAll('.toolbar-menu-panel').forEach((panel) => ensureRenameAction(panel))
@@ -225,10 +334,16 @@
   }
 
   window.addEventListener('resize', positionOpenToolbarPanels)
+  document.addEventListener('keydown', handleNodeDirectionalNavigation, true)
+  document.addEventListener('keydown', handleNodeBackspaceDeletion, true)
+  document.addEventListener('click', syncElbowLineStyleForStructuredLayouts)
 
   window.addEventListener('beforeunload', () => {
     closeRenamePopover()
     window.removeEventListener('resize', positionOpenToolbarPanels)
+    document.removeEventListener('keydown', handleNodeDirectionalNavigation, true)
+    document.removeEventListener('keydown', handleNodeBackspaceDeletion, true)
+    document.removeEventListener('click', syncElbowLineStyleForStructuredLayouts)
     observer.disconnect()
   })
 })()

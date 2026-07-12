@@ -195,7 +195,7 @@ describe('App', () => {
       </StrictMode>,
     )
 
-    await screen.findByDisplayValue('快速开始')
+    await screen.findByDisplayValue('欢迎使用知栖')
 
     expect(replaceCalls).toBe(1)
   })

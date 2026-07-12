@@ -1,9 +1,33 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { createEvent, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { TableBlock } from './TableBlock'
 
 describe('TableBlock', () => {
+  it('extends the table from the final cell with Tab and Enter', () => {
+    const onChange = vi.fn()
+
+    render(<TableBlock rows={[['A1', 'B1']]} onChange={onChange} />)
+
+    const finalCell = screen.getByRole('textbox', { name: '第 1 行第 2 列' })
+    const tabEvent = createEvent.keyDown(finalCell, { key: 'Tab' })
+    fireEvent(finalCell, tabEvent)
+
+    expect(tabEvent.defaultPrevented).toBe(true)
+    expect(onChange).toHaveBeenLastCalledWith([['A1', 'B1', '']])
+
+    onChange.mockClear()
+
+    const enterEvent = createEvent.keyDown(finalCell, { key: 'Enter' })
+    fireEvent(finalCell, enterEvent)
+
+    expect(enterEvent.defaultPrevented).toBe(true)
+    expect(onChange).toHaveBeenLastCalledWith([
+      ['A1', 'B1'],
+      ['', ''],
+    ])
+  })
+
   it('adds rows and columns from edge controls', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()
@@ -58,9 +82,13 @@ describe('TableBlock', () => {
     const columnTrigger = screen.getByRole('button', { name: '第 1 列操作' })
 
     expect(rowTrigger).toHaveClass('table-control-trigger')
+    expect(rowTrigger).toHaveClass('table-row-control-trigger')
     expect(rowTrigger).not.toHaveClass('table-handle-button')
     expect(columnTrigger).toHaveClass('table-control-trigger')
+    expect(columnTrigger).toHaveClass('table-column-control-trigger')
     expect(columnTrigger).not.toHaveClass('table-handle-button')
+    expect(rowTrigger.querySelector('.lucide-ellipsis-vertical')).not.toBeNull()
+    expect(columnTrigger.querySelector('.lucide-ellipsis')).not.toBeNull()
 
     await user.click(rowTrigger)
     expect(screen.getByRole('menu', { name: '第 1 行菜单' })).toBeInTheDocument()
@@ -453,5 +481,127 @@ describe('TableBlock', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('does not resize columns below the table cell minimum width', async () => {
+    vi.useFakeTimers()
+
+    try {
+      const onChange = vi.fn()
+      const rows = [['A1', 'B1']]
+      const { container } = render(<TableBlock rows={rows} onChange={onChange} />)
+      const columnHandle = container.querySelector('.table-column-resize-handle')
+      expect(columnHandle).not.toBeNull()
+
+      fireEvent.mouseDown(columnHandle!, { clientX: 120 })
+      fireEvent.mouseMove(document, { clientX: -100 })
+      fireEvent.mouseUp(document)
+      await vi.runAllTimersAsync()
+
+      expect(onChange).toHaveBeenLastCalledWith(rows, { columnWidths: [120] })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('toggles the first row as a persisted header row', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    const rows = [
+      ['名称', '状态'],
+      ['知栖', '进行中'],
+    ]
+
+    render(<TableBlock rows={rows} hasHeaderRow onChange={onChange} />)
+
+    expect(screen.getByRole('textbox', { name: '第 1 行第 1 列' }).closest('.table-data-cell')).toHaveClass(
+      'table-data-cell-header',
+    )
+
+    await user.click(screen.getByRole('button', { name: '第 1 行操作' }))
+    await user.click(screen.getByRole('button', { name: '取消表头行' }))
+
+    expect(onChange).toHaveBeenLastCalledWith(rows, { hasHeaderRow: false })
+  })
+
+  it('uses a lightweight selected state for the active cell', async () => {
+    const user = userEvent.setup()
+
+    render(<TableBlock rows={[['A1', 'B1']]} onChange={vi.fn()} />)
+
+    const firstCell = screen.getByRole('textbox', { name: '第 1 行第 1 列' })
+    const secondCell = screen.getByRole('textbox', { name: '第 1 行第 2 列' })
+
+    await user.click(firstCell)
+    expect(firstCell.closest('.table-data-cell')).toHaveClass('table-data-cell-selected')
+
+    await user.click(secondCell)
+    expect(secondCell.closest('.table-data-cell')).toHaveClass('table-data-cell-selected')
+    expect(firstCell.closest('.table-data-cell')).not.toHaveClass('table-data-cell-selected')
+
+    fireEvent.pointerDown(document.body)
+    expect(secondCell.closest('.table-data-cell')).not.toHaveClass('table-data-cell-selected')
+  })
+
+  it('uses multiline cells and resets manual dimensions by double-clicking resize handles', async () => {
+    vi.useFakeTimers()
+
+    try {
+      const onChange = vi.fn()
+      const rows = [
+        ['A1', 'B1'],
+        ['A2', 'B2'],
+      ]
+      const { container } = render(
+        <TableBlock rows={rows} columnWidths={[180, 0]} rowHeights={[64]} onChange={onChange} />,
+      )
+
+      const cell = screen.getByRole('textbox', { name: '第 1 行第 1 列' })
+      expect(cell.tagName).toBe('TEXTAREA')
+
+      const columnHandle = container.querySelector('.table-column-resize-handle')
+      expect(columnHandle).not.toBeNull()
+      fireEvent.doubleClick(columnHandle!)
+      await vi.runAllTimersAsync()
+      expect(onChange).toHaveBeenLastCalledWith(rows, { rowHeights: [64] })
+
+      onChange.mockClear()
+
+      const rowHandle = container.querySelector('.table-row-resize-handle')
+      expect(rowHandle).not.toBeNull()
+      fireEvent.doubleClick(rowHandle!)
+      await vi.runAllTimersAsync()
+      expect(onChange).toHaveBeenLastCalledWith(rows, {})
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps resize handles on the final row and column edges', () => {
+    const { container } = render(
+      <TableBlock
+        rows={[
+          ['A1', 'B1'],
+          ['A2', 'B2'],
+        ]}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(container.querySelectorAll('.table-column-resize-handle')).toHaveLength(2)
+    expect(container.querySelectorAll('.table-row-resize-handle')).toHaveLength(2)
+  })
+
+  it('persists the table body-width setting from the first column menu', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    const rows = [['A1', 'B1']]
+
+    render(<TableBlock rows={rows} fitToContent={false} onChange={onChange} />)
+
+    await user.click(screen.getByRole('button', { name: '第 1 列操作' }))
+    await user.click(screen.getByRole('button', { name: '适应正文宽度' }))
+
+    expect(onChange).toHaveBeenLastCalledWith(rows, { fitToContent: true })
   })
 })

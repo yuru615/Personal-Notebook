@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createDefaultAppState } from '../components/dataTable/domain/factory'
+import { CURRENT_WELCOME_GUIDE_VERSION } from '../domain/seed'
 import { createMemoryRepository } from '../test/memoryRepository'
 import { createWorkspaceStore } from './createWorkspaceStore'
 import type { AppSettings, BlockRecord, WorkspaceSnapshot } from '../domain/types'
@@ -123,6 +124,7 @@ function createWorkspace(): WorkspaceSnapshot {
   workspace.settings = {
     ...workspace.settings,
     inboxPageId: 'page_inbox',
+    welcomeGuideVersion: CURRENT_WELCOME_GUIDE_VERSION,
   }
 
   return workspace
@@ -662,6 +664,91 @@ describe('createWorkspaceStore data tables', () => {
     expect(store.getState().currentPageId).toBe('page_1')
   })
 
+  it('adds the welcome page once when bootstrapping an existing workspace', async () => {
+    const workspace = createWorkspace()
+    workspace.settings = {
+      ...workspace.settings,
+      welcomePageId: undefined,
+      welcomeGuideVersion: undefined,
+    }
+    const counted = createCountingRepository(workspace)
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+
+    const welcomePage = store
+      .getState()
+      .pages.find((page) => page.title === '\u6b22\u8fce\u4f7f\u7528\u77e5\u6816')
+
+    expect(welcomePage).toMatchObject({
+      parentId: null,
+      icon: '\ud83c\udf3f',
+    })
+    expect(welcomePage?.blocks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'whiteboard' }),
+        expect.objectContaining({ type: 'data_table' }),
+        expect.objectContaining({ type: 'mindmap' }),
+      ]),
+    )
+    expect(store.getState().boards).toHaveLength(1)
+    expect(store.getState().dataTables).toHaveLength(1)
+    expect(store.getState().mindmaps).toHaveLength(1)
+    expect(store.getState().settings.welcomeGuideVersion).toBe(CURRENT_WELCOME_GUIDE_VERSION)
+    expect(store.getState().pages.some((page) => page.id === 'page_1')).toBe(true)
+    expect(counted.getSnapshot()?.pages).toContainEqual(welcomePage)
+
+    await store.getState().bootstrap()
+
+    expect(
+      store
+        .getState()
+        .pages.filter((page) => page.title === '\u6b22\u8fce\u4f7f\u7528\u77e5\u6816'),
+    ).toHaveLength(1)
+
+    await store.getState().deletePage(welcomePage!.id)
+
+    const restartedStore = createWorkspaceStore(counted.repository)
+    await restartedStore.getState().bootstrap()
+
+    expect(
+      restartedStore
+        .getState()
+        .pages.find((page) => page.title === '\u6b22\u8fce\u4f7f\u7528\u77e5\u6816'),
+    ).toBeUndefined()
+  })
+
+  it('keeps an edited welcome page and creates the complete guide separately', async () => {
+    const workspace = createWorkspace()
+    const now = '2026-07-11T00:00:00.000Z'
+    workspace.pages.push({
+      id: 'page_welcome',
+      parentId: null,
+      title: '\u6b22\u8fce\u4f7f\u7528\u77e5\u6816',
+      icon: '\ud83c\udf3f',
+      cover: null,
+      properties: {},
+      blocks: [{ id: 'block_custom', type: 'paragraph', text: '\u6211\u7684\u5185\u5bb9' }],
+      createdAt: now,
+      updatedAt: now,
+    })
+    workspace.settings = {
+      ...workspace.settings,
+      welcomePageId: 'page_welcome',
+      welcomeGuideVersion: undefined,
+    }
+    const counted = createCountingRepository(workspace)
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+
+    expect(store.getState().pages.find((page) => page.id === 'page_welcome')?.blocks).toEqual([
+      { id: 'block_custom', type: 'paragraph', text: '\u6211\u7684\u5185\u5bb9' },
+    ])
+    expect(store.getState().pages.some((page) => page.title === '\u77e5\u6816\u4f7f\u7528\u624b\u518c')).toBe(true)
+    expect(store.getState().settings.welcomeGuideVersion).toBe(CURRENT_WELCOME_GUIDE_VERSION)
+  })
+
   it('repairs a broken inboxPageId during bootstrap', async () => {
     const workspace = createLegacyWorkspace()
     workspace.settings = {
@@ -691,7 +778,7 @@ describe('createWorkspaceStore data tables', () => {
     await store.getState().bootstrap()
 
     expect(store.getState().settings.inboxPageId).toBe('page_inbox')
-    expect(store.getState().pages).toHaveLength(2)
+    expect(store.getState().pages).toHaveLength(3)
   })
 
   it('recreates the inbox page on demand after the current inbox page is deleted', async () => {
@@ -1017,15 +1104,22 @@ describe('createWorkspaceStore data tables', () => {
     await store.getState().bootstrap()
     await store.getState().deletePage('page_parent')
 
-    expect(store.getState().pages.filter((page) => page.id !== 'page_inbox').map((page) => page.id)).toEqual([
-      'page_next',
-    ])
+    expect(
+      store
+        .getState()
+        .pages.filter(
+          (page) => page.id !== 'page_inbox' && page.title !== '\u6b22\u8fce\u4f7f\u7528\u77e5\u6816',
+        )
+        .map((page) => page.id),
+    ).toEqual(['page_next'])
     expect(store.getState().currentPageId).toBe('page_next')
     expect(store.getState().settings.lastOpenedPageId).toBe('page_next')
     expect(
       counted
         .getSnapshot()
-        ?.pages.filter((page) => page.id !== 'page_inbox')
+        ?.pages.filter(
+          (page) => page.id !== 'page_inbox' && page.title !== '\u6b22\u8fce\u4f7f\u7528\u77e5\u6816',
+        )
         .map((page) => page.id),
     ).toEqual(['page_next'])
   })
@@ -1152,7 +1246,11 @@ describe('createWorkspaceStore data tables', () => {
       parentId: null,
     })
     expect(duplicatedChild).toBeTruthy()
-    expect(state.pages.filter((page) => page.id !== 'page_inbox')).toHaveLength(4)
+    expect(
+      state.pages.filter(
+        (page) => page.id !== 'page_inbox' && page.title !== '\u6b22\u8fce\u4f7f\u7528\u77e5\u6816',
+      ),
+    ).toHaveLength(4)
     expect(state.boards).toHaveLength(2)
     expect(state.dataTables).toHaveLength(2)
     expect(state.mindmaps).toHaveLength(2)
@@ -1170,7 +1268,13 @@ describe('createWorkspaceStore data tables', () => {
     expect(duplicatedBlocks.find((block) => block.type === 'mindmap')).not.toMatchObject({
       mindmapId: 'mindmap_1',
     })
-    expect(counted.getSnapshot()?.pages.filter((page) => page.id !== 'page_inbox')).toHaveLength(4)
+    expect(
+      counted
+        .getSnapshot()
+        ?.pages.filter(
+          (page) => page.id !== 'page_inbox' && page.title !== '\u6b22\u8fce\u4f7f\u7528\u77e5\u6816',
+        ),
+    ).toHaveLength(4)
   })
 
   it('removes orphan page resources on page deletion and keeps resources referenced elsewhere', async () => {
@@ -1232,9 +1336,14 @@ describe('createWorkspaceStore data tables', () => {
     await store.getState().bootstrap()
     await store.getState().deletePage('page_delete')
 
-    expect(store.getState().pages.filter((page) => page.id !== 'page_inbox').map((page) => page.id)).toEqual([
-      'page_keep',
-    ])
+    expect(
+      store
+        .getState()
+        .pages.filter(
+          (page) => page.id !== 'page_inbox' && page.title !== '\u6b22\u8fce\u4f7f\u7528\u77e5\u6816',
+        )
+        .map((page) => page.id),
+    ).toEqual(['page_keep'])
     expect(store.getState().boards.map((board) => board.id)).toEqual(['board_shared'])
     expect(store.getState().dataTables.map((dataTable) => dataTable.id)).toEqual([
       'database_shared',
@@ -1281,6 +1390,50 @@ describe('createWorkspaceStore data tables', () => {
       type: 'data_table',
       displayMode: 'inline',
       databaseId: expect.stringMatching(/^database_/),
+    })
+    expect(store.getState().dataTables).toHaveLength(1)
+  })
+
+  it('only switches data table blocks between card and inline modes', async () => {
+    const workspace = createWorkspace()
+    const now = '2026-07-11T00:00:00.000Z'
+    workspace.dataTables = [
+      {
+        id: 'database_1',
+        title: '\u9879\u76ee\u6570\u636e\u5e93',
+        snapshot: createDefaultAppState(),
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]
+    workspace.pages[0] = {
+      ...workspace.pages[0],
+      blocks: [{ id: 'block_database', type: 'data_table', databaseId: 'database_1' }],
+    }
+    const store = createWorkspaceStore(createMemoryRepository(workspace))
+
+    await store.getState().bootstrap()
+    await store.getState().turnBlockInto('page_1', 'block_database', 'heading_1')
+
+    expect(store.getState().pages[0]?.blocks[0]).toEqual({
+      id: 'block_database',
+      type: 'data_table',
+      databaseId: 'database_1',
+    })
+
+    await store.getState().turnBlockInto('page_1', 'block_database', 'data_table_inline')
+    expect(store.getState().pages[0]?.blocks[0]).toEqual({
+      id: 'block_database',
+      type: 'data_table',
+      databaseId: 'database_1',
+      displayMode: 'inline',
+    })
+
+    await store.getState().turnBlockInto('page_1', 'block_database', 'data_table')
+    expect(store.getState().pages[0]?.blocks[0]).toEqual({
+      id: 'block_database',
+      type: 'data_table',
+      databaseId: 'database_1',
     })
     expect(store.getState().dataTables).toHaveLength(1)
   })

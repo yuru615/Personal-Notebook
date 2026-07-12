@@ -17,9 +17,12 @@ import { DEFAULT_PAGE_ICON } from '../domain/pageIcons'
 import {
   createInboxPage,
   createSeedWorkspace,
+  createWelcomeGuideBundle,
+  CURRENT_WELCOME_GUIDE_VERSION,
   DEFAULT_PAGE_DISPLAY_DEFAULTS,
   INBOX_PAGE_ICON,
   INBOX_PAGE_TITLE,
+  WELCOME_PAGE_TITLE,
 } from '../domain/seed'
 import {
   cloneBlocksForUnsync,
@@ -510,15 +513,18 @@ function createSettings(
   sidebarWidth = 272,
   pinnedSidebarItems: SidebarPinnedItem[] = [],
   inboxPageId: PageId | null = null,
+  welcomePageId: PageId | null = null,
   clipboardCaptureMode: ClipboardCaptureMode = 'off',
   pageDefaults: PageDisplayDefaults = DEFAULT_PAGE_DISPLAY_DEFAULTS,
   searchPreferences: SearchPreferences = DEFAULT_SEARCH_PREFERENCES,
   blockSelectionStartMode: BlockSelectionStartMode = 'safe_zone_only',
   linkOpenMode: ExternalLinkOpenMode = 'modifier',
+  welcomeGuideVersion: number | null = CURRENT_WELCOME_GUIDE_VERSION,
 ): WorkspaceSettings {
   return {
     lastOpenedPageId,
     inboxPageId,
+    welcomePageId,
     sidebarLayout,
     sidebarWidth,
     pinnedSidebarItems,
@@ -527,6 +533,7 @@ function createSettings(
     searchPreferences,
     blockSelectionStartMode,
     linkOpenMode,
+    welcomeGuideVersion,
   }
 }
 
@@ -541,6 +548,11 @@ function normalizeSettings(settings: WorkspaceSettings): {
       : 272
   const pinnedSidebarItems = normalizePinnedSidebarItems(settings.pinnedSidebarItems)
   const inboxPageId = typeof settings.inboxPageId === 'string' ? settings.inboxPageId : null
+  const welcomePageId = typeof settings.welcomePageId === 'string' ? settings.welcomePageId : null
+  const welcomeGuideVersion =
+    settings.welcomeGuideVersion === CURRENT_WELCOME_GUIDE_VERSION
+      ? CURRENT_WELCOME_GUIDE_VERSION
+      : null
   const clipboardCaptureMode =
     settings.clipboardCaptureMode === 'prompt_to_inbox' ? 'prompt_to_inbox' : 'off'
   const blockSelectionStartMode =
@@ -552,6 +564,8 @@ function normalizeSettings(settings: WorkspaceSettings): {
   const searchPreferences = normalizeSearchPreferences(settings.searchPreferences)
   const didChange =
     settings.inboxPageId !== inboxPageId ||
+    settings.welcomePageId !== welcomePageId ||
+    settings.welcomeGuideVersion !== welcomeGuideVersion ||
     settings.sidebarLayout !== sidebarLayout ||
     settings.sidebarWidth !== sidebarWidth ||
     JSON.stringify(settings.pinnedSidebarItems ?? []) !== JSON.stringify(pinnedSidebarItems) ||
@@ -565,6 +579,8 @@ function normalizeSettings(settings: WorkspaceSettings): {
     settings: {
       lastOpenedPageId: settings.lastOpenedPageId,
       inboxPageId,
+      welcomePageId,
+      welcomeGuideVersion,
       sidebarLayout,
       sidebarWidth,
       pinnedSidebarItems,
@@ -622,6 +638,79 @@ function ensureInboxPageInSnapshot(snapshot: WorkspaceSnapshot): {
     },
     didChange: true,
   }
+}
+
+function ensureWelcomePageInSnapshot(snapshot: WorkspaceSnapshot): {
+  snapshot: WorkspaceSnapshot
+  didChange: boolean
+} {
+  if (snapshot.settings.welcomeGuideVersion === CURRENT_WELCOME_GUIDE_VERSION) {
+    return { snapshot, didChange: false }
+  }
+
+  const existingWelcomePage =
+    (typeof snapshot.settings.welcomePageId === 'string'
+      ? snapshot.pages.find((page) => page.id === snapshot.settings.welcomePageId)
+      : null) ?? snapshot.pages.find((page) => page.title === WELCOME_PAGE_TITLE)
+
+  if (!existingWelcomePage && typeof snapshot.settings.welcomePageId === 'string') {
+    return {
+      snapshot: {
+        ...snapshot,
+        settings: {
+          ...snapshot.settings,
+          welcomeGuideVersion: CURRENT_WELCOME_GUIDE_VERSION,
+        },
+      },
+      didChange: true,
+    }
+  }
+
+  const guide = createWelcomeGuideBundle()
+  const shouldReplaceWelcomePage = existingWelcomePage
+    ? isLegacyWelcomePage(existingWelcomePage)
+    : true
+  const guidePage = existingWelcomePage && shouldReplaceWelcomePage
+    ? {
+        ...guide.page,
+        id: existingWelcomePage.id,
+        createdAt: existingWelcomePage.createdAt,
+      }
+    : existingWelcomePage
+      ? { ...guide.page, title: '知栖使用手册' }
+      : guide.page
+
+  return {
+    snapshot: {
+      ...snapshot,
+      boards: [...snapshot.boards, guide.board],
+      dataTables: [...(snapshot.dataTables ?? []), guide.dataTable],
+      mindmaps: [...(snapshot.mindmaps ?? []), guide.mindmap],
+      pages: existingWelcomePage && shouldReplaceWelcomePage
+        ? snapshot.pages.map((page) => (page.id === existingWelcomePage.id ? guidePage : page))
+        : [...snapshot.pages, guidePage],
+      settings: {
+        ...snapshot.settings,
+        welcomePageId: existingWelcomePage?.id ?? guidePage.id,
+        welcomeGuideVersion: CURRENT_WELCOME_GUIDE_VERSION,
+      },
+    },
+    didChange: true,
+  }
+}
+
+function isLegacyWelcomePage(page: PageRecord) {
+  const headings = page.blocks
+    .filter((block): block is Extract<BlockRecord, { type: 'heading_1' | 'heading_2' }> =>
+      block.type === 'heading_1' || block.type === 'heading_2',
+    )
+    .map((block) => block.text)
+
+  return (
+    page.title === WELCOME_PAGE_TITLE &&
+    page.icon === '🌿' &&
+    JSON.stringify(headings) === JSON.stringify(['知栖', '从这里开始', '常用操作', '本地优先'])
+  )
 }
 
 function normalizePinnedSidebarItems(items: WorkspaceSettings['pinnedSidebarItems']): SidebarPinnedItem[] {
@@ -991,10 +1080,11 @@ function normalizeWorkspaceSnapshot(snapshot: WorkspaceSnapshot) {
     ? { boards, dataTables, mindmaps, syncedBlockGroups, pages, pageProperties, settings }
     : { ...snapshot, boards, dataTables, mindmaps, syncedBlockGroups, pages, pageProperties, settings }
   const ensuredInbox = ensureInboxPageInSnapshot(nextSnapshot)
+  const ensuredWelcome = ensureWelcomePageInSnapshot(ensuredInbox.snapshot)
 
   return {
-    snapshot: ensuredInbox.snapshot,
-    didChange: didChange || ensuredInbox.didChange,
+    snapshot: ensuredWelcome.snapshot,
+    didChange: didChange || ensuredInbox.didChange || ensuredWelcome.didChange,
   }
 }
 
@@ -1569,11 +1659,13 @@ export function createWorkspaceStore(
             snapshot.settings.sidebarWidth ?? 272,
             snapshot.settings.pinnedSidebarItems ?? [],
             snapshot.settings.inboxPageId ?? null,
+            snapshot.settings.welcomePageId ?? null,
             getClipboardCaptureMode(snapshot.settings),
             getPageDefaults(snapshot.settings),
             getSearchPreferences(snapshot.settings),
             getBlockSelectionStartMode(snapshot.settings),
             getLinkOpenMode(snapshot.settings),
+            snapshot.settings.welcomeGuideVersion ?? null,
           ),
           appSettings,
           currentPageId,
@@ -1606,6 +1698,7 @@ export function createWorkspaceStore(
         state.settings.sidebarWidth ?? 272,
         state.settings.pinnedSidebarItems ?? [],
         inboxPage.id,
+        state.settings.welcomePageId ?? null,
         getClipboardCaptureMode(state.settings),
         getPageDefaults(state.settings),
         getSearchPreferences(state.settings),
@@ -1649,6 +1742,7 @@ export function createWorkspaceStore(
         state.settings.sidebarWidth ?? 272,
         state.settings.pinnedSidebarItems ?? [],
         state.settings.inboxPageId ?? null,
+        state.settings.welcomePageId ?? null,
         getClipboardCaptureMode(state.settings),
         getPageDefaults(state.settings),
         getSearchPreferences(state.settings),
@@ -1699,6 +1793,7 @@ export function createWorkspaceStore(
         state.settings.sidebarWidth ?? 272,
         state.settings.pinnedSidebarItems ?? [],
         state.settings.inboxPageId ?? null,
+        state.settings.welcomePageId ?? null,
         getClipboardCaptureMode(state.settings),
         getPageDefaults(state.settings),
         getSearchPreferences(state.settings),
@@ -1754,6 +1849,7 @@ export function createWorkspaceStore(
         state.settings.sidebarWidth ?? 272,
         state.settings.pinnedSidebarItems ?? [],
         state.settings.inboxPageId ?? null,
+        state.settings.welcomePageId ?? null,
         mode,
         getPageDefaults(state.settings),
         getSearchPreferences(state.settings),
@@ -1792,6 +1888,7 @@ export function createWorkspaceStore(
         state.settings.sidebarWidth ?? 272,
         state.settings.pinnedSidebarItems ?? [],
         state.settings.inboxPageId ?? null,
+        state.settings.welcomePageId ?? null,
         getClipboardCaptureMode(state.settings),
         getPageDefaults(state.settings),
         getSearchPreferences(state.settings),
@@ -1830,6 +1927,7 @@ export function createWorkspaceStore(
         state.settings.sidebarWidth ?? 272,
         state.settings.pinnedSidebarItems ?? [],
         state.settings.inboxPageId ?? null,
+        state.settings.welcomePageId ?? null,
         getClipboardCaptureMode(state.settings),
         getPageDefaults(state.settings),
         getSearchPreferences(state.settings),
@@ -1867,6 +1965,7 @@ export function createWorkspaceStore(
         state.settings.sidebarWidth ?? 272,
         state.settings.pinnedSidebarItems ?? [],
         state.settings.inboxPageId ?? null,
+        state.settings.welcomePageId ?? null,
         getClipboardCaptureMode(state.settings),
         nextDefaults,
         getSearchPreferences(state.settings),
@@ -1904,6 +2003,7 @@ export function createWorkspaceStore(
         state.settings.sidebarWidth ?? 272,
         state.settings.pinnedSidebarItems ?? [],
         state.settings.inboxPageId ?? null,
+        state.settings.welcomePageId ?? null,
         getClipboardCaptureMode(state.settings),
         getPageDefaults(state.settings),
         nextSearchPreferences,
@@ -1942,6 +2042,7 @@ export function createWorkspaceStore(
         state.settings.sidebarWidth ?? 272,
         state.settings.pinnedSidebarItems ?? [],
         state.settings.inboxPageId ?? null,
+        state.settings.welcomePageId ?? null,
         getClipboardCaptureMode(state.settings),
         getPageDefaults(state.settings),
         getSearchPreferences(state.settings),
@@ -1981,6 +2082,7 @@ export function createWorkspaceStore(
         nextWidth,
         state.settings.pinnedSidebarItems ?? [],
         state.settings.inboxPageId ?? null,
+        state.settings.welcomePageId ?? null,
         getClipboardCaptureMode(state.settings),
         getPageDefaults(state.settings),
         getSearchPreferences(state.settings),
@@ -2021,6 +2123,7 @@ export function createWorkspaceStore(
         state.settings.sidebarWidth ?? 272,
         nextPinnedSidebarItems,
         state.settings.inboxPageId ?? null,
+        state.settings.welcomePageId ?? null,
         getClipboardCaptureMode(state.settings),
         getPageDefaults(state.settings),
         getSearchPreferences(state.settings),
@@ -3189,6 +3292,7 @@ export function createWorkspaceStore(
         state.settings.sidebarWidth ?? 272,
         nextPinnedSidebarItems,
         nextInboxPageId,
+        state.settings.welcomePageId ?? null,
         getClipboardCaptureMode(state.settings),
         getPageDefaults(state.settings),
         getSearchPreferences(state.settings),
@@ -4350,6 +4454,17 @@ export function createWorkspaceStore(
 
     turnBlockInto: async (pageId: PageId, blockId: string, type: BlockType) => {
       const state = get()
+      const sourceBlock = state.pages
+        .find((page) => page.id === pageId)
+        ?.blocks.find((block) => block.id === blockId)
+
+      if (
+        sourceBlock?.type === 'data_table' &&
+        (!isDataTableCommandType(type) || sourceBlock.displayMode === getDataTableDisplayMode(type))
+      ) {
+        return
+      }
+
       const now = new Date().toISOString()
       let nextBoards = state.boards
       let nextDataTables = state.dataTables
@@ -4365,6 +4480,15 @@ export function createWorkspaceStore(
           blocks: page.blocks.map((block) => {
             if (block.id !== blockId) {
               return block
+            }
+
+            if (block.type === 'data_table' && isDataTableCommandType(type)) {
+              if (getDataTableDisplayMode(type) === 'inline') {
+                return { ...block, displayMode: 'inline' as const }
+              }
+
+              const { displayMode: _displayMode, ...dataTableBlock } = block
+              return dataTableBlock
             }
 
             if (block.type === type) {

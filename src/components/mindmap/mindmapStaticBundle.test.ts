@@ -59,6 +59,30 @@ describe('mindmap static bundle', () => {
     expect(css).toContain('position: absolute;')
   })
 
+  it('uses a centered line icon for expanded mindmap node toggles', () => {
+    const css = readFileSync(resolve(process.cwd(), 'public/mindmap-web/host-overrides.css'), 'utf8')
+
+    expect(css).toContain('.node-card-toggle:not(.node-card-toggle-collapsed-count)::before')
+    expect(css).toContain('width: 10px;')
+    expect(css).toContain('height: 2px;')
+    expect(css).toContain('background: var(--node-toggle-ring);')
+  })
+
+  it('keeps the root node title visible in the tree layout', () => {
+    const css = readFileSync(resolve(process.cwd(), 'public/mindmap-web/host-overrides.css'), 'utf8')
+
+    expect(css).toContain('.canvas-transform-tree .node-card-root')
+    expect(css).toContain('background: var(--map-accent, var(--accent));')
+  })
+
+  it('switches tree and org layouts to elbow connectors', () => {
+    const script = readFileSync(resolve(process.cwd(), 'public/mindmap-web/host-enhancements.js'), 'utf8')
+
+    expect(script).toContain('function syncElbowLineStyleForStructuredLayouts(event) {')
+    expect(script).toContain("['\\u6811\\u72b6\\u56fe', '\\u7ec4\\u7ec7\\u56fe'].includes")
+    expect(script).toContain("button.textContent?.trim() === '\\u6298\\u7ebf'")
+  })
+
   it('ships host enhancements for rename-in-menu behavior', () => {
     const script = readFileSync(resolve(process.cwd(), 'public/mindmap-web/host-enhancements.js'), 'utf8')
 
@@ -74,5 +98,21 @@ describe('mindmap static bundle', () => {
     expect(script).toContain('window.innerWidth - rootRect.left - panelWidth - 12')
     expect(script).toContain("panel.style.right = 'auto'")
     expect(script).toContain('anchorRect.bottom - rootRect.top + 16')
+  })
+
+  it('ships directional keyboard navigation between selected mindmap nodes', () => {
+    const script = readFileSync(resolve(process.cwd(), 'public/mindmap-web/host-enhancements.js'), 'utf8')
+
+    expect(script).toContain('function handleNodeDirectionalNavigation(event) {')
+    expect(script).toContain("event.key.startsWith('Arrow')")
+    expect(script).toContain('selectNextNodeInDirection(direction)')
+  })
+
+  it('ships Backspace as a selected mindmap node deletion shortcut', () => {
+    const script = readFileSync(resolve(process.cwd(), 'public/mindmap-web/host-enhancements.js'), 'utf8')
+
+    expect(script).toContain('function handleNodeBackspaceDeletion(event) {')
+    expect(script).toContain("event.key !== 'Backspace'")
+    expect(script).toContain("key: 'Delete'")
   })
 })

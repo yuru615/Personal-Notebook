@@ -13,13 +13,13 @@ function readLegacyFile(relativePath: string) {
 describe('legacy whiteboard parity', () => {
   it('keeps the embedded app.js identical to the imported standalone whiteboard source', () => {
     expect(sha256(readLegacyFile('./legacy/app.js'))).toBe(
-      'E3FDE4C2065AC88A355BC9382D7D289AB41712C0A272C8E55481C1FB6D3D3C0C',
+      '00B30A17097E35E2BF9A2CAB54C231D10579C1BD59529926F2D9DF95830DCA07',
     )
   })
 
   it('keeps the embedded index.html identical to the imported standalone whiteboard source', () => {
     expect(sha256(readLegacyFile('./legacy/index.html'))).toBe(
-      '667D382FFD9390248B54202114B8FE8AE257F3E2804D6F77C4938682761F128F',
+      '2442BB04B2310D244245F20EFAB583A17B540DCA5A0D8D543DB54D0808D6A9E6',
     )
   })
 

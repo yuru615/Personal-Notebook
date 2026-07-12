@@ -1,6 +1,6 @@
 [package]
 name = "zhixi"
-version = "0.0.1"
+version = "1.0.0"
 description = "A local-first knowledge base desktop app for Zhixi."
 authors = ["知栖"]
 edition = "2021"

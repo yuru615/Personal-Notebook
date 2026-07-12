@@ -325,6 +325,103 @@ describe('BlockEditor', () => {
     })
   })
 
+  it('keeps Word headings and tables when its plain-text clipboard payload looks like markdown', async () => {
+    const onPasteBlocks = vi.fn()
+    const emptyPage = {
+      ...page,
+      blocks: [{ id: 'b1', type: 'paragraph' as const, text: '' }],
+    }
+
+    render(
+      <BlockEditor
+        page={emptyPage as never}
+        allPages={[emptyPage as never]}
+        onUpdateBlock={vi.fn()}
+        onPasteBlocks={onPasteBlocks}
+      />,
+    )
+
+    pasteStructuredTextInto(screen.getByRole('textbox', { name: '输入正文' }), {
+      markdown: '',
+      html: [
+        '<p class="MsoHeading1">1 Introduction</p>',
+        '<p class="MsoHeading2">1.1 Purpose</p>',
+        '<table><tr><td>Module</td><td>Owner</td></tr><tr><td>Scheduling</td><td>Team</td></tr></table>',
+      ].join(''),
+      text: '1. Introduction\n1.1 Purpose\nModule\tOwner\nScheduling\tTeam',
+    })
+
+    await waitFor(() => {
+      expect(onPasteBlocks).toHaveBeenCalledWith(
+        'b1',
+        [
+          expect.objectContaining({ type: 'heading_1', text: '1 Introduction' }),
+          expect.objectContaining({ type: 'heading_2', text: '1.1 Purpose' }),
+          expect.objectContaining({
+            type: 'table',
+            rows: [
+              ['Module', 'Owner'],
+              ['Scheduling', 'Team'],
+            ],
+          }),
+        ],
+        true,
+      )
+    })
+  })
+
+  it('turns pasted Word HTML headings, tables, and images into editor blocks', async () => {
+    const onPasteBlocks = vi.fn()
+    const emptyPage = {
+      ...page,
+      blocks: [{ id: 'b1', type: 'paragraph' as const, text: '' }],
+    }
+
+    render(
+      <BlockEditor
+        page={emptyPage as never}
+        allPages={[emptyPage as never]}
+        onUpdateBlock={vi.fn()}
+        onPasteBlocks={onPasteBlocks}
+      />,
+    )
+
+    pasteStructuredTextInto(screen.getByRole('textbox', { name: '输入正文' }), {
+      html: [
+        '<style>p.CustomWordHeading { mso-outline-level: 1; }</style>',
+        '<p class="CustomWordHeading">Word heading</p>',
+        '<table><tr><td>Task</td><td>Owner</td></tr><tr><td>Import</td><td>Zhixi</td></tr></table>',
+        '<p><img src="data:image/png;base64,iVBORw0KGgo=" alt="Word image"></p>',
+      ].join(''),
+      text: 'Word heading\nTask\tOwner\nImport\tZhixi',
+    })
+
+    await waitFor(() => {
+      expect(onPasteBlocks).toHaveBeenCalledWith(
+        'b1',
+        [
+          expect.objectContaining({ type: 'heading_1', text: 'Word heading' }),
+          expect.objectContaining({
+            type: 'table',
+            rows: [
+              ['Task', 'Owner'],
+              ['Import', 'Zhixi'],
+            ],
+          }),
+          expect.objectContaining({
+            type: 'image',
+            assetId: 'asset_pasted_image',
+            alt: 'Word image',
+          }),
+        ],
+        true,
+      )
+    })
+    expect(assets.writeAssetBytes).toHaveBeenCalledWith(
+      expect.objectContaining({ mimeType: 'image/png' }),
+    )
+  })
+
   it('uses desktop clipboard markdown when the WebView paste payload has no readable text', async () => {
     const onPasteBlocks = vi.fn()
     const emptyPage = {
@@ -1257,6 +1354,90 @@ describe('BlockEditor', () => {
     expect(await screen.findByRole('heading', { name: '项目数据表' })).toBeInTheDocument()
   })
 
+  it('keeps records visible when a legacy data table is shown inline', async () => {
+    const dataTablePage = {
+      ...page,
+      blocks: [
+        { id: 'b6', type: 'data_table', displayMode: 'inline', databaseId: 'database-1' },
+      ],
+    }
+    const snapshot = createDefaultAppState()
+    const record = {
+      id: 'record_1',
+      title: '保留的任务',
+      values: {},
+      createdAt: '2026-07-11T00:00:00.000Z',
+      updatedAt: '2026-07-11T00:00:00.000Z',
+    }
+
+    snapshot.records[record.id] = record
+    snapshot.recordPages[record.id] = {
+      recordId: record.id,
+      blockIds: [],
+      updatedAt: record.updatedAt,
+    }
+    delete (snapshot as { version?: number }).version
+
+    render(
+      <MemoryRouter>
+        <BlockEditor
+          page={dataTablePage as never}
+          allPages={[dataTablePage as never]}
+          dataTables={[
+            {
+              id: 'database-1',
+              title: '项目数据表',
+              snapshot,
+              createdAt: '2026-06-22T00:00:00.000Z',
+              updatedAt: '2026-06-22T00:00:00.000Z',
+            },
+          ] as never}
+          onUpdateBlock={vi.fn()}
+          onUpdateDataTableSnapshot={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('保留的任务')).toBeInTheDocument()
+  })
+
+  it('lets an inline data table convert back to a card', async () => {
+    const user = userEvent.setup()
+    const onTurnInto = vi.fn()
+    const dataTablePage = {
+      ...page,
+      blocks: [
+        { id: 'b6', type: 'data_table', displayMode: 'inline', databaseId: 'database-1' },
+      ],
+    }
+
+    render(
+      <MemoryRouter>
+        <BlockEditor
+          page={dataTablePage as never}
+          allPages={[dataTablePage as never]}
+          dataTables={[
+            {
+              id: 'database-1',
+              title: '项目数据表',
+              snapshot: createDefaultAppState(),
+              createdAt: '2026-06-22T00:00:00.000Z',
+              updatedAt: '2026-06-22T00:00:00.000Z',
+            },
+          ] as never}
+          onUpdateBlock={vi.fn()}
+          onUpdateDataTableSnapshot={vi.fn()}
+          onTurnInto={onTurnInto}
+        />
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getByRole('button', { name: '拖动块' }))
+    await user.click(screen.getByRole('button', { name: '转换为数据表格卡片' }))
+
+    expect(onTurnInto).toHaveBeenCalledWith('b6', 'data_table')
+  })
+
   it('shows record and property counts on a data table card', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-22T12:00:00.000Z'))
@@ -1594,6 +1775,28 @@ describe('BlockEditor', () => {
     }
   })
 
+  it('does not start marquee selection when resizing a simple table', () => {
+    const { container } = render(
+      <BlockEditor
+        page={page as never}
+        allPages={[page as never]}
+        onUpdateBlock={vi.fn()}
+        blockSelectionStartMode="content_allowed"
+      />,
+    )
+
+    const surface = container.querySelector('.editor-surface')
+    const resizeHandle = container.querySelector('.table-column-resize-handle')
+    if (!(surface instanceof HTMLElement) || !(resizeHandle instanceof HTMLElement)) {
+      throw new Error('Expected editor surface and table resize handle')
+    }
+
+    pointerDownAt(resizeHandle, 160, 180)
+    pointerMoveAt(surface, 280, 300)
+
+    expect(container.querySelector('.editor-selection-marquee')).not.toBeInTheDocument()
+  })
+
   it('keeps every block in the marquee range while the page scrolls', () => {
     const originalScrollY = Object.getOwnPropertyDescriptor(window, 'scrollY')
     let scrollY = 0
@@ -1884,6 +2087,92 @@ describe('BlockEditor', () => {
     fireEvent.keyDown(surface, { key: 'Delete' })
 
     expect(onDeleteBlocks).toHaveBeenCalledWith(['b1', 'b2', 'b3'])
+  })
+
+  it('copies marquee-selected blocks and pastes them into the trailing empty row', async () => {
+    const copyPage = { ...page, blocks: page.blocks.slice(0, 2) }
+    const onPasteBlocks = vi.fn()
+    const { container } = render(
+      <BlockEditor
+        page={copyPage as never}
+        allPages={[copyPage as never]}
+        onUpdateBlock={vi.fn()}
+        onPasteBlocks={onPasteBlocks}
+        blockSelectionStartMode="safe_zone_only"
+      />,
+    )
+
+    const surface = container.querySelector('.editor-surface')
+    const gutter = container.querySelector('.block-selection-gutter')
+    const rows = Array.from(container.querySelectorAll('.editor-row'))
+    const trailingInput = container.querySelector('.empty-block-input')
+    if (
+      !(surface instanceof HTMLElement) ||
+      !(gutter instanceof HTMLElement) ||
+      !(trailingInput instanceof HTMLInputElement)
+    ) {
+      throw new Error('Expected selection surface and trailing input')
+    }
+
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 480,
+      bottom: 320,
+      width: 480,
+      height: 320,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect)
+    rows.forEach((row, index) => {
+      vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({
+        left: 0,
+        top: 16 + index * 48,
+        right: 420,
+        bottom: 56 + index * 48,
+        width: 420,
+        height: 40,
+        x: 0,
+        y: 16 + index * 48,
+        toJSON: () => ({}),
+      } as DOMRect)
+    })
+
+    pointerDownAt(gutter, 12, 18)
+    pointerMoveAt(window, 220, 110)
+    pointerUpAt(window, 220, 110)
+
+    const clipboardValues = new Map<string, string>()
+    fireEvent.copy(surface, {
+      clipboardData: {
+        setData: (type: string, value: string) => clipboardValues.set(type, value),
+      },
+    })
+
+    const copiedBlocks = JSON.parse(clipboardValues.get('application/x-zhixi-blocks+json') ?? 'null')
+    expect(copiedBlocks).toMatchObject([
+      { id: 'b1', type: 'paragraph', text: '第一段' },
+      { id: 'b2', type: 'todo', text: '待办事项', checked: true },
+    ])
+
+    fireEvent.paste(trailingInput, {
+      clipboardData: {
+        files: [],
+        items: [],
+        getData: (type: string) => clipboardValues.get(type) ?? '',
+      },
+    })
+
+    await waitFor(() => {
+      expect(onPasteBlocks).toHaveBeenCalledWith(
+        null,
+        [
+          expect.objectContaining({ type: 'paragraph', text: '第一段', id: expect.not.stringMatching(/^b1$/) }),
+          expect.objectContaining({ type: 'todo', text: '待办事项', checked: true, id: expect.not.stringMatching(/^b2$/) }),
+        ],
+      )
+    })
   })
 
   it('does not start selection from the content area in safe-zone mode, but does in content-allowed mode', () => {

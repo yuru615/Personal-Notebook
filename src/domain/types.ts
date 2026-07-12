@@ -163,6 +163,8 @@ export interface CodeBlock extends BlockBase {
 export interface TableBlock extends BlockBase {
   type: 'table'
   rows: string[][]
+  hasHeaderRow?: boolean
+  fitToContent?: boolean
   cellStyles?: TableCellStyleGrid
   columnWidths?: number[]
   rowHeights?: number[]
@@ -325,6 +327,8 @@ export interface PageRecord {
 export interface WorkspaceSettings {
   lastOpenedPageId: PageId | null
   inboxPageId?: PageId | null
+  welcomePageId?: PageId | null
+  welcomeGuideVersion?: number | null
   sidebarLayout?: 'compact' | 'classic'
   sidebarWidth?: number
   pinnedSidebarItems?: SidebarPinnedItem[]

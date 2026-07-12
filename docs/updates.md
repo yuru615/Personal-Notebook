@@ -4,6 +4,85 @@
 
 ## 维护规则
 
+## 2026-07-12 框选焦点轮廓修复
+
+提交：未提交
+
+简要描述：
+
+修复正文框选完成后，编辑器外围出现黑色浏览器焦点边框的问题。
+
+详细描述：
+
+- 框选完成后编辑器表面会获得焦点，以便继续响应 Delete 等键盘操作；此前未覆盖浏览器默认的焦点轮廓，导致正文区域外侧显示一圈黑框。
+- 现在仅关闭编辑器容器的默认 `outline`，已选块本身的主题色高亮、边框和删除交互保持不变。
+
+验证情况：
+
+- 已通过 `npm test -- src/styles/editorMultiSelectLayout.test.ts src/components/editor/BlockEditor.test.tsx`（76 项测试）。
+
+## 2026-07-12 Word 表格混合内容粘贴
+
+提交：未提交
+
+简要描述：
+
+修复 Word 内容同时包含标题、普通文本和表格时，全部回退为普通文本或编号列表的问题。
+
+详细描述：
+
+- 粘贴流程现在会优先尝试可解析的 HTML 结构；Word 的标题段落、普通段落和表格会一并转为对应的块。
+- 只有 HTML 不包含可转换的结构时，才回退到 Markdown 或纯文本解析，因此保留了现有 Markdown 粘贴能力。
+- 新增回归覆盖：当剪贴板纯文本带有类似 `1. 标题` 的内容、同时 HTML 里存在 Word 标题和表格时，仍保留标题层级和表格块。
+
+验证情况：
+
+- 已通过 `npm test -- src/components/editor/BlockEditor.test.tsx src/domain/clipboardCapture.test.ts`（87 项测试）。
+- 已通过 `npm run build`。
+
+## 2026-07-12 简单表格紧凑编辑
+
+提交：未提交
+
+简要描述：
+
+简单表格改为正文内更清爽的紧凑显示，并补齐高频单元格键盘录入。
+
+详细描述：
+
+- 移除表格原先为行列控制条预留的上、下、左、右空白区域，表格默认只显示内容网格。
+- 行、列、加行、加列的既有控制继续保留，但默认透明且不拦截点击；鼠标悬停表格后才显示在网格边缘。
+- 单元格内按 `Tab` 按顺序进入下一格；位于表格最后一格时会自动新增一列并继续聚焦。按 `Enter` 进入下一行；在最后一行时会自动新增一行。
+- 表格记录、单元格背景色、对齐方式、已保存的列宽/行高与行列菜单均复用原有数据契约，不进行迁移或重建。
+
+验证情况：
+
+- 已通过 `npm test -- src/components/editor/blocks/TableBlock.test.tsx src/styles/tableControlLayout.test.ts src/styles/tableBorders.test.ts`（27 项测试）。
+- 已通过编辑器联动回归：`npm test -- src/components/editor/blocks/TableBlock.test.tsx src/components/editor/BlockEditor.test.tsx src/styles/tableControlLayout.test.ts src/styles/tableBorders.test.ts`（103 项测试）。
+- 已通过 `npm run build`。
+
+## 2026-07-11 Word 富文本粘贴
+
+提交：未提交
+
+简要描述：
+
+从 Word 复制内容到知栖时，标题层级、简单表格和内嵌图片现在会分别转换为对应的标题块、表格块和图片块。
+
+详细描述：
+
+- Windows 桌面端会直接读取剪贴板的 `HTML Format`，并解析 CF_HTML 片段，不再仅依赖 WebView 是否把富文本 HTML 传给前端。
+- Word 的 `Heading`、中文标题样式、`mso-outline-level` 和标题类样式会映射为知栖的三级标题；四级及更深层级会收敛为三级标题，这是当前编辑器的最大层级。
+- Word 的 HTML 表格会保留单元格文本并插入为知栖简单表格；带 `data:` 或本地 `file:///` 来源的图片会先写入本地资源库，再创建可正常显示的图片块。
+- 普通加大字号的文本不会被猜测为标题，避免破坏用户原来的正文结构。
+
+验证情况：
+
+- 已通过 Word 标题、表格、图片的前端定向回归：`npm test -- src/domain/clipboardCapture.test.ts src/components/editor/BlockEditor.test.tsx src/lib/desktopLifecycle.test.ts`。
+- 已通过 Rust 定向回归：`cargo test extracts_the_fragment_from_windows_cf_html --manifest-path src-tauri/Cargo.toml`。
+- 已通过 `npm run build`。
+- 已通过隔离浏览器界面验证：模拟 Word HTML 实际渲染为标题块、简单表格和图片块。
+
 ## 2026-07-11 编辑器块操作、图标移除与列表富文本
 
 提交：未提交
@@ -773,6 +852,66 @@
 验证情况：
 
 - 已核对最新未推送提交中的大文件均来自上述本地构建与临时目录。
+
+## 2026-07-11 1.0.0 安装包与首次使用说明
+
+提交：待提交
+
+简要描述：
+
+发布 Windows `1.0.0` 安装包，并为新建工作区补充完整的知栖产品介绍和操作说明页。
+
+详细描述：
+
+- 统一前端、Tauri 与 Rust 包版本为 `1.0.0`，生成 Windows x64 NSIS 安装程序。
+- 将首次创建工作区原有的“快速开始”页升级为“欢迎使用知栖”，介绍本地优先定位、收件箱、页面树、搜索、数据表、白板和导图等常用工作流。
+- 已有工作区首次升级到该版本时，也会一次性补入说明页；该页删除后不会再次自动创建。
+- 说明页本身采用普通可编辑块，新用户可直接按自己的习惯继续修改或作为个人首页使用。
+
+验证情况：
+
+- 已通过 `npm.cmd test -- src/domain/seed.test.ts src/lib/workspaceRepository.test.ts`。
+- 已通过 `npm.cmd test -- src/store/createWorkspaceStore.test.ts src/domain/seed.test.ts src/lib/workspaceRepository.test.ts`（86 个测试）。
+- 已通过 `npm.cmd run build`。
+- 已成功生成并核对 `知栖_1.0.0_x64-setup.exe` 的版本信息。
+## 2026-07-11 数据表格块转换边界
+
+提交：待提交
+
+简要描述：
+
+数据表格块现在只能在卡片入口与正文内嵌两种显示模式之间互相转换。
+
+详细描述：
+
+- 数据表格块的手柄菜单不再显示标题、待办、段落等普通块转换项；卡片模式仅显示“转换为嵌入式数据表”，内嵌模式仅显示“转换为数据表格卡片”。
+- 转换只改变 `displayMode`，保留原有 `databaseId`，不会新建数据表、丢失记录或改变页面中的块 ID。
+- store 层同步拒绝数据表格块转换到其他类型，避免未来其他入口绕过菜单约束。
+
+验证情况：
+
+- 已通过 `npm.cmd test -- src/components/editor/BlockHandleMenu.test.tsx src/store/createWorkspaceStore.test.ts`：78 个测试通过。
+- 已通过 `npm.cmd run build`。
+
+## 2026-07-11 完整首次使用手册与交互示例
+
+提交：待提交
+
+简要描述：
+
+将“欢迎使用知栖”升级为完整操作手册，并在页面内提供可直接编辑的数据表、白板和思维导图示例。
+
+详细描述：
+
+- 手册按开始记录、页面与块、组织与搜索、媒体与导入、数据表、白板、思维导图、设置与备份逐项说明当前可用功能和常见操作。
+- 新工作区会附带“任务数据表”“白板示例”“项目规划导图”三个真实资源，并作为内联块出现在说明页中；示例数据、便签、图形、连线和导图节点均可直接继续编辑。
+- 旧版系统欢迎页会一次性原地升级；如检测到用户已经改写欢迎页，则保留该页并另建“知栖使用手册”，不会覆盖用户内容。用户主动删除手册后也不会再次自动创建。
+
+验证情况：
+
+- 已通过 `npm.cmd test`：89 个测试文件、720 个测试通过。
+- 已通过 `npm.cmd run build`。
+
 ## 2026-07-05 页面属性日期弹窗优化
 
 提交：未提交
@@ -1141,3 +1280,186 @@
 验证情况：
 - 已通过 `C:/Program Files/nodejs/npm.cmd run test -- src/utils/reorder.test.ts src/store/createWorkspaceStore.test.ts src/components/settings/SettingsCenter.test.tsx src/components/editor/BlockEditor.test.tsx src/styles/editorMultiSelectLayout.test.ts`
 - 已通过 `C:/Program Files/nodejs/npm.cmd run build`
+# 2026-07-11 数据表卡片与嵌入模式兼容修复
+
+提交：未提交
+
+简要描述：
+
+数据表卡片转换为正文嵌入模式后，旧数据表快照不再被误判为空表；嵌入式数据表也可通过块手柄菜单稳定转换回数据表卡片，两个显示模式始终复用同一个数据表与记录。
+
+详细描述：
+
+- 抽出统一的数据表初始状态兼容入口，为缺少版本字段的旧快照补齐当前运行所需的默认字段，同时保留原有数据库、字段、记录、记录页、块与资源。
+- 正文内嵌数据表和独立数据表页统一使用该入口，避免卡片预览仍有内容、嵌入式却回退成空表的显示差异。
+- 增加回归测试：旧快照内嵌后仍显示既有记录；嵌入式数据表的块手柄菜单可触发“转换为数据表格卡片”。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/editor/BlockEditor.test.tsx src/components/editor/BlockHandleMenu.test.tsx src/store/createWorkspaceStore.test.ts`
+# 2026-07-11 白板连线工具栏优化
+
+提交：未提交
+
+简要描述：
+
+白板顶部工具栏移除独立的“连线”图标；新建白板和新建连接线默认使用曲线，已有白板中的连线样式保持不变。
+
+详细描述：
+
+- 移除顶部工具栏的连线工具按钮，减少高频工具区的视觉占用。
+- 保留便签、文本、图形和图片对象现有的连接锚点交互，用户仍可从对象间创建连接线。
+- 将新白板的默认连接线模式从直线调整为曲线；历史快照保留其已保存的直线或曲线设置，不做批量迁移。
+- 同步更新白板内嵌画布的初始工具状态和曲线选中态，避免首次渲染与实际默认值不一致。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/whiteboard/whiteboardModel.test.ts src/components/whiteboard/legacyWhiteboardDocument.test.ts src/components/whiteboard/WhiteboardCanvas.test.tsx`
+# 2026-07-11 白板端点默认与菜单状态优化
+
+提交：未提交
+
+简要描述：
+
+新建连接线的起点和终点均默认选择端点列表第一项“无”；顶部端点按钮不再展示当前选项，选中状态只在展开列表中显示。
+
+详细描述：
+
+- 将新白板和内嵌白板画布的起止端点默认值统一为 `none`，新建连接线不再默认带圆点或箭头。
+- 顶部起点、终点按钮固定显示中性线条图标，不再随当前端点选项替换图标或携带选中状态。
+- 展开后的端点列表继续保留当前选项的高亮和 `aria-checked` 状态，方便确认和切换。
+- 升级白板 iframe 文档版本，确保当前已打开的调试白板重建为新端点菜单。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/whiteboard/whiteboardModel.test.ts src/components/whiteboard/legacyWhiteboardDocument.test.ts src/components/whiteboard/WhiteboardCanvas.test.tsx`
+# 2026-07-11 白板曲线连线删除修复
+
+提交：未提交
+
+简要描述：
+
+默认曲线连接线现在可从实际曲线路径或两端之间的直连区域选中，恢复稳定的删除体验。
+
+详细描述：
+
+- 定位到问题由默认曲线带来的选择盲区造成：用户按原先直线的习惯点击两端中间位置时，曲线未被选中，因此删除键没有目标可删。
+- 曲线连接的命中检测现同时覆盖实际贝塞尔路径和两端之间的直连选择带；不改变连接线的绘制、端点、数据或原有曲线形状。
+- 添加了几何回归测试，覆盖纵向距离较大的曲线从直连区域点击仍可选中并删除的场景。
+- 升级白板 iframe 文档版本，已打开的调试白板会自动重载这项修复。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/whiteboard/legacyConnectionGeometry.test.ts src/components/whiteboard/legacyWhiteboardDocument.test.ts src/components/whiteboard/whiteboardModel.test.ts src/components/whiteboard/WhiteboardCanvas.test.tsx`
+
+## 2026-07-11 白板中键平移对象误触修复
+
+提交：未提交
+
+简要描述：
+
+修复了在便签、文本或图片对象上按住鼠标中键拖动时，误触发对象编辑、选中或移动的问题。
+
+详细描述：
+
+- 将白板平移统一收敛到同一个指针处理函数。
+- 对象层优先识别鼠标中键，并直接进入画布平移状态，不再执行便签、文本或图片的对象交互逻辑。
+- 升级白板 iframe 文档版本，使已打开的白板自动加载这项修复。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/whiteboard/legacyWhiteboardDocument.test.ts`。
+
+## 2026-07-11 思维导图方向键节点导航
+
+提交：未提交
+
+简要描述：
+
+思维导图选中节点后，可以使用方向键在画布上的相邻节点之间切换选择。
+
+详细描述：
+
+- 在导图画布获得焦点时，拦截四个方向键并按节点实际显示位置计算最近的左、右、上、下节点。
+- 通过既有节点点击流程完成选择和焦点保持，不新增另一套节点选中状态。
+- 编辑节点文本、工具栏输入和菜单操作不会被方向键导航拦截。
+- 选中节点后，`Backspace` 会复用既有 `Delete` 删除流程，避免浏览器默认退回行为。
+- 展开状态的节点收起按钮改为固定长度的居中横线图标，避免文本短横线偏短、偏离垂直中心。
+- 横线颜色与收起圆环的边框颜色共用同一变量，普通、悬停和根节点状态保持一致。
+- 修复树状图通用白色节点背景覆盖根节点主题色、导致白色根节点标题不可见的问题。
+- 切换到树状图或组织图时，自动使用折线连接，避免曲线连接在层级布局中造成视觉干扰。
+- 正文多选块支持复制后粘贴到空白行或空白块：会保留块类型与内容，并在粘贴时生成新块 ID，避免同页复制冲突。
+- 优化 Word 富文本粘贴：识别 Word 行内样式中的加粗、斜体、下划线、删除线与文字颜色，并兼容 `o:p` 等 Word 包装标签，减少回退为纯文本的情况。
+- 补充 Word 标题段落识别：`MsoHeading1`、`mso-style-name: Heading 2` 及中文“标题 1-3”会映射为知栖对应的标题块。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/mindmap/mindmapStaticBundle.test.ts`。
+
+## 2026-07-12 简单表格行列菜单可见性优化
+
+提交：未提交
+
+简要描述：
+
+简单表格的行、列更多菜单改为与添加行、添加列按钮同时清晰显示；行操作使用竖向三点，列操作使用横向三点。
+
+详细描述：
+
+- 行列菜单完整复用添加行、列按钮的状态样式：首次进入表格时均只显示淡色图标；单独悬停到按钮时，再使用一致的实色高亮、深色图标和细描边。
+- 行操作入口使用竖向三点，列操作入口使用横向三点，使图标方向与对应操作维度一致。
+- 保持既有行列菜单、尺寸调整和表格数据结构不变。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/editor/blocks/TableBlock.test.tsx src/styles/tableControlLayout.test.ts`。
+- 已通过 `C:/Program Files/nodejs/npm.cmd run build`。
+
+## 2026-07-12 简单表格滚动与末边界拖拽修复
+
+提交：未提交
+
+简要描述：
+
+移除简单表格无意义的纵向滚动条，并恢复末尾行、列尺寸边界的稳定拖拽。
+
+详细描述：
+
+- 表格横向滚动容器明确隐藏纵向溢出，避免 `overflow-x: auto` 与 `overflow-y: visible` 的浏览器计算规则额外生成纵向滚动条并挤占横向空间。
+- 行列更多控制层高于新增行列入口，真实的行列尺寸手柄再高一层，最后一行和最后一列的边界不会再被新增入口遮住。
+- 表格网格的边框计入自身 `100%` 宽度，避免正文宽度恰好铺满时，左侧一像素边框额外触发横向滚动条。
+- 最后一列和最后一行的尺寸手柄收在表格边界内侧，保留 10 像素拖拽命中区，同时不再以透明的越界手柄制造滚动溢出。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/editor/blocks/TableBlock.test.tsx src/styles/tableControlLayout.test.ts src/components/editor/BlockEditor.test.tsx`，共 119 项测试。
+- 已通过 `C:/Program Files/nodejs/npm.cmd run build`。
+
+## 2026-07-12 简单表格编辑完善
+
+提交：未提交
+
+简要描述：
+
+简单表格补充首行表头开关、主题色单元格选中、多行自动增高及双击恢复行列尺寸；已有插入、删除、颜色、对齐和拖拽调整能力保持不变。
+
+详细描述：
+
+- 第一行的行菜单新增“设为表头行 / 取消表头行”，表头状态随页面块数据持久化，并以轻量底色和字重区分。
+- 当前编辑单元格使用系统主题色的半透明高亮与一像素细边提示，不改变单元格或表格布局尺寸。
+- 单元格改为支持自动换行的多行输入；长文本按内容增高，`Shift + Enter` 可输入换行，原有 `Enter` 行间移动与 `Tab` 单元格导航保持不变。
+- 保留自由拖拽调整行高和列宽；双击任一尺寸手柄会清除该手动尺寸，恢复内容自适应。
+- 控制菜单层直接读取首行和首列单元格的实际像素宽高，内容变化或手动调整后与单元格边界保持对齐，避免首列拖拽时控制边界覆盖真实表格边框；尺寸手柄提升层级并扩大命中范围，避免被菜单覆盖；点击表格外会清除单元格选中状态。
+- 编辑器框选入口会忽略简单表格的行列尺寸手柄，拖拽调整尺寸不再触发块框选。
+- 行列菜单进一步改为按每个真实单元格的 `left/top/width/height` 绝对定位，消除窄首列与宽内容列之间的菜单错位；表格内容默认垂直居中，表头使用更明显的底色且悬停时仍保留。
+- 简单表格在拖窄某一列后仍至少铺满可用正文宽度，剩余列会分配可用空间；只有总宽度超出正文区域时才出现横向滚动，避免表格整体收缩导致内容和菜单压扁。
+- 控制入口不再回退到固定最小列宽：首次测量真实单元格坐标前保持隐藏，并在下一帧重新测量后显示，避免首列菜单错误落到列边界。
+- 数据网格、行列控制层和添加行/列区域现统一占满同一正文宽度基准，避免添加区域与实际表格宽度脱节；最后一列和最后一行也提供可拖拽、可双击恢复的尺寸手柄。
+- 自由调整列宽的下限统一为单元格最小宽度 `120px`，行高下限统一为 `39px`，避免自由尺寸与单元格自身最小尺寸冲突导致边界、菜单和内容错位。
+- 列宽拖拽起点改为当前实际渲染宽度，避免首次拖动从默认宽度重新计算而突然跳到最小值；首列菜单新增“适应正文宽度”表格级开关，关闭后按内容宽度收紧，超出正文区域时保留横向滚动。
+
+验证情况：
+
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/editor/blocks/TableBlock.test.tsx src/styles/tableControlLayout.test.ts src/components/editor/BlockEditor.test.tsx`，共 107 项测试。
+- 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/editor/blocks/TableBlock.test.tsx src/styles/tableControlLayout.test.ts`，共 32 项测试。
+- 已通过 `C:/Program Files/nodejs/npm.cmd run build`。

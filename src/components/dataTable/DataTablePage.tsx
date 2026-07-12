@@ -8,7 +8,7 @@ import { PageHeader } from '../editor/PageHeader'
 import { AppStoreProvider, type SaveStatus as DataTableSaveStatus } from './store/AppStore'
 import TablePage from './components/table/TablePage'
 import RecordPage from './components/record/RecordPage'
-import { createDefaultAppState } from './domain/factory'
+import { getDataTableInitialState } from './domain/appState'
 import type { AppState } from './domain/types'
 import './styles.css'
 
@@ -25,24 +25,6 @@ interface DataTablePageProps {
   onRename: (title: string) => void
   onChangeIcon: (icon: string | null) => void
   onChangeCover: (cover: string | null) => void
-}
-
-function isDataTableState(value: unknown): value is AppState {
-  if (!value || typeof value !== 'object') {
-    return false
-  }
-
-  const state = value as Partial<AppState>
-
-  return (
-    state.version === 1 &&
-    !!state.database &&
-    typeof state.database === 'object' &&
-    !!state.properties &&
-    typeof state.properties === 'object' &&
-    !!state.records &&
-    typeof state.records === 'object'
-  )
 }
 
 function toDataTableSaveStatus(status: SaveStatus): DataTableSaveStatus {
@@ -63,7 +45,9 @@ export function DataTablePage({
   onChangeIcon,
   onChangeCover,
 }: DataTablePageProps) {
-  const initialState = dataTable && isDataTableState(dataTable.snapshot) ? dataTable.snapshot : createDefaultAppState()
+  const initialState = dataTable
+    ? getDataTableInitialState(dataTable.snapshot, dataTable.title)
+    : getDataTableInitialState(null, '')
   const dataTableHeaderPage: PageRecord | null = dataTable
     ? {
         id: dataTable.id,

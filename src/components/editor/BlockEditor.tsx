@@ -16,7 +16,10 @@ import type {
   SyncedBlockMode,
   TextBlockStyle,
 } from '../../domain/types'
-import { clipboardHtmlToStructuredBlocks } from '../../domain/clipboardCapture'
+import {
+  clipboardHtmlToStructuredPasteItems,
+  type ClipboardStructuredPasteItem,
+} from '../../domain/clipboardCapture'
 import { parseMarkdownBlocks } from '../../domain/markdownImport'
 import {
   buildSyncedPickerItems,
@@ -53,6 +56,86 @@ import { getSlashMenuOptions, SlashMenu, type SlashMenuCommand } from './SlashMe
 import type { ReorderPosition } from '../../utils/reorder'
 import type { PageRelationAutocompleteItem } from './PageRelationAutocomplete'
 import { createBlock } from '../../utils/blockFactory'
+import { createId } from '../../utils/id'
+
+const BLOCK_CLIPBOARD_MIME_TYPE = 'application/x-zhixi-blocks+json'
+const blockTypes = new Set<BlockType>([
+  'paragraph',
+  'heading_1',
+  'heading_2',
+  'heading_3',
+  'todo',
+  'bulleted_list',
+  'numbered_list',
+  'child_page',
+  'code',
+  'table',
+  'image',
+  'video',
+  'audio',
+  'file',
+  'whiteboard',
+  'data_table',
+  'mindmap',
+  'synced_block',
+])
+
+function parseCopiedBlocks(rawValue: string): BlockRecord[] | null {
+  if (!rawValue) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue) as unknown
+    if (
+      !Array.isArray(parsed) ||
+      parsed.length === 0 ||
+      !parsed.every(
+        (block) =>
+          typeof block === 'object' &&
+          block !== null &&
+          typeof (block as { id?: unknown }).id === 'string' &&
+          typeof (block as { type?: unknown }).type === 'string' &&
+          blockTypes.has((block as { type: BlockType }).type),
+      )
+    ) {
+      return null
+    }
+
+    return parsed as BlockRecord[]
+  } catch {
+    return null
+  }
+}
+
+function createPastedBlockCopies(blocks: BlockRecord[]): BlockRecord[] {
+  return blocks.map((block) => {
+    const copy = structuredClone(block)
+    if (copy.type === 'synced_block') {
+      return { ...copy, id: createId('block'), instanceId: createId('synced-instance') }
+    }
+
+    return { ...copy, id: createId('block') }
+  })
+}
+
+function copiedBlocksToPlainText(blocks: BlockRecord[]) {
+  return blocks
+    .map((block) => {
+      if ('text' in block) {
+        return block.text
+      }
+      if ('items' in block) {
+        return block.items.join('\n')
+      }
+      if (block.type === 'table') {
+        return block.rows.map((row) => row.join('\t')).join('\n')
+      }
+      return ''
+    })
+    .filter(Boolean)
+    .join('\n\n')
+}
 
 const EmbeddedDataTableBlock = lazy(() =>
   import('./blocks/EmbeddedDataTableBlock').then((module) => ({
@@ -607,6 +690,10 @@ export function BlockEditor({
       }
     }
 
+    if (target.closest('.table-resize-handle')) {
+      return
+    }
+
     if (target === surface && isPointerInTrailingSurfaceGap(surface, clientY)) {
       preventDefault()
       clearBlockSelection()
@@ -1031,32 +1118,96 @@ export function BlockEditor({
     onUpdateBlock(nextBlockId, await createImageBlockFromPasteSource(source, nextBlockId))
   }
 
-  function getPastedStructuredBlocks(clipboardData: DataTransfer): BlockRecord[] | null {
+  function getPastedImageSourceFromHtml(source: string): PastedImageSource | null {
+    const dataUrlMatch = source.match(/^data:(image\/[\w.+-]+);base64,([\s\S]+)$/i)
+    if (dataUrlMatch) {
+      try {
+        const encoded = dataUrlMatch[2].replace(/\s/g, '')
+        const decoded = atob(encoded)
+        return {
+          kind: 'image_bytes',
+          bytes: Uint8Array.from(decoded, (character) => character.charCodeAt(0)),
+        }
+      } catch {
+        return null
+      }
+    }
+
+    if (!source.startsWith('file:///')) {
+      return null
+    }
+
+    try {
+      const path = decodeURIComponent(source.replace(/^file:\/\//i, ''))
+        .replace(/^\/([a-z]:)/i, '$1')
+        .replace(/\//g, '\\')
+      return path ? { kind: 'image_file', path } : null
+    } catch {
+      return null
+    }
+  }
+
+  async function materializePastedStructuredItems(items: ClipboardStructuredPasteItem[]) {
+    const blocks: BlockRecord[] = []
+
+    for (const item of items) {
+      if (item.kind === 'block') {
+        blocks.push(item.block)
+        continue
+      }
+
+      const source = getPastedImageSourceFromHtml(item.source)
+      if (!source) {
+        continue
+      }
+
+      try {
+        const imageBlock = await createImageBlockFromPasteSource(source, createId('block'))
+        blocks.push({ ...imageBlock, ...(item.alt ? { alt: item.alt } : {}) })
+      } catch {
+        // Keep the surrounding document content when Word exposes an unreadable image source.
+      }
+    }
+
+    return blocks
+  }
+
+  function getPastedStructuredItems(clipboardData: DataTransfer): ClipboardStructuredPasteItem[] | null {
     if (typeof clipboardData.getData !== 'function') {
       return null
     }
 
-    return getPastedStructuredBlocksFromText(
+    const copiedBlocks = parseCopiedBlocks(clipboardData.getData(BLOCK_CLIPBOARD_MIME_TYPE))
+    if (copiedBlocks) {
+      return createPastedBlockCopies(copiedBlocks).map((block) => ({ kind: 'block', block }))
+    }
+
+    return getPastedStructuredItemsFromText(
       clipboardData.getData('text/markdown'),
       clipboardData.getData('text/plain') || clipboardData.getData('Text'),
       clipboardData.getData('text/html'),
     )
   }
 
-  function getPastedStructuredBlocksFromText(
+  function getPastedStructuredItemsFromText(
     markdown: string,
     text: string,
     html: string | null | undefined,
-  ): BlockRecord[] | null {
+  ): ClipboardStructuredPasteItem[] | null {
+    const htmlItems = clipboardHtmlToStructuredPasteItems(html ?? '')
+    if (htmlItems?.length) {
+      return htmlItems
+    }
+
     if (isMarkdownClipboardText(markdown)) {
-      return parseMarkdownBlocks(markdown)
+      return parseMarkdownBlocks(markdown).map((block) => ({ kind: 'block', block }))
     }
 
     if (isMarkdownClipboardText(text)) {
-      return parseMarkdownBlocks(text)
+      return parseMarkdownBlocks(text).map((block) => ({ kind: 'block', block }))
     }
 
-    return clipboardHtmlToStructuredBlocks(html ?? '')
+    return null
   }
 
   async function insertStructuredBlocksAfter(blockId: string, blocks: BlockRecord[]) {
@@ -1109,8 +1260,17 @@ export function BlockEditor({
   }
 
   function handlePasteStructuredContent(target: PasteTargetBlock, clipboardData: DataTransfer) {
-    const blocks = getPastedStructuredBlocks(clipboardData)
-    return blocks && blocks.length > 0 ? applyPastedStructuredBlocks(target, blocks) : false
+    const items = getPastedStructuredItems(clipboardData)
+    if (!items || items.length === 0) {
+      return false
+    }
+
+    void materializePastedStructuredItems(items).then((blocks) => {
+      if (blocks.length > 0) {
+        applyPastedStructuredBlocks(target, blocks)
+      }
+    })
+    return true
   }
 
   async function handleDesktopPasteStructuredContent(target: PasteTargetBlock) {
@@ -1123,15 +1283,29 @@ export function BlockEditor({
       } satisfies DesktopPasteFallback
     }
 
-    const blocks = getPastedStructuredBlocksFromText('', candidate.text, candidate.html)
+    const items = getPastedStructuredItemsFromText('', candidate.text, candidate.html)
+    if (!items || items.length === 0) {
+      return { handled: false } satisfies DesktopPasteFallback
+    }
+
+    const blocks = await materializePastedStructuredItems(items)
     return {
-      handled: Boolean(blocks && blocks.length > 0 && applyPastedStructuredBlocks(target, blocks)),
+      handled: blocks.length > 0 && applyPastedStructuredBlocks(target, blocks),
     } satisfies DesktopPasteFallback
   }
 
   function handlePasteStructuredContentIntoTrailingRow(clipboardData: DataTransfer) {
-    const blocks = getPastedStructuredBlocks(clipboardData)
-    return blocks && blocks.length > 0 ? applyPastedStructuredBlocksIntoTrailingRow(blocks) : false
+    const items = getPastedStructuredItems(clipboardData)
+    if (!items || items.length === 0) {
+      return false
+    }
+
+    void materializePastedStructuredItems(items).then((blocks) => {
+      if (blocks.length > 0) {
+        applyPastedStructuredBlocksIntoTrailingRow(blocks)
+      }
+    })
+    return true
   }
 
   async function handleDesktopPasteStructuredContentIntoTrailingRow() {
@@ -1144,9 +1318,14 @@ export function BlockEditor({
       } satisfies DesktopPasteFallback
     }
 
-    const blocks = getPastedStructuredBlocksFromText('', candidate.text, candidate.html)
+    const items = getPastedStructuredItemsFromText('', candidate.text, candidate.html)
+    if (!items || items.length === 0) {
+      return { handled: false } satisfies DesktopPasteFallback
+    }
+
+    const blocks = await materializePastedStructuredItems(items)
     return {
-      handled: Boolean(blocks && blocks.length > 0 && applyPastedStructuredBlocksIntoTrailingRow(blocks)),
+      handled: blocks.length > 0 && applyPastedStructuredBlocksIntoTrailingRow(blocks),
     } satisfies DesktopPasteFallback
   }
 
@@ -1630,6 +1809,20 @@ export function BlockEditor({
       className="editor-surface"
       tabIndex={-1}
       onInput={keepInputInView}
+      onCopyCapture={(event) => {
+        if (orderedSelectedBlockIds.length === 0) {
+          return
+        }
+
+        const selectedBlocks = page.blocks.filter((block) => orderedSelectedBlockIds.includes(block.id))
+        if (selectedBlocks.length === 0) {
+          return
+        }
+
+        event.preventDefault()
+        event.clipboardData.setData(BLOCK_CLIPBOARD_MIME_TYPE, JSON.stringify(selectedBlocks))
+        event.clipboardData.setData('text/plain', copiedBlocksToPlainText(selectedBlocks))
+      }}
       onKeyDownCapture={(event) => {
         if (event.key === 'Escape' && selectedBlockIds.length > 0) {
           event.preventDefault()
@@ -1769,6 +1962,8 @@ export function BlockEditor({
               block,
               <TableBlock
                 rows={block.rows}
+                hasHeaderRow={block.hasHeaderRow}
+                fitToContent={block.fitToContent}
                 cellStyles={block.cellStyles}
                 columnWidths={block.columnWidths}
                 rowHeights={block.rowHeights}
@@ -1776,6 +1971,8 @@ export function BlockEditor({
                   onUpdateBlock(block.id, {
                     ...block,
                     rows,
+                    hasHeaderRow: details ? details.hasHeaderRow : block.hasHeaderRow,
+                    fitToContent: details ? details.fitToContent : block.fitToContent,
                     cellStyles: details ? details.cellStyles : block.cellStyles,
                     columnWidths: details ? details.columnWidths : block.columnWidths,
                     rowHeights: details ? details.rowHeights : block.rowHeights,
@@ -1837,6 +2034,9 @@ export function BlockEditor({
           case 'data_table': {
             const dataTable = dataTableMap.get(block.databaseId)
             const recordTitles = dataTable ? getDataTableRecordTitles(dataTable) : []
+            const menuAllowedBlockTypes: BlockType[] = [
+              block.displayMode === 'inline' ? 'data_table' : 'data_table_inline',
+            ]
 
             if (block.displayMode === 'inline' && dataTable) {
               return renderBlockRow(
@@ -1853,6 +2053,7 @@ export function BlockEditor({
                     }}
                   />
                 </Suspense>,
+                { menuAllowedBlockTypes },
               )
             }
 
@@ -1868,6 +2069,7 @@ export function BlockEditor({
                 onOpen={() => onOpenDataTable?.(block.databaseId)}
                 onRecover={!dataTable ? () => onRestoreDataTable?.(block.databaseId) : undefined}
               />,
+              { menuAllowedBlockTypes },
             )
           }
           case 'mindmap': {

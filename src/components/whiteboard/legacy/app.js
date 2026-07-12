@@ -12,8 +12,8 @@
   const CONNECTION_HANDLE_OFFSET = 18;
   const SHAPE_TYPES = ["rect", "ellipse", "diamond", "triangle"];
   const LINE_MARKERS = ["none", "arrow", "bar", "dot", "circle", "diamond"];
-  const DEFAULT_LINE_START_MARKER = "dot";
-  const DEFAULT_LINE_END_MARKER = "arrow";
+  const DEFAULT_LINE_START_MARKER = "none";
+  const DEFAULT_LINE_END_MARKER = "none";
   const MIN_SHAPE_SIZE = 8;
   const TEXT_FONT_OPTIONS = [
     { label: "默认", value: "Inter, Segoe UI, sans-serif" },
@@ -155,7 +155,7 @@
     selectedStrokeIds: [],
     pendingConnectionNoteId: null,
     connectionDraft: null,
-    lineMode: "straight",
+    lineMode: "curve",
     lineStartMarker: DEFAULT_LINE_START_MARKER,
     lineEndMarker: DEFAULT_LINE_END_MARKER,
     shapeType: "rect",
@@ -728,10 +728,10 @@
     menu.style.transform = "none";
   }
 
-  function updateLineMarkerToggle(button, marker, target) {
+  function updateLineMarkerToggle(button, target) {
     if (!button) return;
-    button.innerHTML = lineMarkerPreviewSvg(marker, target);
-    button.dataset.lineMarker = marker;
+    button.innerHTML = lineMarkerPreviewSvg("none", target);
+    button.removeAttribute("data-line-marker");
   }
 
   function setExportMenuOpen(isOpen) {
@@ -782,8 +782,8 @@
     });
     const activeStartMarker = getActiveLineMarker("from");
     const activeEndMarker = getActiveLineMarker("to");
-    updateLineMarkerToggle(lineStartMarkerToggle, activeStartMarker, "from");
-    updateLineMarkerToggle(lineEndMarkerToggle, activeEndMarker, "to");
+    updateLineMarkerToggle(lineStartMarkerToggle, "from");
+    updateLineMarkerToggle(lineEndMarkerToggle, "to");
     document.querySelectorAll("[data-line-marker]").forEach((button) => {
       const target = button.dataset.lineMarkerTarget === "from" ? "from" : "to";
       const activeMarker = target === "from" ? activeStartMarker : activeEndMarker;
@@ -973,10 +973,15 @@
       }
     }
 
+    const shouldPan = state.tool === "hand" || spaceDown || event.button === 1;
+
+    if (shouldPan) {
+      startPanFromPointer(event);
+      return;
+    }
+
     event.preventDefault();
     viewport.setPointerCapture(event.pointerId);
-
-    const shouldPan = state.tool === "hand" || spaceDown || event.button === 1;
 
     if (state.connectionDraft) {
       if (hitShape) confirmConnectionToTarget(hitShape);
@@ -989,17 +994,6 @@
       if (hitShape) handleConnectorObjectClick(hitShape, world);
       else state.pendingConnectionNoteId = null;
       render();
-      return;
-    }
-
-    if (shouldPan) {
-      pointerMode = {
-        type: "pan",
-        pointerId: event.pointerId,
-        lastX: event.clientX,
-        lastY: event.clientY,
-      };
-      document.body.classList.add("is-panning");
       return;
     }
 
@@ -1163,6 +1157,19 @@
     render();
   }
 
+  function startPanFromPointer(event, captureTarget = viewport) {
+    event.preventDefault();
+    event.stopPropagation();
+    captureTarget.setPointerCapture(event.pointerId);
+    pointerMode = {
+      type: "pan",
+      pointerId: event.pointerId,
+      lastX: event.clientX,
+      lastY: event.clientY,
+    };
+    document.body.classList.add("is-panning");
+  }
+
   function onViewportDoubleClick(event) {
     if (state.tool !== "select" || event.button !== 0) return;
     if (event.target.closest(".note, .text-box, .text-toolbar, .shape-text-editor")) return;
@@ -1178,6 +1185,11 @@
   }
 
   function onNotePointerDown(event) {
+    if (event.button === 1) {
+      startPanFromPointer(event, noteLayer);
+      return;
+    }
+
     const connectHandle = event.target.closest(".note-connect-handle");
     if (connectHandle) {
       event.preventDefault();
@@ -1821,6 +1833,11 @@
   }
 
   function onImagePointerDown(event) {
+    if (event.button === 1) {
+      startPanFromPointer(event, noteLayer);
+      return;
+    }
+
     const imageElement = event.target.closest(".image-box");
     if (!imageElement) return;
     const image = findImage(imageElement.dataset.id);
@@ -1907,6 +1924,11 @@
   }
 
   function onTextPointerDown(event) {
+    if (event.button === 1) {
+      startPanFromPointer(event, noteLayer);
+      return;
+    }
+
     if (event.target.closest(".text-toolbar")) return;
     const textElement = event.target.closest(".text-box");
     if (!textElement) return;
@@ -2432,6 +2454,8 @@
     if (connection.mode !== "curve") {
       return distanceToSegment(point, geometry.start, geometry.end) <= hitDistance;
     }
+
+    if (distanceToSegment(point, geometry.start, geometry.end) <= hitDistance) return true;
 
     let previous = geometry.start;
     for (let step = 1; step <= 28; step += 1) {

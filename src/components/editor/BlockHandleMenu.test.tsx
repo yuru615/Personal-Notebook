@@ -36,6 +36,21 @@ describe('BlockHandleMenu', () => {
     expect(screen.getByRole('button', { name: '在下方插入块' })).toBeInTheDocument()
   })
 
+  it('limits a data table block to the inline data table conversion', () => {
+    render(
+      <BlockHandleMenu
+        allowedBlockTypes={['data_table_inline']}
+        onTurnInto={vi.fn()}
+        onDuplicate={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: '\u8f6c\u6362\u4e3a\u5d4c\u5165\u5f0f\u6570\u636e\u8868' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '\u8f6c\u6362\u4e3a\u6807\u9898 1' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '\u8f6c\u6362\u4e3a\u5f85\u529e' })).not.toBeInTheDocument()
+  })
+
   it('places insert actions before conversion and other block actions', () => {
     const { container } = render(
       <BlockHandleMenu

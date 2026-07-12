@@ -36,7 +36,7 @@ use windows::{
         System::{
             DataExchange::{
                 CloseClipboard, GetClipboardData, GetClipboardSequenceNumber,
-                IsClipboardFormatAvailable, OpenClipboard,
+                IsClipboardFormatAvailable, OpenClipboard, RegisterClipboardFormatW,
             },
             LibraryLoader::GetModuleHandleW,
             Memory::{GlobalLock, GlobalSize, GlobalUnlock},
@@ -377,7 +377,7 @@ fn process_clipboard_capture_tick(app: &AppHandle, state: &ClipboardCaptureState
 }
 
 fn clipboard_text_candidate(text: &str, html: Option<&str>) -> Option<ClipboardCandidate> {
-    let normalized_html = normalize_optional_string(html);
+    let normalized_html = normalize_optional_html(html);
     if text.trim().is_empty() && normalized_html.is_none() {
         return None;
     }
@@ -499,6 +499,29 @@ fn normalize_optional_string(value: Option<&str>) -> Option<String> {
             Some(candidate.to_string())
         }
     })
+}
+
+fn normalize_optional_html(value: Option<&str>) -> Option<String> {
+    let html = normalize_optional_string(value)?;
+    Some(extract_cf_html_fragment(&html).unwrap_or(html))
+}
+
+fn extract_cf_html_fragment(value: &str) -> Option<String> {
+    let read_offset = |label: &str| {
+        value.lines().find_map(|line| {
+            line.trim()
+                .strip_prefix(label)
+                .and_then(|offset| offset.trim().parse::<usize>().ok())
+        })
+    };
+    let start = read_offset("StartFragment:")?;
+    let end = read_offset("EndFragment:")?;
+
+    if start >= end || end > value.len() || !value.is_char_boundary(start) || !value.is_char_boundary(end) {
+        return None;
+    }
+
+    Some(value[start..end].to_string())
 }
 
 fn now_timestamp_ms() -> u64 {
@@ -627,6 +650,11 @@ fn read_windows_native_clipboard_candidate() -> Result<Option<ClipboardCandidate
     let clipboard = open_windows_clipboard()?;
 
     let image_file_candidate = read_windows_native_image_file_candidate()?;
+    let html_candidate = if image_file_candidate.is_none() {
+        read_windows_native_html()?
+    } else {
+        None
+    };
     let text_candidate = if image_file_candidate.is_none() {
         read_windows_native_unicode_text()?
     } else {
@@ -637,32 +665,17 @@ fn read_windows_native_clipboard_candidate() -> Result<Option<ClipboardCandidate
         return Ok(Some(candidate));
     }
 
-    if let Some(text) = text_candidate {
-        if should_probe_windows_powershell_fallback(image_file_candidate.is_some()) {
-            drop(clipboard);
-            let output = run_windows_powershell_script(WINDOWS_CLIPBOARD_READ_SCRIPT)?;
-            if let Some(candidate) = parse_clipboard_candidate_json(&output)? {
-                return Ok(Some(candidate));
-            }
-        }
-
-        return Ok(clipboard_text_candidate(&text, None));
+    if text_candidate.is_some() || html_candidate.is_some() {
+        return Ok(clipboard_text_candidate(
+            text_candidate.as_deref().unwrap_or_default(),
+            html_candidate.as_deref(),
+        ));
     }
 
     drop(clipboard);
 
-    if should_probe_windows_powershell_fallback(image_file_candidate.is_some()) {
-        let output = run_windows_powershell_script(WINDOWS_CLIPBOARD_READ_SCRIPT)?;
-        return parse_clipboard_candidate_json(&output);
-    }
-
-    Ok(None)
-}
-
-fn should_probe_windows_powershell_fallback(
-    has_native_image_file: bool,
-) -> bool {
-    !has_native_image_file
+    let output = run_windows_powershell_script(WINDOWS_CLIPBOARD_READ_SCRIPT)?;
+    parse_clipboard_candidate_json(&output)
 }
 
 #[cfg(target_os = "windows")]
@@ -730,6 +743,29 @@ fn read_windows_native_unicode_text() -> Result<Option<String>, String> {
     let _ = unsafe { GlobalUnlock(global) };
 
     Ok(if text.is_empty() { None } else { Some(text) })
+}
+
+#[cfg(target_os = "windows")]
+fn read_windows_native_html() -> Result<Option<String>, String> {
+    let format = unsafe { RegisterClipboardFormatW(w!("HTML Format")) };
+    if format == 0 || unsafe { IsClipboardFormatAvailable(format) }.is_err() {
+        return Ok(None);
+    }
+
+    let handle = unsafe { GetClipboardData(format) }
+        .map_err(|error| format!("failed to read Windows clipboard HTML: {error}"))?;
+    let global = HGLOBAL(handle.0);
+    let pointer = unsafe { GlobalLock(global) } as *const u8;
+    if pointer.is_null() {
+        return Err("failed to lock the Windows clipboard HTML buffer".to_string());
+    }
+
+    let byte_count = unsafe { GlobalSize(global) };
+    let bytes = unsafe { std::slice::from_raw_parts(pointer, byte_count) };
+    let html = String::from_utf8_lossy(bytes).trim_end_matches('\0').to_string();
+    let _ = unsafe { GlobalUnlock(global) };
+
+    Ok(normalize_optional_html(Some(&html)))
 }
 
 fn read_null_terminated_utf16(units: &[u16]) -> String {
@@ -1082,6 +1118,19 @@ mod tests {
     }
 
     #[test]
+    fn extracts_the_fragment_from_windows_cf_html() {
+        let fragment = "<p class=\"MsoHeading1\">Word heading</p>";
+        let header = "Version:1.0\r\nStartHTML:0000000000\r\nEndHTML:0000000000\r\nStartFragment:0000000000\r\nEndFragment:0000000000\r\n";
+        let start = header.len();
+        let end = start + fragment.len();
+        let clipboard_html = format!(
+            "Version:1.0\r\nStartHTML:0000000000\r\nEndHTML:0000000000\r\nStartFragment:{start:010}\r\nEndFragment:{end:010}\r\n{fragment}"
+        );
+
+        assert_eq!(extract_cf_html_fragment(&clipboard_html), Some(fragment.to_string()));
+    }
+
+    #[test]
     fn keeps_the_native_candidate_without_running_the_fallback() {
         let mut fallback_used = false;
         let candidate = ClipboardCandidate::ImageBytes {
@@ -1157,21 +1206,6 @@ mod tests {
         state.clear_last_seen_signature();
 
         assert!(state.store_detected_candidate(candidate, "2026-07-09T00:00:02.000Z".to_string()));
-    }
-
-    #[test]
-    fn probes_the_powershell_fallback_when_no_native_file_or_text_match_exists() {
-        assert!(should_probe_windows_powershell_fallback(false));
-    }
-
-    #[test]
-    fn keeps_probing_the_powershell_fallback_when_only_native_text_matched() {
-        assert!(should_probe_windows_powershell_fallback(false));
-    }
-
-    #[test]
-    fn skips_the_powershell_fallback_when_native_files_already_matched() {
-        assert!(!should_probe_windows_powershell_fallback(true));
     }
 
     #[test]

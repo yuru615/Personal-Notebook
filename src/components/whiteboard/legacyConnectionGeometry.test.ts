@@ -53,6 +53,35 @@ function loadConnectionPathGeometry(): (
   return factory() as ReturnType<typeof loadConnectionPathGeometry>
 }
 
+function loadConnectionHitTest() {
+  const connectionPathGeometry = loadConnectionPathGeometry()
+  const factory = new Function(
+    'findConnectable',
+    'connectionGeometry',
+    'distanceToSegment',
+    'cubicPoint',
+    'CONNECTION_HIT_PAD',
+    [
+      extractFunction(legacyAppScript, 'connectionHitTest'),
+      'return connectionHitTest;',
+    ].join('\n\n'),
+  )
+
+  return factory(
+    () => ({ id: 'object' }),
+    () => connectionPathGeometry({ x: 0, y: 0 }, { x: 200, y: 400 }, 'curve', 'e', 'w'),
+    new Function(
+      [extractFunction(legacyAppScript, 'clamp'), extractFunction(legacyAppScript, 'distanceToSegment'), 'return distanceToSegment;'].join('\n\n'),
+    )(),
+    new Function(`${extractFunction(legacyAppScript, 'cubicPoint')}\nreturn cubicPoint;`)(),
+    12,
+  ) as (
+    connection: { from: string; to: string; mode: string; size: number },
+    point: { x: number; y: number },
+    threshold: number,
+  ) => boolean
+}
+
 describe('legacy connection geometry', () => {
   it('keeps fixed left-to-right tangents even when endpoints swap vertically', () => {
     const connectionPathGeometry = loadConnectionPathGeometry()
@@ -73,5 +102,17 @@ describe('legacy connection geometry', () => {
       expect(geometry.control1?.x ?? 0).toBeGreaterThan(geometry.start.x)
       expect(geometry.control2?.x ?? 0).toBeLessThan(geometry.end.x)
     }
+  })
+
+  it('keeps a curve selectable from the direct path between its endpoints', () => {
+    const connectionHitTest = loadConnectionHitTest()
+
+    expect(
+      connectionHitTest(
+        { from: 'from', to: 'to', mode: 'curve', size: 3 },
+        { x: 50, y: 100 },
+        6,
+      ),
+    ).toBe(true)
   })
 })

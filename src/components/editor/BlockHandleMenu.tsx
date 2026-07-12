@@ -36,6 +36,8 @@ const turnIntoOptions: Array<{ type: BlockType; label: string; icon: string }> =
   { type: 'numbered_list', label: '转为有序列表', icon: '1.' },
   { type: 'code', label: '转为代码块', icon: '</>' },
   { type: 'table', label: '转为表格', icon: '▦' },
+  { type: 'data_table', label: '\u8f6c\u6362\u4e3a\u6570\u636e\u8868\u683c\u5361\u7247', icon: '▦' },
+  { type: 'data_table_inline', label: '\u8f6c\u6362\u4e3a\u5d4c\u5165\u5f0f\u6570\u636e\u8868', icon: '▦' },
 ]
 
 const textColorOptions: Array<{ value: TextColor; label: string }> = [

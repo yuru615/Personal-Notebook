@@ -36,6 +36,8 @@ describe('editor multi select layout', () => {
     expect(cssRule('.editor-selection-marquee')).toContain('position: fixed;')
     expect(cssRule('.editor-selection-marquee')).toContain('pointer-events: none;')
     expect(cssRule('.editor-selection-marquee')).toContain('background: var(--app-accent-marquee);')
+    expect(cssRule('.editor-surface:focus')).toContain('outline: 0;')
+    expect(cssRule('.editor-surface:focus-visible')).toContain('outline: 0;')
     expect(styles).not.toContain(
       '.editor-row-selected > .block-frame > .block-frame-content > .canvas-entry-card,',
     )

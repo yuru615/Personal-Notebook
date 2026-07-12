@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { buildLegacyWhiteboardSrcDoc } from './legacyWhiteboardDocument'
+import {
+  buildLegacyWhiteboardSrcDoc,
+  LEGACY_WHITEBOARD_DOCUMENT_VERSION,
+} from './legacyWhiteboardDocument'
 import { createEmptyBoardSnapshot } from './whiteboardModel'
 
 describe('legacyWhiteboardDocument', () => {
+  it('uses the toolbar-optimization document version', () => {
+    expect(LEGACY_WHITEBOARD_DOCUMENT_VERSION).toBe('2026-07-11-whiteboard-middle-pan-v16')
+  })
+
   it('includes pointer-release completion for connection drafts', () => {
     const srcDoc = buildLegacyWhiteboardSrcDoc('board-1', createEmptyBoardSnapshot(), '2026-06-19T00:00:00.000Z')
 
@@ -48,6 +55,29 @@ describe('legacyWhiteboardDocument', () => {
 
     expect(srcDoc).toContain('if (tool === "shape" && state.tool === "shape") {')
     expect(srcDoc).toContain('setTool("select");')
+  })
+
+  it('keeps connector creation off the top toolbar and defaults new lines to curves', () => {
+    const srcDoc = buildLegacyWhiteboardSrcDoc('board-1', createEmptyBoardSnapshot(), '2026-06-19T00:00:00.000Z')
+
+    expect(srcDoc).not.toContain('data-tool="connector"')
+    expect(srcDoc).toContain('lineMode: "curve",')
+  })
+
+  it('defaults both endpoints to the first marker and keeps their toolbar buttons neutral', () => {
+    const srcDoc = buildLegacyWhiteboardSrcDoc('board-1', createEmptyBoardSnapshot(), '2026-06-19T00:00:00.000Z')
+
+    expect(srcDoc).toContain('const DEFAULT_LINE_START_MARKER = "none";')
+    expect(srcDoc).toContain('const DEFAULT_LINE_END_MARKER = "none";')
+    expect(srcDoc).toContain('button.innerHTML = lineMarkerPreviewSvg("none", target);')
+    expect(srcDoc).not.toContain('button.dataset.lineMarker = marker;')
+  })
+
+  it('routes middle-button drags on objects to canvas panning', () => {
+    const srcDoc = buildLegacyWhiteboardSrcDoc('board-1', createEmptyBoardSnapshot(), '2026-06-19T00:00:00.000Z')
+
+    expect(srcDoc).toContain('function startPanFromPointer(event, captureTarget = viewport) {')
+    expect(srcDoc.match(/startPanFromPointer\(event, noteLayer\);/g)).toHaveLength(3)
   })
 
   it('renders configurable connection endpoint markers and stronger draft feedback', () => {

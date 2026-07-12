@@ -3,7 +3,7 @@ import legacyIndexHtml from './legacy/index.html?raw'
 import legacyStyles from './legacy/styles.css?raw'
 import type { WhiteboardSnapshot } from './whiteboardModel'
 
-export const LEGACY_WHITEBOARD_DOCUMENT_VERSION = '2026-06-19-whiteboard-line-markers-v12'
+export const LEGACY_WHITEBOARD_DOCUMENT_VERSION = '2026-07-11-whiteboard-middle-pan-v16'
 
 const storageKeySnippet = 'const STORAGE_KEY = "flowboard.whiteboard.v1";'
 const hydrateSnippet = 'const raw = localStorage.getItem(STORAGE_KEY);'

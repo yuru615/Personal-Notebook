@@ -461,6 +461,39 @@
   filter: brightness(0.96);
 }
 
+.node-card-toggle:not(.node-card-toggle-collapsed-count) {
+  --node-toggle-ring: var(--border);
+  font-size: 0;
+  line-height: 0;
+}
+
+.node-card-toggle:not(.node-card-toggle-collapsed-count):hover {
+  --node-toggle-ring: var(--map-accent-border, #0f766e47);
+}
+
+.node-card-root .node-card-toggle:not(.node-card-toggle-collapsed-count) {
+  --node-toggle-ring: #ffffff80;
+}
+
+.node-card-root .node-card-toggle:not(.node-card-toggle-collapsed-count):hover {
+  --node-toggle-ring: #ffffffc7;
+}
+
+.node-card-toggle:not(.node-card-toggle-collapsed-count)::before {
+  content: '';
+  display: block;
+  width: 10px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--node-toggle-ring);
+}
+
+.canvas-transform-tree .node-card-root {
+  border-color: var(--map-accent, var(--accent));
+  background: var(--map-accent, var(--accent));
+  color: #ffffff;
+}
+
 @media (width <= 1024px) {
   :root {
     --topbar-offset: 92px;

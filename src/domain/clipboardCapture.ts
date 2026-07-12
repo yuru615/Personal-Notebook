@@ -19,20 +19,9 @@ const BLOCK_TAGS = new Set([
   'ol',
 ])
 
-const ALLOWED_TAGS = new Set([
-  ...BLOCK_TAGS,
-  'strong',
-  'b',
-  'em',
-  'i',
-  'u',
-  'a',
-  'br',
-  'span',
-  's',
-  'strike',
-  'del',
-])
+export type ClipboardStructuredPasteItem =
+  | { kind: 'block'; block: BlockRecord }
+  | { kind: 'image'; source: string; alt: string }
 
 function toParagraphBlock(text: string, richText?: RichTextSegment[]): BlockRecord {
   const normalizedRichText = normalizeRichText(richText ?? [])
@@ -47,7 +36,8 @@ function toParagraphBlock(text: string, richText?: RichTextSegment[]): BlockReco
 
 function hasApprovedMarks(segments: RichTextSegment[]) {
   return segments.some(
-    (segment) => segment.bold || segment.italic || segment.underline || segment.strike || segment.link,
+    (segment) =>
+      segment.bold || segment.italic || segment.underline || segment.strike || segment.link || segment.color,
   )
 }
 
@@ -60,6 +50,7 @@ function keepApprovedMarks(segments: RichTextSegment[]) {
       ...(segment.underline ? { underline: true } : {}),
       ...(segment.strike ? { strike: true } : {}),
       ...(segment.link ? { link: segment.link } : {}),
+      ...(segment.color ? { color: segment.color } : {}),
     })),
   )
 }
@@ -83,7 +74,10 @@ function htmlToPlainText(html: string) {
 
 function hasUnsupportedHtml(root: HTMLElement) {
   return Array.from(root.querySelectorAll('*')).some(
-    (element) => !ALLOWED_TAGS.has(element.tagName.toLowerCase()),
+    (element) =>
+      ['table', 'img', 'video', 'audio', 'iframe', 'object', 'embed', 'svg', 'canvas'].includes(
+        element.tagName.toLowerCase(),
+      ),
   )
 }
 
@@ -168,23 +162,105 @@ function getStructuredTableBlock(element: HTMLElement): BlockRecord | null {
   return rows.length > 0 ? { id: createId('block'), type: 'table', rows } : null
 }
 
-export function clipboardHtmlToStructuredBlocks(html: string): BlockRecord[] | null {
+function getWordClassStyles(root: HTMLElement) {
+  const classStyles = new Map<string, string>()
+
+  root.querySelectorAll('style').forEach((style) => {
+    for (const rule of style.textContent?.matchAll(/([^{}]+)\{([^{}]*)\}/g) ?? []) {
+      const declarations = rule[2]
+      for (const className of rule[1].matchAll(/\.([\w-]+)/g)) {
+        const name = className[1]
+        classStyles.set(name, `${classStyles.get(name) ?? ''} ${declarations}`)
+      }
+    }
+  })
+
+  return classStyles
+}
+
+function getWordHeadingLevel(element: HTMLElement, classStyles: Map<string, string>) {
+  const classDeclarations = Array.from(element.classList)
+    .map((className) => classStyles.get(className) ?? '')
+    .join(' ')
+  const styleName = `${element.className} ${element.getAttribute('style') ?? ''} ${classDeclarations}`
+  const outlineLevel = styleName.match(/mso-outline-level\s*:\s*['"]?([1-9])/i)?.[1]
+  const ariaLevel =
+    element.getAttribute('role') === 'heading' ? element.getAttribute('aria-level') : null
+  const headingLevel = styleName.match(/(?:mso)?heading[\s_-]*([1-9])|标题\s*([1-9])/i)
+  const isWordTitle = /(?:mso)?title\b|标题样式/i.test(styleName)
+  const level = Number(outlineLevel ?? ariaLevel ?? headingLevel?.[1] ?? headingLevel?.[2] ?? (isWordTitle ? 1 : 0))
+
+  return level >= 1 && level <= 9 ? Math.min(level, 3) : null
+}
+
+function hasWordHeading(root: HTMLElement, classStyles: Map<string, string>) {
+  return Array.from(root.querySelectorAll<HTMLElement>('p, div')).some(
+    (element) => getWordHeadingLevel(element, classStyles) !== null,
+  )
+}
+
+function getImagePasteItems(element: HTMLElement): ClipboardStructuredPasteItem[] {
+  const images = element.matches('img')
+    ? [element as HTMLImageElement]
+    : Array.from(element.querySelectorAll<HTMLImageElement>('img'))
+
+  return images
+    .map((image) => ({
+      kind: 'image' as const,
+      source: image.getAttribute('src')?.trim() ?? '',
+      alt: image.getAttribute('alt')?.trim() || image.getAttribute('title')?.trim() || '',
+    }))
+    .filter((item) => item.source.length > 0)
+}
+
+export function clipboardHtmlToStructuredPasteItems(html: string): ClipboardStructuredPasteItem[] | null {
   const container = document.createElement('div')
   container.innerHTML = html
+  const classStyles = getWordClassStyles(container)
 
-  if (!container.querySelector('h1, h2, h3, ul, ol, pre, table')) {
+  if (
+    !container.querySelector('h1, h2, h3, h4, h5, h6, ul, ol, pre, table, img') &&
+    !hasWordHeading(container, classStyles)
+  ) {
     return null
   }
 
-  const blocks: BlockRecord[] = []
+  const items: ClipboardStructuredPasteItem[] = []
+  const appendBlock = (block: BlockRecord | null) => {
+    if (block) {
+      items.push({ kind: 'block', block })
+    }
+  }
   const appendElement = (element: HTMLElement): void => {
     const tag = element.tagName.toLowerCase()
 
-    if (tag === 'h1' || tag === 'h2' || tag === 'h3') {
-      const block = toStructuredTextBlock(`heading_${tag[1]}` as 'heading_1' | 'heading_2' | 'heading_3', element)
-      if (block) {
-        blocks.push(block)
-      }
+    if (tag === 'style' || tag === 'meta' || tag === 'link') {
+      return
+    }
+
+    if (tag === 'img') {
+      items.push(...getImagePasteItems(element))
+      return
+    }
+
+    if (/^h[1-6]$/.test(tag)) {
+      appendBlock(
+        toStructuredTextBlock(
+          `heading_${Math.min(Number(tag[1]), 3)}` as 'heading_1' | 'heading_2' | 'heading_3',
+          element,
+        ),
+      )
+      return
+    }
+
+    const wordHeadingLevel = getWordHeadingLevel(element, classStyles)
+    if (wordHeadingLevel) {
+      appendBlock(
+        toStructuredTextBlock(
+          `heading_${wordHeadingLevel}` as 'heading_1' | 'heading_2' | 'heading_3',
+          element,
+        ),
+      )
       return
     }
 
@@ -193,10 +269,7 @@ export function clipboardHtmlToStructuredBlocks(html: string): BlockRecord[] | n
       Array.from(element.children)
         .filter((child): child is HTMLElement => child instanceof HTMLElement && child.tagName.toLowerCase() === 'li')
         .forEach((item) => {
-          const block = getStructuredListItem(item, type)
-          if (block) {
-            blocks.push(block)
-          }
+          appendBlock(getStructuredListItem(item, type))
           Array.from(item.children)
             .filter((child): child is HTMLElement => child instanceof HTMLElement && ['ul', 'ol'].includes(child.tagName.toLowerCase()))
             .forEach(appendElement)
@@ -205,25 +278,19 @@ export function clipboardHtmlToStructuredBlocks(html: string): BlockRecord[] | n
     }
 
     if (tag === 'pre') {
-      const block = getStructuredCodeBlock(element)
-      if (block) {
-        blocks.push(block)
-      }
+      appendBlock(getStructuredCodeBlock(element))
       return
     }
 
     if (tag === 'table') {
-      const block = getStructuredTableBlock(element)
-      if (block) {
-        blocks.push(block)
-      }
+      appendBlock(getStructuredTableBlock(element))
       return
     }
 
     if (tag === 'div') {
       const structuredChildren = Array.from(element.children).filter(
         (child): child is HTMLElement =>
-          child instanceof HTMLElement && ['h1', 'h2', 'h3', 'p', 'div', 'ul', 'ol', 'pre', 'table'].includes(child.tagName.toLowerCase()),
+          child instanceof HTMLElement && ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'div', 'ul', 'ol', 'pre', 'table', 'img'].includes(child.tagName.toLowerCase()),
       )
       if (structuredChildren.length > 0) {
         structuredChildren.forEach(appendElement)
@@ -233,8 +300,11 @@ export function clipboardHtmlToStructuredBlocks(html: string): BlockRecord[] | n
 
     const block = toStructuredTextBlock('paragraph', element)
     if (block) {
-      blocks.push(block)
+      appendBlock(block)
+      return
     }
+
+    items.push(...getImagePasteItems(element))
   }
 
   Array.from(container.childNodes).forEach((child) => {
@@ -243,7 +313,15 @@ export function clipboardHtmlToStructuredBlocks(html: string): BlockRecord[] | n
     }
   })
 
-  return blocks.length > 0 ? blocks : null
+  return items.length > 0 ? items : null
+}
+
+export function clipboardHtmlToStructuredBlocks(html: string): BlockRecord[] | null {
+  const blocks = clipboardHtmlToStructuredPasteItems(html)
+    ?.filter((item): item is Extract<ClipboardStructuredPasteItem, { kind: 'block' }> => item.kind === 'block')
+    .map((item) => item.block)
+
+  return blocks && blocks.length > 0 ? blocks : null
 }
 
 function sliceRichTextSegments(segments: RichTextSegment[], start: number, end: number) {

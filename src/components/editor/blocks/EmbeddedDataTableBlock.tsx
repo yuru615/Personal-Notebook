@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import type { DataTableRecord } from '../../../domain/types'
-import { createDefaultAppState } from '../../dataTable/domain/factory'
+import { getDataTableInitialState } from '../../dataTable/domain/appState'
 import type { AppState } from '../../dataTable/domain/types'
 import TablePage from '../../dataTable/components/table/TablePage'
 import { AppStoreProvider } from '../../dataTable/store/AppStore'
@@ -13,32 +13,8 @@ interface EmbeddedDataTableBlockProps {
   onChange?: (snapshot: AppState) => void
 }
 
-function isDataTableState(value: unknown): value is AppState {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return false
-  }
-
-  const state = value as Partial<AppState>
-
-  return (
-    state.version === 1 &&
-    !!state.database &&
-    typeof state.database === 'object' &&
-    !!state.properties &&
-    typeof state.properties === 'object' &&
-    !!state.records &&
-    typeof state.records === 'object'
-  )
-}
-
 function getInitialState(dataTable: DataTableRecord) {
-  if (isDataTableState(dataTable.snapshot)) {
-    return dataTable.snapshot
-  }
-
-  const fallback = createDefaultAppState()
-  fallback.database.name = dataTable.title
-  return fallback
+  return getDataTableInitialState(dataTable.snapshot, dataTable.title)
 }
 
 export function EmbeddedDataTableBlock({
