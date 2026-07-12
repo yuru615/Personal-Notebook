@@ -5567,4 +5567,33 @@ mod tests {
             b"leak"
         );
     }
+
+    #[test]
+    fn appends_mcp_blocks_and_audit_record_in_one_transaction() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        storage
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed workspace");
+
+        storage
+            .append_mcp_page_blocks(
+                "page_1",
+                vec![json!({ "id": "block_mcp_audit", "type": "paragraph", "text": "Saved by MCP" })],
+                "2026-07-12T00:00:00.000Z".to_string(),
+            )
+            .expect("append MCP blocks");
+
+        let page = storage.load_page_record("page_1").expect("load page");
+        let audit: String = storage
+            .connection
+            .query_row(
+                "SELECT created_ids_json FROM zhixi_mcp_audit_log WHERE page_id = ?1",
+                ["page_1"],
+                |row| row.get(0),
+            )
+            .expect("audit record");
+
+        assert!(page.blocks.iter().any(|block| block["id"] == "block_mcp_audit"));
+        assert_eq!(audit, r#"["block_mcp_audit"]"#);
+    }
 }

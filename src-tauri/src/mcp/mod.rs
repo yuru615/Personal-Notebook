@@ -78,12 +78,14 @@ struct LocalMcpServer {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
 struct SearchPagesInput {
     query: String,
     limit: Option<usize>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
 struct CreatePageInput {
     parent_id: Option<String>,
     title: String,
@@ -91,11 +93,13 @@ struct CreatePageInput {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
 struct GetPageInput {
     page_id: String,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
 struct AppendContentInput {
     page_id: String,
     text: Option<String>,
@@ -329,6 +333,17 @@ mod tests {
 
     use super::{AppendContentInput, CreatePageInput, GetPageInput, LocalMcpServer, McpServerState, start_local_server};
     use crate::storage::{McpSettings, PageRecord, StorageState};
+
+    #[test]
+    fn accepts_camel_case_tool_arguments() {
+        let create: CreatePageInput = serde_json::from_str(r#"{"parentId":"page_parent","title":"AI 草稿"}"#)
+            .expect("create page input");
+        let append: AppendContentInput = serde_json::from_str(r#"{"pageId":"page_target","text":"一段内容"}"#)
+            .expect("append input");
+
+        assert_eq!(create.parent_id.as_deref(), Some("page_parent"));
+        assert_eq!(append.page_id, "page_target");
+    }
 
     #[tokio::test]
     async fn starts_on_loopback_and_stops_cleanly() {
