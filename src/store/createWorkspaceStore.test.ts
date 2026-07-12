@@ -461,6 +461,26 @@ describe('createWorkspaceStore data tables', () => {
     expect(appSettings.getSaveCalls()).toBe(1)
   })
 
+  it('keeps persisted local MCP settings after bootstrap', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const appSettings = createMemoryAppSettingsRepository({
+      mcp: {
+        enabled: true,
+        port: 1750,
+        token: 'test-token',
+      },
+    })
+    const store = createWorkspaceStore(counted.repository, appSettings.repository)
+
+    await store.getState().bootstrap()
+
+    expect(store.getState().appSettings.mcp).toEqual({
+      enabled: true,
+      port: 1750,
+      token: 'test-token',
+    })
+  })
+
   it('defaults search preferences and persists changes', async () => {
     const counted = createCountingRepository(createWorkspace())
     const store = createWorkspaceStore(counted.repository)

@@ -451,10 +451,27 @@ function createEmptyState(): WorkspaceState {
 }
 
 function normalizeAppSettings(settings: AppSettings | null | undefined): AppSettings {
+  const mcp = normalizeMcpSettings(settings?.mcp)
+
   return {
     closeAction: settings?.closeAction === 'quit' ? 'quit' : 'hide_to_tray',
     accentTheme: normalizeAppAccentTheme(settings?.accentTheme),
+    ...(mcp ? { mcp } : {}),
   }
+}
+
+function normalizeMcpSettings(settings: AppSettings['mcp']): McpSettings | undefined {
+  if (
+    !settings ||
+    !Number.isInteger(settings.port) ||
+    settings.port < 1024 ||
+    settings.port > 65535 ||
+    !settings.token
+  ) {
+    return undefined
+  }
+
+  return settings
 }
 
 function normalizePageDefaults(defaults: Partial<PageDisplayDefaults> | undefined): PageDisplayDefaults {
