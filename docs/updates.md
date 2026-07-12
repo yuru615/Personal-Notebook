@@ -1484,4 +1484,4 @@
 - 已通过相关前端测试：5 个文件、133 项。
 - 已通过 `npm run build`。
 - 已通过 `cargo check --manifest-path src-tauri/Cargo.toml`。
-- 当前 Windows 环境运行 Rust 测试二进制时出现 `0xc0000139` 装载异常，未能完成运行期 MCP HTTP 联调；静态编译通过。
+- `cargo test --lib` 的测试宿主仍会出现 Windows `0xc0000139` 装载异常；已用同源独立程序完成 MCP 服务启动、Bearer 认证、Streamable HTTP `initialize`，以及 `create_page`、`append_content` 的真实 `tools/call` 写入验证。
