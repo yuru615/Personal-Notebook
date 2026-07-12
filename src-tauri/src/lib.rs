@@ -6,6 +6,7 @@ use tauri::{
 };
 
 mod clipboard_capture;
+mod mcp;
 mod storage;
 
 const MAIN_WINDOW_LABEL: &str = "main";
@@ -57,6 +58,8 @@ pub fn run() {
             storage::commands::replace_workspace_backup,
             storage::commands::load_app_settings,
             storage::commands::save_app_settings,
+            storage::commands::enable_local_mcp,
+            storage::commands::disable_local_mcp,
             storage::commands::export_page_package,
             storage::commands::export_page_package_to_path,
             storage::commands::import_page_package,
@@ -83,6 +86,18 @@ pub fn run() {
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir()?;
             app.manage(storage::StorageState::open(app_data_dir)?);
+            let mcp_state = mcp::McpServerState::new(app.handle().clone());
+            let mcp_settings = app
+                .state::<storage::StorageState>()
+                .with_storage(|storage| storage.load_app_settings())?
+                .and_then(|settings| settings.mcp);
+            let storage = app.state::<storage::StorageState>().inner().clone();
+            app.manage(mcp_state.clone());
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) = mcp_state.apply(mcp_settings.as_ref(), storage).await {
+                    eprintln!("failed to restore local MCP server: {error}");
+                }
+            });
             let clipboard_capture_state = clipboard_capture::ClipboardCaptureState::default();
             app.manage(clipboard_capture_state.clone());
             clipboard_capture::start_clipboard_capture_monitor(app.handle().clone(), clipboard_capture_state);

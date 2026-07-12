@@ -93,6 +93,24 @@ describe('createTauriStorageClient', () => {
     })
   })
 
+  it('enables and disables the local MCP server through dedicated Tauri commands', async () => {
+    const { createTauriStorageClient } = await import('./storageClient')
+    const settings = {
+      enabled: true,
+      port: 38472,
+      token: 'test-token',
+    }
+    eventApi.invoke.mockResolvedValueOnce(settings).mockResolvedValueOnce(undefined)
+
+    const client = createTauriStorageClient()
+
+    await expect(client.enableLocalMcp()).resolves.toEqual(settings)
+    await client.disableLocalMcp()
+
+    expect(eventApi.invoke).toHaveBeenNthCalledWith(1, 'enable_local_mcp')
+    expect(eventApi.invoke).toHaveBeenNthCalledWith(2, 'disable_local_mcp')
+  })
+
   it('searches through the backend search command with a bounded limit', async () => {
     const { createTauriStorageClient } = await import('./storageClient')
     eventApi.invoke.mockResolvedValueOnce([

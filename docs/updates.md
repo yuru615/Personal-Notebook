@@ -1463,3 +1463,25 @@
 - 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/editor/blocks/TableBlock.test.tsx src/styles/tableControlLayout.test.ts src/components/editor/BlockEditor.test.tsx`，共 107 项测试。
 - 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/editor/blocks/TableBlock.test.tsx src/styles/tableControlLayout.test.ts`，共 32 项测试。
 - 已通过 `C:/Program Files/nodejs/npm.cmd run build`。
+
+# 2026-07-11 本机 MCP 写入接入（第一阶段）
+
+提交：待提交
+
+简要描述：
+
+知栖桌面端新增受令牌保护的本机 MCP 服务，可供已授权的本机 AI 客户端搜索、读取和创建页面，并追加文本或普通表格。
+
+详细描述：
+
+- 服务仅绑定 `127.0.0.1`，要求精确 Bearer 令牌；设置中心可启用、关闭和复制连接配置。
+- 新增 `search_pages`、`get_page`、`create_page`、`append_content` 工具；追加写入与本机审计记录处于同一 SQLite 事务。
+- MCP 成功写入后通知桌面前端重新加载工作区，已打开页面可获取新内容。
+- 本期不开放删除、覆盖、移动、远程访问或资产写入。
+
+验证情况：
+
+- 已通过相关前端测试：5 个文件、133 项。
+- 已通过 `npm run build`。
+- 已通过 `cargo check --manifest-path src-tauri/Cargo.toml`。
+- 当前 Windows 环境运行 Rust 测试二进制时出现 `0xc0000139` 装载异常，未能完成运行期 MCP HTTP 联调；静态编译通过。

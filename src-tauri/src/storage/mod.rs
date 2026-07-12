@@ -26,7 +26,7 @@ pub use models::PagePackageImportResult;
 pub use models::{
     AppSettings, AssetMeta, BoardRecord, BootstrapPayload, DataTableRecord, DeleteResult,
     ImportAssetFileInput, LoadedPage, MindmapRecord, PageMeta, PagePackageManifest,
-    PagePropertyDefinition, PageRecord, SaveResult, SearchResult, SyncedBlockGroupRecord,
+    McpSettings, PagePropertyDefinition, PageRecord, SaveResult, SearchResult, SyncedBlockGroupRecord,
     WorkspaceSettings, WorkspaceSnapshot, WriteAssetInput,
 };
 
@@ -96,6 +96,13 @@ impl StorageState {
             .lock()
             .map_err(|_| StorageError::new("conflict", "storage lock poisoned"))?;
         task(&storage)
+    }
+
+    #[cfg(test)]
+    pub fn open_in_memory_for_tests() -> StorageResult<Self> {
+        Ok(Self {
+            storage: Arc::new(Mutex::new(Storage::open_in_memory_for_tests()?)),
+        })
     }
 }
 
@@ -243,6 +250,47 @@ impl Storage {
                 .unwrap_or_else(|| self.next_position("zhixi_pages"));
             self.insert_page(&page, position)?;
             self.rebuild_resource_search_documents()?;
+            Ok(SaveResult { id: page.id })
+        })
+    }
+
+    pub fn append_mcp_page_blocks(
+        &self,
+        page_id: &str,
+        blocks: Vec<Value>,
+        updated_at: String,
+    ) -> StorageResult<SaveResult> {
+        let created_ids = blocks
+            .iter()
+            .filter_map(|block| block.get("id").and_then(Value::as_str))
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+
+        if blocks.is_empty() {
+            return Err(StorageError::invalid_payload("at least one block is required"));
+        }
+
+        self.with_transaction(|| {
+            let mut page = self.load_page_record(page_id)?;
+            page.blocks.extend(blocks);
+            page.updated_at = updated_at.clone();
+            let position = self
+                .page_position(&page.id)?
+                .ok_or_else(|| StorageError::not_found("page not found"))?;
+            self.insert_page(&page, position)?;
+            self.rebuild_resource_search_documents()?;
+            self.connection.execute(
+                "INSERT INTO zhixi_mcp_audit_log (id, created_at, client_name, tool_name, page_id, created_ids_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![
+                    format!("mcp_audit_{}", created_ids.first().map(String::as_str).unwrap_or(page_id)),
+                    updated_at,
+                    "local-mcp",
+                    "append_content",
+                    page_id,
+                    serde_json::to_string(&created_ids)?,
+                ],
+            )?;
             Ok(SaveResult { id: page.id })
         })
     }
@@ -1029,7 +1077,7 @@ impl Storage {
         Ok(())
     }
 
-    fn save_app_settings(&self, settings: &AppSettings) -> StorageResult<()> {
+    pub fn save_app_settings(&self, settings: &AppSettings) -> StorageResult<()> {
         self.connection.execute(
             "INSERT INTO zhixi_settings (id, record_json) VALUES (?1, ?2)
               ON CONFLICT(id) DO UPDATE SET record_json = excluded.record_json",
@@ -1062,7 +1110,7 @@ impl Storage {
             .transpose()
     }
 
-    fn load_app_settings(&self) -> StorageResult<Option<AppSettings>> {
+    pub fn load_app_settings(&self) -> StorageResult<Option<AppSettings>> {
         self.connection
             .query_row(
                 "SELECT record_json FROM zhixi_settings WHERE id = ?1",
@@ -2796,6 +2844,11 @@ mod tests {
         let settings = AppSettings {
             close_action: Some("hide_to_tray".to_string()),
             accent_theme: Some("violet".to_string()),
+            mcp: Some(models::McpSettings {
+                enabled: true,
+                port: 38_472,
+                token: "test-token".to_string(),
+            }),
         };
 
         storage
@@ -3110,7 +3163,10 @@ mod tests {
     fn initializes_schema_with_wal_foreign_keys_and_version() {
         let storage = Storage::open_in_memory_for_tests().expect("storage opens");
 
-        assert_eq!(storage.schema_version().expect("schema version"), 3);
+        assert_eq!(
+            storage.schema_version().expect("schema version"),
+            schema::SCHEMA_VERSION
+        );
         assert_eq!(
             storage.pragma_string("journal_mode").expect("journal mode"),
             "memory"
@@ -3754,7 +3810,10 @@ mod tests {
 
         let storage = Storage::open(&data_dir).expect("open migrated storage");
 
-        assert_eq!(storage.schema_version().expect("schema version"), 3);
+        assert_eq!(
+            storage.schema_version().expect("schema version"),
+            schema::SCHEMA_VERSION
+        );
         let page_content_columns = storage
             .connection
             .prepare("PRAGMA table_info(zhixi_page_contents)")

@@ -55,6 +55,16 @@ pub struct AppSettings {
     pub close_action: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accent_theme: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp: Option<McpSettings>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpSettings {
+    pub enabled: bool,
+    pub port: u16,
+    pub token: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

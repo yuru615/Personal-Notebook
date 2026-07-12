@@ -30,6 +30,8 @@ function createProps(
     onSetPageDefaults: vi.fn(),
     onSetAppCloseAction: vi.fn(),
     onSetAppAccentTheme: vi.fn(),
+    onEnableLocalMcp: vi.fn(),
+    onDisableLocalMcp: vi.fn(),
     onSetSidebarLayout: vi.fn(),
     onSetSidebarWidth: vi.fn(),
     onSetClipboardCaptureMode: vi.fn(),

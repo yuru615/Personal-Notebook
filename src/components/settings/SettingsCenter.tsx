@@ -48,6 +48,8 @@ export interface SettingsCenterProps {
   onSetPageDefaults: (defaults: Partial<PageDisplayDefaults>) => void | Promise<void>
   onSetAppCloseAction: (closeAction: AppCloseAction) => void | Promise<void>
   onSetAppAccentTheme: (theme: AppAccentTheme) => void | Promise<void>
+  onEnableLocalMcp: () => void | Promise<void>
+  onDisableLocalMcp: () => void | Promise<void>
   onSetSidebarLayout: (layout: NonNullable<WorkspaceSettings['sidebarLayout']>) => void | Promise<void>
   onSetSidebarWidth: (width: number) => void | Promise<void>
   onSetClipboardCaptureMode: (
@@ -109,6 +111,8 @@ export function SettingsCenter({
   onSetPageDefaults,
   onSetAppCloseAction,
   onSetAppAccentTheme,
+  onEnableLocalMcp,
+  onDisableLocalMcp,
   onSetSidebarLayout,
   onSetSidebarWidth,
   onSetClipboardCaptureMode,
@@ -148,6 +152,8 @@ export function SettingsCenter({
   )
   const closeAction = appSettings.closeAction === 'quit' ? 'quit' : 'hide_to_tray'
   const accentTheme = appSettings.accentTheme ?? 'blue_gray'
+  const localMcp = appSettings.mcp
+  const [mcpCopyStatus, setMcpCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle')
 
   useEffect(() => {
     setDraftSidebarWidth(sidebarWidth)
@@ -177,6 +183,25 @@ export function SettingsCenter({
       if (pendingSidebarWidthRef.current === normalizedWidth) {
         pendingSidebarWidthRef.current = null
       }
+    }
+  }
+
+  async function copyLocalMcpConfig() {
+    if (!localMcp?.enabled || !navigator.clipboard) {
+      setMcpCopyStatus('error')
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(
+        JSON.stringify({
+          url: `http://127.0.0.1:${localMcp.port}/mcp`,
+          headers: { Authorization: `Bearer ${localMcp.token}` },
+        }),
+      )
+      setMcpCopyStatus('copied')
+    } catch {
+      setMcpCopyStatus('error')
     }
   }
 
@@ -679,10 +704,40 @@ export function SettingsCenter({
         ) : null}
 
         {currentSection === 'experimental' ? (
-          <section className="settings-section">
-            <h2 className="settings-section-title">实验功能</h2>
-            <p className="settings-placeholder">这里先留空，后面逐项接入。</p>
-          </section>
+          <div className="settings-section-stack">
+            <section className="settings-section">
+              <h2 className="settings-section-title">实验功能</h2>
+              <div className="settings-card">
+                <label className="settings-toggle-row">
+                  <span>
+                    <span className="settings-card-label">启用本机 MCP 接入</span>
+                    <span className="settings-card-help">允许已授权的本机 AI 客户端访问知栖。</span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={localMcp?.enabled === true}
+                    onChange={(event) => {
+                      void (event.target.checked ? onEnableLocalMcp() : onDisableLocalMcp())
+                    }}
+                  />
+                </label>
+                {localMcp?.enabled ? (
+                  <>
+                    <div className="settings-card-divider" />
+                    <div className="settings-card-field">
+                      <div className="settings-card-label">连接地址</div>
+                      <div className="settings-card-help">http://127.0.0.1:{localMcp.port}/mcp</div>
+                      <button type="button" className="settings-action-button" onClick={() => void copyLocalMcpConfig()}>
+                        复制 MCP 配置
+                      </button>
+                      {mcpCopyStatus === 'copied' ? <div className="settings-card-help">配置已复制。</div> : null}
+                      {mcpCopyStatus === 'error' ? <div className="settings-card-help">复制失败，请检查系统剪贴板权限。</div> : null}
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            </section>
+          </div>
         ) : null}
       </section>
     </div>

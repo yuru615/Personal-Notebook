@@ -1,6 +1,7 @@
 ﻿import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Suspense, lazy } from 'react'
 import { useMemo } from 'react'
+import { listen } from '@tauri-apps/api/event'
 import {
   HashRouter,
   MemoryRouter,
@@ -245,6 +246,25 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
 
     return () => {
       isActive = false
+    }
+  }, [store])
+
+  useEffect(() => {
+    if (!isDesktopRuntime()) {
+      return
+    }
+
+    let unlistenMcpWorkspace: (() => void) | null = null
+    void listen('zhixi://mcp-workspace-updated', async () => {
+      await store.getState().bootstrap()
+    })
+      .then((unlisten) => {
+        unlistenMcpWorkspace = unlisten
+      })
+      .catch(() => undefined)
+
+    return () => {
+      unlistenMcpWorkspace?.()
     }
   }, [store])
 
@@ -572,6 +592,8 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onSetSidebarWidth={(width) => store.getState().setSidebarWidth(width)}
       onSetAppCloseAction={(closeAction) => store.getState().setAppCloseAction(closeAction)}
       onSetAppAccentTheme={(theme) => store.getState().setAppAccentTheme(theme)}
+      onEnableLocalMcp={() => store.getState().enableLocalMcp()}
+      onDisableLocalMcp={() => store.getState().disableLocalMcp()}
       onSetClipboardCaptureMode={(mode) => store.getState().setClipboardCaptureMode(mode)}
       onSetBlockSelectionStartMode={(mode) =>
         store.getState().setBlockSelectionStartMode(mode)
@@ -842,6 +864,8 @@ interface AppRoutesProps {
   onCreatePage: (parentId?: string, options?: CreatePageOptions) => Promise<PageRecord>
   onSetAppCloseAction: (closeAction: 'hide_to_tray' | 'quit') => Promise<void>
   onSetAppAccentTheme: (theme: AppAccentTheme) => Promise<void>
+  onEnableLocalMcp: () => Promise<unknown>
+  onDisableLocalMcp: () => Promise<void>
   onSetSidebarLayout: (layout: NonNullable<WorkspaceSettings['sidebarLayout']>) => Promise<void>
   onSetSidebarWidth: (width: number) => Promise<void>
   onSetClipboardCaptureMode: (
@@ -999,6 +1023,8 @@ function AppRoutes({
   onCreatePage,
   onSetAppCloseAction,
   onSetAppAccentTheme,
+  onEnableLocalMcp,
+  onDisableLocalMcp,
   onSetSidebarLayout,
   onSetSidebarWidth,
   onSetClipboardCaptureMode,
@@ -1265,6 +1291,8 @@ function AppRoutes({
                 workspaceSettings={workspaceSettings}
                 onSetAppCloseAction={onSetAppCloseAction}
                 onSetAppAccentTheme={onSetAppAccentTheme}
+                onEnableLocalMcp={onEnableLocalMcp}
+                onDisableLocalMcp={onDisableLocalMcp}
                 onSetSidebarLayout={onSetSidebarLayout}
                 onSetSidebarWidth={onSetSidebarWidth}
                 onSetClipboardCaptureMode={onSetClipboardCaptureMode}
@@ -1465,6 +1493,8 @@ interface SettingsRouteProps {
   workspaceSettings: WorkspaceSettings
   onSetAppCloseAction: (closeAction: 'hide_to_tray' | 'quit') => Promise<void>
   onSetAppAccentTheme: (theme: AppAccentTheme) => Promise<void>
+  onEnableLocalMcp: () => Promise<unknown>
+  onDisableLocalMcp: () => Promise<void>
   onSetSidebarLayout: (layout: NonNullable<WorkspaceSettings['sidebarLayout']>) => Promise<void>
   onSetSidebarWidth: (width: number) => Promise<void>
   onSetClipboardCaptureMode: (
@@ -1494,6 +1524,8 @@ function SettingsRoute({
   workspaceSettings,
   onSetAppCloseAction,
   onSetAppAccentTheme,
+  onEnableLocalMcp,
+  onDisableLocalMcp,
   onSetSidebarLayout,
   onSetSidebarWidth,
   onSetClipboardCaptureMode,
@@ -1531,6 +1563,12 @@ function SettingsRoute({
       }}
       onSetAppAccentTheme={(theme) => {
         void onSetAppAccentTheme(theme)
+      }}
+      onEnableLocalMcp={() => {
+        void onEnableLocalMcp()
+      }}
+      onDisableLocalMcp={() => {
+        void onDisableLocalMcp()
       }}
       onSetSidebarLayout={(layout) => {
         void onSetSidebarLayout(layout)

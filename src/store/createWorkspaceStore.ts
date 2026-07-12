@@ -40,6 +40,7 @@ import type {
   DataTableRecord,
   ExternalLinkOpenMode,
   MindmapRecord,
+  McpSettings,
   PageFontFamily,
   PageId,
   PageDisplayDefaults,
@@ -106,6 +107,8 @@ export interface WorkspaceState {
   setCurrentPage: (pageId: PageId) => Promise<void>
   setAppCloseAction: (closeAction: AppCloseAction) => Promise<void>
   setAppAccentTheme: (theme: AppAccentTheme) => Promise<void>
+  enableLocalMcp: () => Promise<McpSettings>
+  disableLocalMcp: () => Promise<void>
   setClipboardCaptureMode: (mode: ClipboardCaptureMode) => Promise<void>
   setBlockSelectionStartMode: (mode: BlockSelectionStartMode) => Promise<void>
   setLinkOpenMode: (mode: ExternalLinkOpenMode) => Promise<void>
@@ -258,6 +261,12 @@ function createEmptyState(): WorkspaceState {
       throw new Error('not implemented')
     },
     setAppAccentTheme: async () => {
+      throw new Error('not implemented')
+    },
+    enableLocalMcp: async () => {
+      throw new Error('not implemented')
+    },
+    disableLocalMcp: async () => {
       throw new Error('not implemented')
     },
     setClipboardCaptureMode: async () => {
@@ -1393,6 +1402,12 @@ export function createWorkspaceStore(
     async save() {
       return undefined
     },
+    async enableLocalMcp() {
+      throw new Error('Local MCP is unavailable')
+    },
+    async disableLocalMcp() {
+      throw new Error('Local MCP is unavailable')
+    },
   },
 ) {
   const undoStack: WorkspaceSnapshot[] = []
@@ -1839,6 +1854,23 @@ export function createWorkspaceStore(
 
       set({ appSettings: nextAppSettings })
       await appSettingsRepository.save(nextAppSettings)
+    },
+
+    enableLocalMcp: async () => {
+      const mcp = await appSettingsRepository.enableLocalMcp()
+      set({ appSettings: normalizeAppSettings({ ...get().appSettings, mcp }) })
+      return mcp
+    },
+
+    disableLocalMcp: async () => {
+      await appSettingsRepository.disableLocalMcp()
+      const mcp = get().appSettings.mcp
+      set({
+        appSettings: normalizeAppSettings({
+          ...get().appSettings,
+          ...(mcp ? { mcp: { ...mcp, enabled: false } } : {}),
+        }),
+      })
     },
 
     setClipboardCaptureMode: async (mode) => {

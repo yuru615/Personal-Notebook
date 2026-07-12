@@ -4,7 +4,7 @@ version = "1.0.0"
 description = "A local-first knowledge base desktop app for Zhixi."
 authors = ["知栖"]
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.96.1"
 
 [lib]
 name = "zhixi_lib"
@@ -14,14 +14,19 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
+axum = "0.8.8"
 hex = "0.4.3"
 rusqlite = { version = "0.37.0", features = ["bundled", "serde_json"] }
+rmcp = { version = "2.2.0", features = ["transport-streamable-http-server"] }
+rand = "0.10.2"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 sha2 = "0.10.9"
 tauri = { version = "2.11.3", features = ["protocol-asset", "tray-icon"] }
 tauri-plugin-dialog = "2.7.1"
 tauri-plugin-fs = "2.5.1"
+tokio = { version = "1.52.0", features = ["macros", "net", "rt-multi-thread", "sync"] }
+tokio-util = "0.7.18"
 windows = { version = "0.61.3", features = [
   "Win32_Foundation",
   "Win32_System_DataExchange",

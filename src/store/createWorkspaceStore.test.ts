@@ -57,6 +57,16 @@ function createMemoryAppSettingsRepository(initial: AppSettings | null = null) {
         settings = structuredClone(next)
         saveCalls += 1
       },
+      async enableLocalMcp() {
+        const mcp = { enabled: true, port: 38472, token: 'test-token' }
+        settings = { ...(settings ?? {}), mcp }
+        return mcp
+      },
+      async disableLocalMcp() {
+        if (settings?.mcp) {
+          settings = { ...settings, mcp: { ...settings.mcp, enabled: false } }
+        }
+      },
     },
     getSettings() {
       return settings

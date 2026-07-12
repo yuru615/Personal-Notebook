@@ -1,5 +1,5 @@
 import { StrictMode } from 'react'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceSnapshot } from '../domain/types'
@@ -55,6 +55,11 @@ const pagePackageStorage = vi.hoisted(() => ({
   importPagePackageFromPath: vi.fn(async () => ({ rootPageId: 'page_imported' })),
   importPagePackage: vi.fn(async () => ({ rootPageId: 'page_imported' })),
 }))
+const tauriEvents = vi.hoisted(() => ({
+  listen: vi.fn(async () => () => undefined),
+}))
+
+vi.mock('@tauri-apps/api/event', () => tauriEvents)
 
 vi.mock('../lib/desktopLifecycle', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/desktopLifecycle')>()
@@ -171,6 +176,7 @@ describe('App', () => {
   afterEach(() => {
     scrollTo.mockRestore()
     Reflect.deleteProperty(globalThis, '__TAURI_INTERNALS__')
+    tauriEvents.listen.mockClear()
   })
 
   it('bootstraps an empty repository once when StrictMode replays effects', async () => {
@@ -198,6 +204,62 @@ describe('App', () => {
     await screen.findByDisplayValue('欢迎使用知栖')
 
     expect(replaceCalls).toBe(1)
+  })
+
+  it('reloads the open page when the local MCP service reports a write', async () => {
+    Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    })
+    let snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: 'page_mcp_refresh',
+          parentId: null,
+          title: 'MCP note',
+          icon: null,
+          cover: null,
+          blocks: [{ id: 'block_before_mcp', type: 'paragraph', text: 'Before MCP' }],
+          createdAt: '2026-07-11T00:00:00.000Z',
+          updatedAt: '2026-07-11T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: 'page_mcp_refresh' },
+    }
+    const repository: WorkspaceRepository = {
+      load: async () => structuredClone(snapshot),
+      save: async (nextSnapshot) => {
+        snapshot = structuredClone(nextSnapshot)
+      },
+      replace: async (nextSnapshot) => {
+        snapshot = structuredClone(nextSnapshot)
+      },
+      cleanupOrphanAssets: async () => 0,
+    }
+
+    const store = createWorkspaceStore(repository)
+    render(<App store={store} initialEntries={['/pages/page_mcp_refresh']} />)
+
+    await screen.findByText('Before MCP')
+    snapshot.pages[0]?.blocks.push({ id: 'block_from_mcp', type: 'paragraph', text: 'Saved by MCP' })
+
+    await waitFor(() => {
+      expect(tauriEvents.listen).toHaveBeenCalledWith('zhixi://mcp-workspace-updated', expect.any(Function))
+    })
+    const handler = tauriEvents.listen.mock.calls.find(
+      ([eventName]) => eventName === 'zhixi://mcp-workspace-updated',
+    )?.[1] as ((event: { payload: { pageId: string; createdBlockIds: string[] } }) => Promise<void>) | undefined
+
+    await act(async () => {
+      await handler?.({ payload: { pageId: 'page_mcp_refresh', createdBlockIds: ['block_from_mcp'] } })
+    })
+
+    expect(store.getState().pages[0]?.blocks).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'block_from_mcp' })]),
+    )
   })
 
   it('flushes pending saves when the page is being hidden', async () => {
