@@ -83,8 +83,10 @@ describe('app shell layout', () => {
     expect(sidebar).toContain('z-index: 63;')
     expect(sidebar).toContain('isolation: isolate;')
     expect(sidebarTreeActions).not.toContain('transform:')
-    expect(pageMenuPopover).toContain('z-index: 64;')
-    expect(utilityMenuPopover).toContain('z-index: 64;')
+    expect(pageMenuPopover).toContain('z-index: 100;')
+    expect(utilityMenuPopover).toContain('z-index: 100;')
+    expect(cssRule('.page-menu-popover.sidebar-tree-page-menu-popover')).toContain('z-index: 100;')
+    expect(cssRule('.page-menu-popover.sidebar-utility-menu-popover')).toContain('z-index: 100;')
   })
 
   it('lets sidebar popovers shrink and scroll inside small app windows', () => {

@@ -524,7 +524,7 @@ a {
   max-height: min(72vh, calc(100vh - 24px));
   overflow: auto;
   overscroll-behavior: contain;
-  z-index: 64;
+  z-index: 100;
 }
 
 .sidebar-utility-menu {
@@ -537,7 +537,7 @@ a {
   max-height: min(72vh, calc(100vh - 24px));
   overflow: auto;
   overscroll-behavior: contain;
-  z-index: 64;
+  z-index: 100;
 }
 
 .sidebar-compact-header {
@@ -2407,6 +2407,14 @@ a {
     0 2px 8px rgba(15, 23, 42, 0.04);
   overflow: auto;
   overscroll-behavior: contain;
+}
+
+.page-menu-popover.sidebar-tree-page-menu-popover {
+  z-index: 100;
+}
+
+.page-menu-popover.sidebar-utility-menu-popover {
+  z-index: 100;
 }
 
 .page-menu-meta {

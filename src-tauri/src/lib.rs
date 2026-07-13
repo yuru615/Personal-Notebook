@@ -13,9 +13,9 @@ const TRAY_SHOW_WINDOW_ID: &str = "show-window";
 const TRAY_NEW_NOTE_ID: &str = "new-note";
 const TRAY_OPEN_INBOX_ID: &str = "open-inbox";
 const TRAY_QUIT_APP_ID: &str = "quit-app";
-const FRONTEND_QUIT_REQUESTED_EVENT: &str = "zhixi://quit-requested";
-const FRONTEND_TRAY_NEW_NOTE_EVENT: &str = "zhixi://tray-new-note";
-const FRONTEND_TRAY_OPEN_INBOX_EVENT: &str = "zhixi://tray-open-inbox";
+const FRONTEND_QUIT_REQUESTED_EVENT: &str = "zhiqi://quit-requested";
+const FRONTEND_TRAY_NEW_NOTE_EVENT: &str = "zhiqi://tray-new-note";
+const FRONTEND_TRAY_OPEN_INBOX_EVENT: &str = "zhiqi://tray-open-inbox";
 const ALLOWED_EXTERNAL_URL_SCHEMES: [&str; 3] = ["http://", "https://", "mailto:"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

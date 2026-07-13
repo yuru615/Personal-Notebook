@@ -390,10 +390,10 @@ describe('BlockEditor', () => {
       html: [
         '<style>p.CustomWordHeading { mso-outline-level: 1; }</style>',
         '<p class="CustomWordHeading">Word heading</p>',
-        '<table><tr><td>Task</td><td>Owner</td></tr><tr><td>Import</td><td>Zhixi</td></tr></table>',
+        '<table><tr><td>Task</td><td>Owner</td></tr><tr><td>Import</td><td>Zhiqi</td></tr></table>',
         '<p><img src="data:image/png;base64,iVBORw0KGgo=" alt="Word image"></p>',
       ].join(''),
-      text: 'Word heading\nTask\tOwner\nImport\tZhixi',
+      text: 'Word heading\nTask\tOwner\nImport\tZhiqi',
     })
 
     await waitFor(() => {
@@ -405,7 +405,7 @@ describe('BlockEditor', () => {
             type: 'table',
             rows: [
               ['Task', 'Owner'],
-              ['Import', 'Zhixi'],
+              ['Import', 'Zhiqi'],
             ],
           }),
           expect.objectContaining({
@@ -2150,7 +2150,7 @@ describe('BlockEditor', () => {
       },
     })
 
-    const copiedBlocks = JSON.parse(clipboardValues.get('application/x-zhixi-blocks+json') ?? 'null')
+    const copiedBlocks = JSON.parse(clipboardValues.get('application/x-zhiqi-blocks+json') ?? 'null')
     expect(copiedBlocks).toMatchObject([
       { id: 'b1', type: 'paragraph', text: '第一段' },
       { id: 'b2', type: 'todo', text: '待办事项', checked: true },

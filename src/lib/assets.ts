@@ -7,7 +7,7 @@ import {
 } from './storageClient'
 
 const storageClient = createTauriStorageClient()
-const BROWSER_ASSET_STORAGE_PREFIX = 'zhixi.asset.'
+const BROWSER_ASSET_STORAGE_PREFIX = 'zhiqi.asset.'
 
 export type MediaAssetKind = 'image' | 'video' | 'audio'
 

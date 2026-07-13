@@ -668,7 +668,7 @@ pub use models::{
 Near the existing archive constants in `src-tauri/src/storage/mod.rs`, add:
 
 ```rust
-pub const PAGE_PACKAGE_KIND: &str = "zhixi.page-package";
+pub const PAGE_PACKAGE_KIND: &str = "zhiqi.page-package";
 pub const PAGE_PACKAGE_VERSION: u32 = 1;
 pub const PAGE_PACKAGE_MANIFEST_ENTRY: &str = "page-package.json";
 ```
@@ -850,7 +850,7 @@ pub fn load_assets_by_ids(
         let asset = connection
             .query_row(
                 "SELECT id, sha256, name, mime_type, byte_size, relative_path, created_at
-                  FROM zhixi_assets WHERE id = ?1",
+                  FROM zhiqi_assets WHERE id = ?1",
                 [asset_id],
                 |row| {
                     Ok(AssetMeta {
@@ -1168,7 +1168,7 @@ where
     let manifest: PagePackageManifest = {
         let mut manifest_entry = archive
             .by_name(PAGE_PACKAGE_MANIFEST_ENTRY)
-            .map_err(|_| StorageError::invalid_payload("not a zhixi page package"))?;
+            .map_err(|_| StorageError::invalid_payload("not a zhiqi page package"))?;
         serde_json::from_reader(&mut manifest_entry)?
     };
     if manifest.kind != PAGE_PACKAGE_KIND || manifest.version != PAGE_PACKAGE_VERSION {
@@ -1238,7 +1238,7 @@ where
         .ok_or_else(|| StorageError::invalid_payload("page package root is missing"))?;
 
     self.with_transaction(|| {
-        let mut board_position = self.next_position("zhixi_boards");
+        let mut board_position = self.next_position("zhiqi_boards");
         for board in &manifest.boards {
             let mut next_board = board.clone();
             next_board.id = board_id_map[&board.id].clone();
@@ -1246,7 +1246,7 @@ where
             board_position += 1;
         }
 
-        let mut data_table_position = self.next_position("zhixi_data_tables");
+        let mut data_table_position = self.next_position("zhiqi_data_tables");
         for data_table in &manifest.data_tables {
             let mut next_data_table = data_table.clone();
             next_data_table.id = data_table_id_map[&data_table.id].clone();
@@ -1262,7 +1262,7 @@ where
             data_table_position += 1;
         }
 
-        let mut mindmap_position = self.next_position("zhixi_mindmaps");
+        let mut mindmap_position = self.next_position("zhiqi_mindmaps");
         for mindmap in &manifest.mindmaps {
             let mut next_mindmap = mindmap.clone();
             next_mindmap.id = mindmap_id_map[&mindmap.id].clone();
@@ -1270,7 +1270,7 @@ where
             mindmap_position += 1;
         }
 
-        let mut page_position = self.next_position("zhixi_pages");
+        let mut page_position = self.next_position("zhiqi_pages");
         for page in &manifest.pages {
             let mut next_page = page.clone();
             next_page.id = page_id_map[&page.id].clone();
@@ -1493,7 +1493,7 @@ In `README.md`, replace backup wording in the feature list:
 Replace the data section with:
 
 ```md
-工作区核心数据保存在本地 SQLite 数据库 `zhixi.db` 中。页面包 ZIP 导出会生成页面包清单和相关文件资产；页面包导入会新增为顶层页面树，不覆盖现有页面。删除和清理资源前仍建议谨慎确认。
+工作区核心数据保存在本地 SQLite 数据库 `zhiqi.db` 中。页面包 ZIP 导出会生成页面包清单和相关文件资产；页面包导入会新增为顶层页面树，不覆盖现有页面。删除和清理资源前仍建议谨慎确认。
 ```
 
 - [ ] **Step 4: Run focused frontend tests**

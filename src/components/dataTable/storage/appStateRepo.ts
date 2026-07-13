@@ -1,6 +1,6 @@
 import type { AppState } from "../domain/types";
 
-const STORAGE_KEY = "zhixi.standalone-data-table-state.v1";
+const STORAGE_KEY = "zhiqi.standalone-data-table-state.v1";
 
 export interface AppStateRepository {
   loadAppState(): Promise<AppState | undefined>;

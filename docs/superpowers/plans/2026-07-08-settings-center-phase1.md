@@ -4,7 +4,7 @@
 
 **Goal:** Ship the first working settings center page that centralizes current low-risk settings: sidebar layout and width, page defaults for new pages, workspace inbox and clipboard-capture preferences, import/export and cleanup actions, and one real app-level close-window behavior setting.
 
-**Architecture:** Reuse the existing app shell, router, workspace store, and `zhixi_settings` key-value table instead of inventing a second configuration stack. Keep workspace-scoped behavior inside `WorkspaceSettings`, persist app-only behavior through a small `AppSettings` repository, and make page defaults apply only when creating new pages or child pages so existing pages keep their explicit display values.
+**Architecture:** Reuse the existing app shell, router, workspace store, and `zhiqi_settings` key-value table instead of inventing a second configuration stack. Keep workspace-scoped behavior inside `WorkspaceSettings`, persist app-only behavior through a small `AppSettings` repository, and make page defaults apply only when creating new pages or child pages so existing pages keep their explicit display values.
 
 **Tech Stack:** React 19, TypeScript, Zustand vanilla, React Router, Vitest, Testing Library, Tauri 2, Rust, SQLite
 
@@ -64,7 +64,7 @@
 - Modify `E:\Workspace\个人知识库-桌面端\src-tauri\src\storage\commands.rs`
   - Expose `load_app_settings` and `save_app_settings`.
 - Modify `E:\Workspace\个人知识库-桌面端\src-tauri\src\storage\mod.rs`
-  - Persist app settings through a second `zhixi_settings` record id and add round-trip regression tests.
+  - Persist app settings through a second `zhiqi_settings` record id and add round-trip regression tests.
 - Modify `E:\Workspace\个人知识库-桌面端\src-tauri\src\lib.rs`
   - Register the new Tauri commands.
 - Modify `E:\Workspace\个人知识库-桌面端\docs\updates.md`
@@ -187,7 +187,7 @@ import type { AppSettings } from '../domain/types'
 import { createTauriStorageClient, type WorkspaceStorageClient } from './storageClient'
 import { isDesktopRuntime } from './fileAccess'
 
-const BROWSER_APP_SETTINGS_STORAGE_KEY = 'zhixi.app.settings.v1'
+const BROWSER_APP_SETTINGS_STORAGE_KEY = 'zhiqi.app.settings.v1'
 
 export interface AppSettingsRepository {
   load(): Promise<AppSettings | null>
@@ -332,7 +332,7 @@ const APP_SETTINGS_ID: &str = "appSettings";
 
 fn save_app_settings(&self, settings: &AppSettings) -> StorageResult<()> {
     self.connection.execute(
-        "INSERT INTO zhixi_settings (id, record_json) VALUES (?1, ?2)
+        "INSERT INTO zhiqi_settings (id, record_json) VALUES (?1, ?2)
           ON CONFLICT(id) DO UPDATE SET record_json = excluded.record_json",
         params![APP_SETTINGS_ID, serde_json::to_string(settings)?],
     )?;
@@ -342,7 +342,7 @@ fn save_app_settings(&self, settings: &AppSettings) -> StorageResult<()> {
 fn load_app_settings(&self) -> StorageResult<Option<AppSettings>> {
     self.connection
         .query_row(
-            "SELECT record_json FROM zhixi_settings WHERE id = ?1",
+            "SELECT record_json FROM zhiqi_settings WHERE id = ?1",
             [APP_SETTINGS_ID],
             |row| row.get::<_, String>(0),
         )

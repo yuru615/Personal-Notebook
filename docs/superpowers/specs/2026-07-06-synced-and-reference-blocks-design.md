@@ -175,7 +175,7 @@ Rust 侧 `WorkspaceSnapshot`、`BootstrapPayload`、页面包 `PagePackageManife
 
 建议新增独立表：
 
-- `zhixi_synced_block_groups`
+- `zhiqi_synced_block_groups`
 
 推荐字段：
 

@@ -1608,11 +1608,11 @@ In `src-tauri/src/storage/schema.rs`, use a safe v3 migration that recreates the
 pub const SCHEMA_VERSION: i64 = 3;
 
 fn migrate_to_v3(connection: &Connection) -> StorageResult<()> {
-    ensure_column(connection, "zhixi_search_documents", "block_id", "TEXT")?;
+    ensure_column(connection, "zhiqi_search_documents", "block_id", "TEXT")?;
     connection.execute_batch(
         "
-        DROP TABLE IF EXISTS zhixi_search_documents_fts;
-        CREATE VIRTUAL TABLE zhixi_search_documents_fts USING fts5(
+        DROP TABLE IF EXISTS zhiqi_search_documents_fts;
+        CREATE VIRTUAL TABLE zhiqi_search_documents_fts USING fts5(
           document_id UNINDEXED,
           kind UNINDEXED,
           page_id UNINDEXED,
@@ -1625,7 +1625,7 @@ fn migrate_to_v3(connection: &Connection) -> StorageResult<()> {
           excerpt UNINDEXED,
           body
         );
-        DELETE FROM zhixi_search_documents;
+        DELETE FROM zhiqi_search_documents;
         ",
     )?;
     Ok(())
@@ -1657,9 +1657,9 @@ struct SearchDocument {
 let mut statement = connection.prepare(
     "SELECT d.kind, d.page_id, d.block_id, d.board_id, d.database_id, d.record_id, d.title, d.icon,
       d.excerpt, d.match_source, d.match_key, d.source_label
-      FROM zhixi_search_documents_fts f
-      JOIN zhixi_search_documents d ON d.document_id = f.document_id
-      WHERE zhixi_search_documents_fts MATCH ?1
+      FROM zhiqi_search_documents_fts f
+      JOIN zhiqi_search_documents d ON d.document_id = f.document_id
+      WHERE zhiqi_search_documents_fts MATCH ?1
       ORDER BY rank
       LIMIT ?2",
 )?;

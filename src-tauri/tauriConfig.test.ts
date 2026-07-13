@@ -26,7 +26,7 @@ describe('Tauri config', () => {
     expect(config.app?.windows?.[0]?.dragDropEnabled).toBe(false)
   })
 
-  it('keeps bundle icon paths backed by the approved Zhixi source icon', () => {
+  it('keeps bundle icon paths backed by the approved Zhiqi source icon', () => {
     const config = readConfig()
     const iconPaths = config.bundle?.icon ?? []
 
@@ -44,7 +44,7 @@ describe('Tauri config', () => {
 
     const sourceIcon = readFileSync(join(srcTauriDir, 'icons/icon-source.svg'), 'utf8')
 
-    expect(sourceIcon).toContain('data-zhixi-logo="perch-page"')
+    expect(sourceIcon).toContain('data-zhiqi-logo="perch-page"')
     expect(sourceIcon).toContain('#0E766E')
     expect(sourceIcon).toContain('#DDAE4E')
   })

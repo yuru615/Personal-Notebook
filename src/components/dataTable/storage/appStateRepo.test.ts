@@ -32,19 +32,19 @@ describe("createMemoryAppStateRepository", () => {
 });
 
 describe("createBrowserAppStateRepository", () => {
-  it("stores standalone data table state under the zhixi key", async () => {
+  it("stores standalone data table state under the zhiqi key", async () => {
     window.localStorage.clear();
     const repository = createBrowserAppStateRepository();
     const state = createDefaultAppState();
 
     await repository.saveAppState(state);
 
-    expect(window.localStorage.getItem("zhixi.standalone-data-table-state.v1")).toBe(
+    expect(window.localStorage.getItem("zhiqi.standalone-data-table-state.v1")).toBe(
       JSON.stringify(state),
     );
     const storageKeys = Array.from({ length: window.localStorage.length }, (_, index) =>
       window.localStorage.key(index),
     );
-    expect(storageKeys).toEqual(["zhixi.standalone-data-table-state.v1"]);
+    expect(storageKeys).toEqual(["zhiqi.standalone-data-table-state.v1"]);
   });
 });

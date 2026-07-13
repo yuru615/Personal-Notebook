@@ -176,9 +176,9 @@ pub fn search(
     let mut statement = connection.prepare(
         "SELECT d.kind, d.page_id, d.block_id, d.board_id, d.database_id, d.record_id, d.title, d.icon,
           d.excerpt, d.match_source, d.match_key, d.source_label
-          FROM zhixi_search_documents_fts f
-          JOIN zhixi_search_documents d ON d.document_id = f.document_id
-          WHERE zhixi_search_documents_fts MATCH ?1
+          FROM zhiqi_search_documents_fts f
+          JOIN zhiqi_search_documents d ON d.document_id = f.document_id
+          WHERE zhiqi_search_documents_fts MATCH ?1
           ORDER BY rank
           LIMIT ?2",
     )?;
@@ -208,7 +208,7 @@ fn normalize_query(query: &str) -> String {
 
 fn insert_document(connection: &Connection, document: &SearchDocument) -> StorageResult<()> {
     connection.execute(
-        "INSERT INTO zhixi_search_documents
+        "INSERT INTO zhiqi_search_documents
           (document_id, kind, page_id, block_id, board_id, database_id, record_id, title, icon, excerpt, body,
             match_source, match_key, source_label)
           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
@@ -230,7 +230,7 @@ fn insert_document(connection: &Connection, document: &SearchDocument) -> Storag
         ],
     )?;
     connection.execute(
-        "INSERT INTO zhixi_search_documents_fts
+        "INSERT INTO zhiqi_search_documents_fts
           (document_id, kind, page_id, block_id, board_id, database_id, record_id, title, icon, excerpt, body)
           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
@@ -264,20 +264,20 @@ pub fn delete_documents_for_owner(
     };
 
     let mut statement = connection
-        .prepare("SELECT rowid FROM zhixi_search_documents_fts WHERE document_id LIKE ?1")?;
+        .prepare("SELECT rowid FROM zhiqi_search_documents_fts WHERE document_id LIKE ?1")?;
     let row_ids = statement
         .query_map([pattern.as_str()], |row| row.get::<_, i64>(0))?
         .collect::<Result<Vec<_>, _>>()?;
 
     for row_id in row_ids {
         connection.execute(
-            "DELETE FROM zhixi_search_documents_fts WHERE rowid = ?1",
+            "DELETE FROM zhiqi_search_documents_fts WHERE rowid = ?1",
             [row_id],
         )?;
     }
 
     connection.execute(
-        "DELETE FROM zhixi_search_documents WHERE document_id LIKE ?1",
+        "DELETE FROM zhiqi_search_documents WHERE document_id LIKE ?1",
         [pattern],
     )?;
     Ok(())

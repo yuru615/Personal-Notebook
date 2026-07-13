@@ -12,19 +12,19 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
 
     connection.execute_batch(
         "
-        CREATE TABLE IF NOT EXISTS zhixi_meta (
+        CREATE TABLE IF NOT EXISTS zhiqi_meta (
           key TEXT PRIMARY KEY NOT NULL,
           value TEXT NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS zhixi_settings (
+        CREATE TABLE IF NOT EXISTS zhiqi_settings (
           id TEXT PRIMARY KEY NOT NULL,
           record_json TEXT NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS zhixi_pages (
+        CREATE TABLE IF NOT EXISTS zhiqi_pages (
           id TEXT PRIMARY KEY NOT NULL,
-          parent_id TEXT REFERENCES zhixi_pages(id) ON DELETE CASCADE,
+          parent_id TEXT REFERENCES zhiqi_pages(id) ON DELETE CASCADE,
           title TEXT NOT NULL,
           icon TEXT,
           cover TEXT,
@@ -37,27 +37,27 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
           updated_at TEXT NOT NULL
         );
 
-        CREATE INDEX IF NOT EXISTS idx_zhixi_pages_parent_position
-          ON zhixi_pages(parent_id, position);
+        CREATE INDEX IF NOT EXISTS idx_zhiqi_pages_parent_position
+          ON zhiqi_pages(parent_id, position);
 
-        CREATE TABLE IF NOT EXISTS zhixi_page_contents (
-          page_id TEXT PRIMARY KEY NOT NULL REFERENCES zhixi_pages(id) ON DELETE CASCADE,
+        CREATE TABLE IF NOT EXISTS zhiqi_page_contents (
+          page_id TEXT PRIMARY KEY NOT NULL REFERENCES zhiqi_pages(id) ON DELETE CASCADE,
           blocks_json TEXT NOT NULL,
           properties_json TEXT NOT NULL DEFAULT '{}'
         );
 
-        CREATE TABLE IF NOT EXISTS zhixi_block_refs (
-          page_id TEXT NOT NULL REFERENCES zhixi_pages(id) ON DELETE CASCADE,
+        CREATE TABLE IF NOT EXISTS zhiqi_block_refs (
+          page_id TEXT NOT NULL REFERENCES zhiqi_pages(id) ON DELETE CASCADE,
           block_id TEXT NOT NULL,
           ref_kind TEXT NOT NULL,
           ref_id TEXT NOT NULL,
           PRIMARY KEY (page_id, block_id, ref_kind, ref_id)
         );
 
-        CREATE INDEX IF NOT EXISTS idx_zhixi_block_refs_ref
-          ON zhixi_block_refs(ref_kind, ref_id);
+        CREATE INDEX IF NOT EXISTS idx_zhiqi_block_refs_ref
+          ON zhiqi_block_refs(ref_kind, ref_id);
 
-        CREATE TABLE IF NOT EXISTS zhixi_boards (
+        CREATE TABLE IF NOT EXISTS zhiqi_boards (
           id TEXT PRIMARY KEY NOT NULL,
           title TEXT NOT NULL,
           position INTEGER NOT NULL,
@@ -65,12 +65,12 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
           updated_at TEXT NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS zhixi_board_snapshots (
-          board_id TEXT PRIMARY KEY NOT NULL REFERENCES zhixi_boards(id) ON DELETE CASCADE,
+        CREATE TABLE IF NOT EXISTS zhiqi_board_snapshots (
+          board_id TEXT PRIMARY KEY NOT NULL REFERENCES zhiqi_boards(id) ON DELETE CASCADE,
           snapshot_json TEXT NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS zhixi_mindmaps (
+        CREATE TABLE IF NOT EXISTS zhiqi_mindmaps (
           id TEXT PRIMARY KEY NOT NULL,
           title TEXT NOT NULL,
           position INTEGER NOT NULL,
@@ -78,12 +78,12 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
           updated_at TEXT NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS zhixi_mindmap_snapshots (
-          mindmap_id TEXT PRIMARY KEY NOT NULL REFERENCES zhixi_mindmaps(id) ON DELETE CASCADE,
+        CREATE TABLE IF NOT EXISTS zhiqi_mindmap_snapshots (
+          mindmap_id TEXT PRIMARY KEY NOT NULL REFERENCES zhiqi_mindmaps(id) ON DELETE CASCADE,
           snapshot_json TEXT NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS zhixi_synced_block_groups (
+        CREATE TABLE IF NOT EXISTS zhiqi_synced_block_groups (
           id TEXT PRIMARY KEY NOT NULL,
           blocks_json TEXT NOT NULL,
           primary_instance_id TEXT NOT NULL,
@@ -91,7 +91,7 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
           updated_at TEXT NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS zhixi_data_tables (
+        CREATE TABLE IF NOT EXISTS zhiqi_data_tables (
           id TEXT PRIMARY KEY NOT NULL,
           title TEXT NOT NULL,
           icon TEXT,
@@ -102,24 +102,24 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
           updated_at TEXT NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS zhixi_data_table_properties (
-          data_table_id TEXT NOT NULL REFERENCES zhixi_data_tables(id) ON DELETE CASCADE,
+        CREATE TABLE IF NOT EXISTS zhiqi_data_table_properties (
+          data_table_id TEXT NOT NULL REFERENCES zhiqi_data_tables(id) ON DELETE CASCADE,
           id TEXT NOT NULL,
           record_json TEXT NOT NULL,
           position INTEGER NOT NULL,
           PRIMARY KEY (data_table_id, id)
         );
 
-        CREATE TABLE IF NOT EXISTS zhixi_data_table_views (
-          data_table_id TEXT NOT NULL REFERENCES zhixi_data_tables(id) ON DELETE CASCADE,
+        CREATE TABLE IF NOT EXISTS zhiqi_data_table_views (
+          data_table_id TEXT NOT NULL REFERENCES zhiqi_data_tables(id) ON DELETE CASCADE,
           id TEXT NOT NULL,
           record_json TEXT NOT NULL,
           position INTEGER NOT NULL,
           PRIMARY KEY (data_table_id, id)
         );
 
-        CREATE TABLE IF NOT EXISTS zhixi_data_table_records (
-          data_table_id TEXT NOT NULL REFERENCES zhixi_data_tables(id) ON DELETE CASCADE,
+        CREATE TABLE IF NOT EXISTS zhiqi_data_table_records (
+          data_table_id TEXT NOT NULL REFERENCES zhiqi_data_tables(id) ON DELETE CASCADE,
           id TEXT NOT NULL,
           title TEXT NOT NULL,
           record_json TEXT NOT NULL,
@@ -129,15 +129,15 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
           PRIMARY KEY (data_table_id, id)
         );
 
-        CREATE TABLE IF NOT EXISTS zhixi_data_table_record_pages (
-          data_table_id TEXT NOT NULL REFERENCES zhixi_data_tables(id) ON DELETE CASCADE,
+        CREATE TABLE IF NOT EXISTS zhiqi_data_table_record_pages (
+          data_table_id TEXT NOT NULL REFERENCES zhiqi_data_tables(id) ON DELETE CASCADE,
           record_id TEXT NOT NULL,
           record_json TEXT NOT NULL,
           PRIMARY KEY (data_table_id, record_id)
         );
 
-        CREATE TABLE IF NOT EXISTS zhixi_data_table_blocks (
-          data_table_id TEXT NOT NULL REFERENCES zhixi_data_tables(id) ON DELETE CASCADE,
+        CREATE TABLE IF NOT EXISTS zhiqi_data_table_blocks (
+          data_table_id TEXT NOT NULL REFERENCES zhiqi_data_tables(id) ON DELETE CASCADE,
           id TEXT NOT NULL,
           record_id TEXT,
           record_json TEXT NOT NULL,
@@ -145,7 +145,7 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
           PRIMARY KEY (data_table_id, id)
         );
 
-        CREATE TABLE IF NOT EXISTS zhixi_assets (
+        CREATE TABLE IF NOT EXISTS zhiqi_assets (
           id TEXT PRIMARY KEY NOT NULL,
           sha256 TEXT UNIQUE NOT NULL,
           name TEXT NOT NULL,
@@ -155,14 +155,14 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
           created_at TEXT NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS zhixi_asset_refs (
-          asset_id TEXT NOT NULL REFERENCES zhixi_assets(id) ON DELETE CASCADE,
+        CREATE TABLE IF NOT EXISTS zhiqi_asset_refs (
+          asset_id TEXT NOT NULL REFERENCES zhiqi_assets(id) ON DELETE CASCADE,
           owner_kind TEXT NOT NULL,
           owner_id TEXT NOT NULL,
           PRIMARY KEY (asset_id, owner_kind, owner_id)
         );
 
-        CREATE TABLE IF NOT EXISTS zhixi_search_documents (
+        CREATE TABLE IF NOT EXISTS zhiqi_search_documents (
           document_id TEXT PRIMARY KEY NOT NULL,
           kind TEXT NOT NULL,
           page_id TEXT NOT NULL,
@@ -179,7 +179,7 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
           source_label TEXT NOT NULL DEFAULT '正文'
         );
 
-        CREATE VIRTUAL TABLE IF NOT EXISTS zhixi_search_documents_fts USING fts5(
+        CREATE VIRTUAL TABLE IF NOT EXISTS zhiqi_search_documents_fts USING fts5(
           document_id UNINDEXED,
           kind UNINDEXED,
           page_id UNINDEXED,
@@ -210,7 +210,7 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
     }
 
     connection.execute(
-        "INSERT INTO zhixi_meta (key, value) VALUES ('schema_version', ?1)
+        "INSERT INTO zhiqi_meta (key, value) VALUES ('schema_version', ?1)
           ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         [SCHEMA_VERSION.to_string()],
     )?;
@@ -225,7 +225,7 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
 fn load_schema_version(connection: &Connection) -> StorageResult<Option<i64>> {
     let version = connection
         .query_row(
-            "SELECT value FROM zhixi_meta WHERE key = 'schema_version'",
+            "SELECT value FROM zhiqi_meta WHERE key = 'schema_version'",
             [],
             |row| row.get::<_, String>(0),
         )
@@ -243,20 +243,20 @@ fn load_schema_version(connection: &Connection) -> StorageResult<Option<i64>> {
 fn migrate_to_v2(connection: &Connection) -> StorageResult<()> {
     ensure_column(
         connection,
-        "zhixi_page_contents",
+        "zhiqi_page_contents",
         "properties_json",
         "TEXT NOT NULL DEFAULT '{}'",
     )?;
     ensure_column(
         connection,
-        "zhixi_search_documents",
+        "zhiqi_search_documents",
         "match_source",
         "TEXT NOT NULL DEFAULT 'body'",
     )?;
-    ensure_column(connection, "zhixi_search_documents", "match_key", "TEXT")?;
+    ensure_column(connection, "zhiqi_search_documents", "match_key", "TEXT")?;
     ensure_column(
         connection,
-        "zhixi_search_documents",
+        "zhiqi_search_documents",
         "source_label",
         "TEXT NOT NULL DEFAULT '正文'",
     )?;
@@ -264,11 +264,11 @@ fn migrate_to_v2(connection: &Connection) -> StorageResult<()> {
 }
 
 fn migrate_to_v3(connection: &Connection) -> StorageResult<()> {
-    ensure_column(connection, "zhixi_search_documents", "block_id", "TEXT")?;
+    ensure_column(connection, "zhiqi_search_documents", "block_id", "TEXT")?;
     connection.execute_batch(
         "
-        DROP TABLE IF EXISTS zhixi_search_documents_fts;
-        CREATE VIRTUAL TABLE zhixi_search_documents_fts USING fts5(
+        DROP TABLE IF EXISTS zhiqi_search_documents_fts;
+        CREATE VIRTUAL TABLE zhiqi_search_documents_fts USING fts5(
           document_id UNINDEXED,
           kind UNINDEXED,
           page_id UNINDEXED,
@@ -281,7 +281,7 @@ fn migrate_to_v3(connection: &Connection) -> StorageResult<()> {
           excerpt UNINDEXED,
           body
         );
-        DELETE FROM zhixi_search_documents;
+        DELETE FROM zhiqi_search_documents;
         ",
     )?;
     Ok(())
@@ -290,7 +290,7 @@ fn migrate_to_v3(connection: &Connection) -> StorageResult<()> {
 fn migrate_to_v4(connection: &Connection) -> StorageResult<()> {
     connection.execute_batch(
         "
-        CREATE TABLE IF NOT EXISTS zhixi_synced_block_groups (
+        CREATE TABLE IF NOT EXISTS zhiqi_synced_block_groups (
           id TEXT PRIMARY KEY NOT NULL,
           blocks_json TEXT NOT NULL,
           primary_instance_id TEXT NOT NULL,

@@ -4,6 +4,81 @@
 
 ## 维护规则
 
+## 2026-07-13 macOS Tauri 开发告警清理
+
+提交：未提交
+
+简要描述：
+
+清理 macOS 执行 `npm run tauri:dev` 时由 Windows 专属剪贴板捕获代码产生的 Rust 编译告警。
+
+详细描述：
+
+- 将 Windows 专属实现及其辅助类型限定为 Windows（测试构建仍保留对应单元测试）。
+- macOS 上保留剪贴板命令的无操作行为，通知命令显式消费参数，因此不改变跨平台调用契约。
+
+验证情况：
+
+- 已通过 `cargo check --manifest-path src-tauri/Cargo.toml`，确认不再输出项目 Rust 告警。
+
+## 2026-07-13 macOS 侧边栏菜单层级修复
+
+提交：未提交
+
+简要描述：
+
+修复 macOS 桌面端侧边栏“更多”菜单被正文内容遮挡的问题。
+
+详细描述：
+
+- 页面操作菜单和顶部工具栏“更多”菜单现在通过 React Portal 渲染到 `document.body`，不再受侧边栏独立层叠上下文影响。
+- 侧边栏菜单的全局层级固定为 `100`，高于正文内的浮层；文件拖放遮罩等全局优先级更高的交互仍保留在其上方。
+- 保持原有的固定定位、窗口边界翻转、点击外部关闭和菜单项操作行为，并增加 Portal 父节点与最终 CSS 覆盖规则的回归测试。
+
+验证情况：
+
+- 已通过 `npx vitest run src/components/sidebar/SidebarTree.test.tsx src/styles/appShellLayout.test.ts`（44 项测试）。
+- 已通过浏览器实际验证：菜单父节点为 `BODY`、计算 `z-index` 为 `100`，并确认无控制台 warning/error。
+
+## 2026-07-13 macOS Tauri 开发启动修复
+
+提交：未提交
+
+简要描述：
+
+修复 macOS 上执行 `npm run tauri:dev` 时 Windows 依赖链导致的 Rust 编译失败。
+
+详细描述：
+
+- 将仅供 Windows 剪贴板与系统通知功能使用的 `windows` crate 从通用依赖移至 Windows 目标专属依赖。
+- macOS 开发构建不再编译 `windows-future`，避免其与 `windows-core` 内部 API 不匹配而中断桌面应用启动；Windows 构建仍保留原有依赖和功能。
+
+验证情况：
+
+- 已通过 `cargo check --manifest-path src-tauri/Cargo.toml`。
+- 已实际运行 `npm run tauri:dev`，Vite 启动、Rust 编译完成，并运行 `target/debug/zhiqi`。
+- `cargo test --manifest-path src-tauri/Cargo.toml` 已运行 73 项，其中 71 项通过；`initializes_schema_with_wal_foreign_keys_and_version` 与 `opening_v1_database_migrates_columns_and_rebuilds_search_documents` 仍因既有 schema 版本断言期望 3、实际为 4 而失败，与本次依赖分层无关。
+
+## 2026-07-13 Zhiqi 英文标识更新
+
+提交：未提交
+
+简要描述：
+
+将应用英文标识统一更新为 `zhiqi`，作为新的本地应用身份。
+
+详细描述：
+
+- npm 包、Rust crate、Tauri bundle identifier、运行时事件、剪贴板 MIME 类型、页面包标识和图标元数据均切换为 `zhiqi`。
+- SQLite 表和索引前缀、数据库文件、资源目录及浏览器 localStorage 键均采用新前缀，因此新版本不会自动读取旧版本的本地数据。
+- README、维护说明、历史设计文档和测试同步更新，确保仓库内不再保留旧英文标识。
+
+验证情况：
+
+- 已通过 `npm test`（89 个测试文件、759 项测试）和 `npm run build`。
+- `npm run lint` 仍被未改动的 `src/store/createWorkspaceStore.ts` 中既有 `_displayMode` 未使用变量错误阻断；另有 5 个既有 React Hooks warning。
+- Rust 存储测试在依赖编译阶段被 `windows-future` 与 `windows-core` 的 API 不匹配阻断，尚未进入项目代码。
+
 ## 2026-07-12 框选焦点轮廓修复
 
 提交：未提交
@@ -487,7 +562,7 @@
 详细描述：
 
 - 新增文件系统媒体资产支持，让图片、视频、音频等资源由应用管理到本地资产目录。
-- 将数据库和资源路径统一到知栖命名，例如 `zhixi.db` 和 `zhixi-assets/`。
+- 将数据库和资源路径统一到知栖命名，例如 `zhiqi.db` 和 `zhiqi-assets/`。
 - 更新知栖应用图标，并补充 logo/icon 设计与实施文档。
 - 为 MediaBlock 增加单元测试和样式测试，覆盖媒体块基本显示和交互。
 - 新增孤立资源清理能力，减少无引用文件长期占用本地空间。

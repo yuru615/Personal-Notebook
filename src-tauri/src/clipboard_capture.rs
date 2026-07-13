@@ -1,21 +1,33 @@
 use serde::{Deserialize, Serialize};
 use std::{
-    path::Path,
     sync::{Arc, Mutex},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, State};
 
+#[cfg(any(target_os = "windows", test))]
+use std::path::Path;
+#[cfg(target_os = "windows")]
+use std::time::Duration;
+#[cfg(target_os = "windows")]
+use tauri::{Emitter, Manager};
+
+#[cfg(target_os = "windows")]
 const WINDOWS_POWERSHELL_PATH: &str = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
-const CLIPBOARD_CAPTURE_CONFIRM_EVENT: &str = "zhixi://clipboard-capture-confirm";
+#[cfg(target_os = "windows")]
+const CLIPBOARD_CAPTURE_CONFIRM_EVENT: &str = "zhiqi://clipboard-capture-confirm";
 #[cfg(target_os = "windows")]
 const CLIPBOARD_CAPTURE_MONITOR_INTERVAL: Duration = Duration::from_millis(250);
+#[cfg(target_os = "windows")]
 const CLIPBOARD_CAPTURE_NOTIFICATION_TITLE: &str =
     "\u{5DF2}\u{6355}\u{83B7}\u{526A}\u{8D34}\u{677F}\u{5185}\u{5BB9}";
+#[cfg(target_os = "windows")]
 const CLIPBOARD_CAPTURE_NOTIFICATION_CONFIRM_LABEL: &str =
     "\u{70B9}\u{51FB}\u{6536}\u{8FDB}\u{6536}\u{4EF6}\u{7BB1}";
+#[cfg(target_os = "windows")]
 const CLIPBOARD_CAPTURE_RICH_TEXT_SUMMARY: &str =
     "\u{5BCC}\u{6587}\u{672C}\u{526A}\u{8D34}\u{677F}\u{5185}\u{5BB9}";
+#[cfg(target_os = "windows")]
 const CLIPBOARD_CAPTURE_IMAGE_SUMMARY: &str =
     "\u{526A}\u{8D34}\u{677F}\u{56FE}\u{7247}";
 #[cfg(target_os = "windows")]
@@ -101,6 +113,7 @@ pub struct ClipboardCaptureFailureNotificationPayload {
     pub body: String,
 }
 
+#[cfg(any(target_os = "windows", test))]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum ClipboardCandidateWire {
@@ -149,6 +162,7 @@ pub struct ConfirmedClipboardCapture {
 }
 
 impl ClipboardCaptureState {
+    #[cfg(target_os = "windows")]
     fn is_enabled(&self) -> bool {
         self.inner
             .lock()
@@ -156,6 +170,7 @@ impl ClipboardCaptureState {
             .unwrap_or(false)
     }
 
+    #[cfg(target_os = "windows")]
     fn should_suppress(&self, now_ms: u64) -> bool {
         self.inner
             .lock()
@@ -181,6 +196,7 @@ impl ClipboardCaptureState {
         }
     }
 
+    #[cfg(any(target_os = "windows", test))]
     fn store_detected_candidate(&self, candidate: ClipboardCandidate, captured_at: String) -> bool {
         let signature = clipboard_candidate_signature(&candidate);
 
@@ -201,12 +217,14 @@ impl ClipboardCaptureState {
         false
     }
 
+    #[cfg(any(target_os = "windows", test))]
     fn clear_last_seen_signature(&self) {
         if let Ok(mut state) = self.inner.lock() {
             state.last_seen_signature = None;
         }
     }
 
+    #[cfg(target_os = "windows")]
     fn remember_clipboard_sequence_number(&self, sequence_number: u32) {
         if sequence_number == 0 {
             return;
@@ -217,6 +235,7 @@ impl ClipboardCaptureState {
         }
     }
 
+    #[cfg(target_os = "windows")]
     fn mark_clipboard_sequence_if_changed(&self, sequence_number: u32) -> bool {
         if sequence_number == 0 {
             return true;
@@ -234,6 +253,7 @@ impl ClipboardCaptureState {
         true
     }
 
+    #[cfg(any(target_os = "windows", test))]
     fn confirm_pending_capture(&self) -> bool {
         if let Ok(mut state) = self.inner.lock() {
             if let Some(pending_capture) = state.pending_capture.as_mut() {
@@ -320,6 +340,9 @@ pub fn show_clipboard_capture_notification(
         spawn_windows_native_notification(app, payload.title, body, true)?;
     }
 
+    #[cfg(not(target_os = "windows"))]
+    let _ = (app, payload);
+
     Ok(())
 }
 
@@ -332,6 +355,9 @@ pub fn show_clipboard_capture_failure_notification(
     {
         spawn_windows_native_notification(app, payload.title, payload.body, false)?;
     }
+
+    #[cfg(not(target_os = "windows"))]
+    let _ = (app, payload);
 
     Ok(())
 }
@@ -376,6 +402,7 @@ fn process_clipboard_capture_tick(app: &AppHandle, state: &ClipboardCaptureState
     }
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn clipboard_text_candidate(text: &str, html: Option<&str>) -> Option<ClipboardCandidate> {
     let normalized_html = normalize_optional_html(html);
     if text.trim().is_empty() && normalized_html.is_none() {
@@ -398,6 +425,7 @@ fn current_windows_clipboard_sequence_number() -> Option<u32> {
     }
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn clipboard_candidate_signature(candidate: &ClipboardCandidate) -> String {
     match candidate {
         ClipboardCandidate::Text { text, html } => {
@@ -417,6 +445,7 @@ fn clipboard_candidate_signature(candidate: &ClipboardCandidate) -> String {
     }
 }
 
+#[cfg(target_os = "windows")]
 fn summarize_clipboard_candidate(candidate: &ClipboardCandidate) -> String {
     match candidate {
         ClipboardCandidate::Text { text, html } => {
@@ -444,6 +473,7 @@ fn summarize_clipboard_candidate(candidate: &ClipboardCandidate) -> String {
     }
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn clipboard_image_file_candidate(path: &str) -> Option<ClipboardCandidate> {
     let extension = Path::new(path)
         .extension()
@@ -462,6 +492,7 @@ fn clipboard_image_file_candidate(path: &str) -> Option<ClipboardCandidate> {
     })
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn parse_clipboard_candidate_json(json: &str) -> Result<Option<ClipboardCandidate>, String> {
     let trimmed = json.trim();
     if trimmed.is_empty() {
@@ -491,6 +522,7 @@ fn parse_clipboard_candidate_json(json: &str) -> Result<Option<ClipboardCandidat
     })
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn normalize_optional_string(value: Option<&str>) -> Option<String> {
     value.and_then(|candidate| {
         if candidate.trim().is_empty() {
@@ -501,11 +533,13 @@ fn normalize_optional_string(value: Option<&str>) -> Option<String> {
     })
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn normalize_optional_html(value: Option<&str>) -> Option<String> {
     let html = normalize_optional_string(value)?;
     Some(extract_cf_html_fragment(&html).unwrap_or(html))
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn extract_cf_html_fragment(value: &str) -> Option<String> {
     let read_offset = |label: &str| {
         value.lines().find_map(|line| {
@@ -531,10 +565,12 @@ fn now_timestamp_ms() -> u64 {
         .unwrap_or(0)
 }
 
+#[cfg(target_os = "windows")]
 fn iso_timestamp_now() -> String {
     chrono_like_iso8601(now_timestamp_ms())
 }
 
+#[cfg(target_os = "windows")]
 fn chrono_like_iso8601(timestamp_ms: u64) -> String {
     let seconds = (timestamp_ms / 1000) as i64;
     let milliseconds = (timestamp_ms % 1000) as u32;
@@ -551,6 +587,7 @@ fn chrono_like_iso8601(timestamp_ms: u64) -> String {
     )
 }
 
+#[cfg(target_os = "windows")]
 #[derive(Debug, Clone, Copy)]
 struct SimpleDateTime {
     year: i32,
@@ -561,6 +598,7 @@ struct SimpleDateTime {
     second: u32,
 }
 
+#[cfg(target_os = "windows")]
 fn time_from_unix_seconds(seconds: i64) -> SimpleDateTime {
     let days = seconds.div_euclid(86_400);
     let seconds_of_day = seconds.rem_euclid(86_400) as u32;
@@ -576,6 +614,7 @@ fn time_from_unix_seconds(seconds: i64) -> SimpleDateTime {
     }
 }
 
+#[cfg(target_os = "windows")]
 fn civil_from_days(days_since_unix_epoch: i64) -> (i32, u32, u32) {
     let z = days_since_unix_epoch + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 }.div_euclid(146_097);
@@ -591,11 +630,13 @@ fn civil_from_days(days_since_unix_epoch: i64) -> (i32, u32, u32) {
     (year as i32, m as u32, d as u32)
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn decode_hex_utf8(value: &str) -> Result<String, String> {
     let bytes = hex::decode(value).map_err(|error| format!("failed to decode clipboard text hex: {error}"))?;
     String::from_utf8(bytes).map_err(|error| format!("failed to decode clipboard text utf-8: {error}"))
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn decode_optional_hex_utf8(value: Option<&str>) -> Result<Option<String>, String> {
     match value {
         Some(candidate) if !candidate.trim().is_empty() => decode_hex_utf8(candidate).map(Some),
@@ -613,6 +654,7 @@ impl Drop for WindowsClipboardGuard {
     }
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn resolve_windows_clipboard_candidate_with_fallback<F>(
     native_result: Result<Option<ClipboardCandidate>, String>,
     fallback: F,
@@ -768,6 +810,7 @@ fn read_windows_native_html() -> Result<Option<String>, String> {
     Ok(normalize_optional_html(Some(&html)))
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn read_null_terminated_utf16(units: &[u16]) -> String {
     let end = units.iter().position(|value| *value == 0).unwrap_or(units.len());
     String::from_utf16_lossy(&units[..end])
@@ -841,7 +884,7 @@ fn create_windows_notification_window(
     let module = unsafe { GetModuleHandleW(None) }
         .map_err(|error| format!("failed to resolve the notification window module: {error}"))?;
     let instance = HINSTANCE(module.0);
-    let class_name = w!("ZhixiClipboardCaptureNotificationWindow");
+    let class_name = w!("ZhiqiClipboardCaptureNotificationWindow");
     let window_class = WNDCLASSW {
         lpfnWndProc: Some(windows_notification_wndproc),
         hInstance: instance,
@@ -984,6 +1027,7 @@ unsafe extern "system" fn windows_notification_wndproc(
     unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn copy_utf16_into_buffer<const N: usize>(value: &str, buffer: &mut [u16; N]) {
     buffer.fill(0);
     let max_units = buffer.len().saturating_sub(1);
