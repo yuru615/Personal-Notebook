@@ -4659,6 +4659,7 @@ export function createWorkspaceStore(
       let nextBoards = state.boards
       let nextDataTables = state.dataTables
       let nextMindmaps = state.mindmaps
+      let childPage: PageRecord | null = null
       const nextPages = state.pages.map((page) => {
         if (page.id !== pageId) {
           return page
@@ -4705,11 +4706,25 @@ export function createWorkspaceStore(
                       nextMindmaps = [...state.mindmaps, mindmap]
                       return createMindmapBlock(mindmap.id)
                     })()
-                : createBlock(type)
+                  : type === 'child_page'
+                    ? (() => {
+                        childPage = createPageRecord(
+                          pageId,
+                          UNTITLED_PAGE_TITLE,
+                          getPageDefaults(state.settings),
+                        )
+                        return {
+                          id: createId('block'),
+                          type: 'child_page' as const,
+                          pageId: childPage.id,
+                        }
+                      })()
+                    : createBlock(type)
             return { ...preserveBlockContent(fresh, block), id: block.id }
           }),
         }
       })
+      const snapshotPages = childPage ? [...nextPages, childPage] : nextPages
 
       pushUndoSnapshot(state)
       set({ saveStatus: 'saving' })
@@ -4720,14 +4735,14 @@ export function createWorkspaceStore(
           dataTables: nextDataTables,
           mindmaps: nextMindmaps,
           syncedBlockGroups: state.syncedBlockGroups,
-          pages: nextPages,
+          pages: snapshotPages,
           settings: state.settings,
         })
         set({
           boards: nextBoards,
           dataTables: nextDataTables,
           mindmaps: nextMindmaps,
-          pages: nextPages,
+          pages: snapshotPages,
           saveStatus: 'saved',
         })
       } catch {
