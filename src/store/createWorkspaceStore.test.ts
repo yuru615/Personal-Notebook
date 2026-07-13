@@ -2905,6 +2905,32 @@ describe('createWorkspaceStore mindmaps', () => {
     )
   })
 
+  it('turns an empty block into a persisted child page', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+    await store.getState().insertParagraphBlock('page_1', 'placeholder')
+    const sourceBlockId = store.getState().pages[0]?.blocks[0]?.id
+
+    await store.getState().turnBlockInto('page_1', sourceBlockId!, 'child_page')
+
+    const childBlock = store.getState().pages[0]?.blocks[0]
+    expect(childBlock).toMatchObject({
+      id: sourceBlockId,
+      type: 'child_page',
+      pageId: expect.stringMatching(/^page_/),
+    })
+    const childPage = store
+      .getState()
+      .pages.find((page) => page.id === (childBlock as { pageId: string }).pageId)
+    expect(childPage).toMatchObject({
+      parentId: 'page_1',
+      title: '未命名',
+    })
+    expect(counted.getSnapshot()?.pages).toContainEqual(childPage)
+  })
+
   it('does not persist a mindmap snapshot update when the snapshot is unchanged', async () => {
     const counted = createCountingRepository(createWorkspace())
     const store = createWorkspaceStore(counted.repository)
