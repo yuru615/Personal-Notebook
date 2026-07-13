@@ -86,6 +86,85 @@ npm run dev
 
 首次启动会创建默认工作区。桌面端数据保存在 Tauri 应用数据目录中的 `zhixi.db`；应用管理的文件资产保存在同目录下的 `zhixi-assets/`。
 
+## 🤖 本机 AI / MCP 接入
+
+知栖桌面版可启动仅监听 `127.0.0.1` 的 Streamable HTTP MCP 服务。获得令牌的本机 AI 客户端可以搜索、读取和创建页面，并向页面原子写入 Markdown、普通表格、图片/视频/音频/附件、数据表、白板和思维导图。
+
+### 在 Chatbox 或 Cherry Studio 中配置
+
+1. 打开知栖“设置”，启用“本机 MCP 接入”。
+2. 点击“复制 MCP 配置”。复制内容已经包含当前端口和 Bearer 令牌，不需要手工拼接。
+3. 在 Chatbox 或 Cherry Studio 的 MCP 设置中新增或导入服务，粘贴配置并刷新工具列表。
+4. 确认客户端能看到 `search_pages`、`get_page`、`create_page`、`append_content` 四个工具。
+
+复制出的配置使用下面的标准结构（占位符不是实际值）：
+
+```json
+{
+  "mcpServers": {
+    "zhixi": {
+      "type": "streamableHttp",
+      "url": "http://127.0.0.1:<端口>/mcp",
+      "headers": {
+        "Authorization": "Bearer <令牌>"
+      }
+    }
+  }
+}
+```
+
+### `append_content` 完整批次规则
+
+- `content` 中的所有项目在一个原子批次内处理；任意一项非法时，整批都不会写入。
+- 数据表自带标题字段。每条记录的标题写在 `records[].title`；不要在 `columns` 中再定义 `type: "title"`。
+- 成功结果会返回 `createdContent`。外部 AI 应逐项核对其中的 `index`、`type`、`blockIds` 和可选 `objectId`，只有类型与数量都和原请求一致时才能报告完整成功。
+- 错误消息会指出 `content[index] (type)`。修正后必须重新发送完整原子批次，不能只补写出错的那一项。
+
+示例：
+
+```json
+{
+  "pageId": "page_id",
+  "content": [
+    { "type": "markdown", "markdown": "# 标题\n正文" },
+    { "type": "table", "hasHeaderRow": true, "rows": [["名称", "状态"], ["验收", "通过"]] },
+    { "type": "asset", "name": "示意图.png", "mimeType": "image/png", "dataBase64": "..." },
+    {
+      "type": "dataTable",
+      "title": "任务",
+      "columns": [{ "key": "status", "name": "状态", "type": "select" }],
+      "records": [{ "title": "检查 MCP", "values": { "status": "完成" } }]
+    },
+    {
+      "type": "whiteboard",
+      "title": "流程",
+      "nodes": [{ "id": "start", "kind": "ellipse", "text": "开始" }],
+      "edges": []
+    },
+    {
+      "type": "mindmap",
+      "title": "结构",
+      "root": { "text": "中心", "children": [{ "text": "分支" }] }
+    }
+  ]
+}
+```
+
+### 安全与排障
+
+- 令牌等同于对当前知栖工作区的本机写入权限。不要把完整配置粘贴到聊天、截图、日志或公开仓库。
+- 服务不接受局域网或公网连接，也不提供删除、覆盖和移动工具。
+- 点击“重新生成令牌”后，旧令牌立即失效；所有 AI 客户端都要重新粘贴配置。
+- 客户端看不到工具时，先确认知栖仍在运行、MCP 已启用，再刷新客户端工具列表；更新知栖后建议重启客户端，使其重新读取工具描述和 schema。
+- 出现 `401` 表示令牌缺失或已失效；出现 `content[n]` 错误时按提示修正第 `n` 项，并重发完整批次。
+- 仓库中的 `scripts/mcp-smoke-test.mjs` 可用于协议回归。通过环境变量提供 URL 和令牌后运行，脚本不会打印令牌：
+
+```powershell
+$env:ZHIXI_MCP_URL='http://127.0.0.1:<端口>/mcp'
+$env:ZHIXI_MCP_TOKEN='<令牌>'
+node scripts/mcp-smoke-test.mjs
+```
+
 ## 🛠️ 常用命令
 
 ```bash

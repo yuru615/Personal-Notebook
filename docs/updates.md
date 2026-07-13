@@ -4,6 +4,24 @@
 
 ## 维护规则
 
+## 2026-07-12 欢迎手册重复创建修复
+
+提交：未提交
+
+简要描述：
+
+修复桌面端重启后反复新增“知栖使用手册”的问题。
+
+详细描述：
+
+- 补齐 Rust 工作区设置的序列化字段：欢迎页 ID、欢迎手册版本、链接打开方式、页面默认显示和搜索偏好。
+- 此前桌面端保存工作区时会丢弃未声明的欢迎页 ID 与版本号，导致下次启动误判为尚未安装手册，重复创建说明页及其示例资源。
+- 修复后，已有工作区在下一次保存后会持久化当前手册标记；历史上已经多出的手册不会自动删除，避免误删用户编辑过的内容。
+
+验证情况：
+
+- 已通过 `cargo test preserves_extended_workspace_settings_fields_when_loading_and_saving --manifest-path src-tauri/Cargo.toml`。
+
 ## 2026-07-12 本机 MCP 启用状态修复
 
 提交：未提交
@@ -1484,24 +1502,35 @@
 - 已通过 `C:/Program Files/nodejs/npm.cmd test -- src/components/editor/blocks/TableBlock.test.tsx src/styles/tableControlLayout.test.ts`，共 32 项测试。
 - 已通过 `C:/Program Files/nodejs/npm.cmd run build`。
 
-# 2026-07-11 本机 MCP 写入接入（第一阶段）
+# 2026-07-12 本机 MCP 通用写入与客户端回执完善
 
 提交：待提交
 
+版本：1.1.0
+
 简要描述：
 
-知栖桌面端新增受令牌保护的本机 MCP 服务，可供已授权的本机 AI 客户端搜索、读取和创建页面，并追加文本或普通表格。
+知栖桌面端新增受令牌保护的本机 MCP 服务，可供已授权的本机 AI 客户端搜索、读取和创建页面，并原子写入文本、表格、媒体与结构化创作内容；本次真实 Chatbox 验收后进一步补足逐项落库回执和精确错误定位。
 
 详细描述：
 
 - 服务仅绑定 `127.0.0.1`，要求精确 Bearer 令牌；设置中心可启用、关闭和复制连接配置。
-- 新增 `search_pages`、`get_page`、`create_page`、`append_content` 工具；追加写入与本机审计记录处于同一 SQLite 事务。
-- MCP 成功写入后通知桌面前端重新加载工作区，已打开页面可获取新内容。
-- 本期不开放删除、覆盖、移动、远程访问或资产写入。
+- 新增 `search_pages`、`get_page`、`create_page`、`append_content` 工具；支持 Markdown、普通表格、图片、视频、音频、附件、数据表、白板和思维导图。
+- 文件资产会复制进知栖管理的 `zhixi-assets/`，不保留原始本地路径；页面块、结构化对象、引用、搜索索引和 MCP 审计记录在同一 SQLite 事务内更新，失败时整批回滚。
+- `append_content` 成功结果新增 `createdContent`，按输入下标列出真实保存的类型、块 ID 和对象 ID；外部 AI 可据此避免把部分重试误报为全部成功。
+- 校验错误会指出 `content[index] (type)`；数据表说明明确要求使用 `records[].title`，禁止在自定义列中重复定义 `type: "title"`。
+- MCP 成功写入后只增量刷新受影响页面和新增资源，避免外部写入被本机延迟保存覆盖，也不清空已有撤销历史。
+- 支持重新生成令牌；新服务成功启动后旧令牌立即失效。服务仍不开放删除、覆盖、移动或远程访问工具。
+- 工作区结构快照替换前会在同一 SQLite 事务中暂存应用级设置与 MCP 审计，重建后恢复 MCP 启用状态、端口和令牌；只恢复目标快照仍保留页面的审计记录。应用级设置不写入工作区 JSON。
+- JSON 完整备份保存工作区结构并会在同一数据目录内重建资源引用；媒体文件字节不在 JSON 中，跨设备迁移仍应使用页面包或同时迁移 `zhixi-assets`。
 
 验证情况：
 
-- 已通过相关前端测试：5 个文件、133 项。
-- 已通过 `npm run build`。
-- 已通过 `cargo check --manifest-path src-tauri/Cargo.toml`。
-- `cargo test --lib` 的测试宿主仍会出现 Windows `0xc0000139` 装载异常；已用同源独立程序完成 MCP 服务启动、Bearer 认证、Streamable HTTP `initialize`，以及 `create_page`、`append_content` 的真实 `tools/call` 写入验证。
+- 已按 red → green 新增客户端回执测试：修改前因缺少 `createdContent` 失败，修改后通过并核对六种内容类型。
+- 已按 red → green 新增错误定位测试：修改前错误不含内容项下标，修改后能返回 `content[1] (dataTable)`。
+- 已按 red → green 新增工具说明测试：修改前遗漏资产、record title 与回执核验规则，修改后通过。
+- 已通过 MCP 定向 Rust 测试：55 passed、0 failed。
+- 已按 red → green 新增工作区替换回归：修复前 MCP 应用设置变为 `None`、审计查询无记录；修复后 2 passed、0 failed，并经规格与代码质量审查。
+- 已通过完整前端测试：89 个测试文件、787 条测试；完整 Rust 测试：155 passed、0 failed；`npm run lint`：0 error、5 条既有 Hook warning；`npm run build` 通过。
+- 已完成真实 Chatbox 六类内容写入与知栖页面、原生数据表、白板、思维导图打开验收；`scripts/mcp-smoke-test.mjs` 的完整隔离实例复跑、令牌轮换与真实重启验收仍待桌面解锁后执行。
+- Windows release 可执行文件已构建为 `E:\BuildCache\cargo-target\zhixi\mcp-package\release\zhixi.exe`；NSIS/MSI 因官方下载 `nsis-3.11.zip` 两次超时而未生成，待网络恢复后重试。

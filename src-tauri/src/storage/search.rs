@@ -6,8 +6,7 @@ use serde_json::Value;
 use super::{
     error::StorageResult,
     models::{
-        DataTableRecord, PagePropertyDefinition, PageRecord, SearchResult,
-        SyncedBlockGroupRecord,
+        DataTableRecord, PagePropertyDefinition, PageRecord, SearchResult, SyncedBlockGroupRecord,
     },
 };
 
@@ -474,14 +473,19 @@ fn rich_text_relation_entries(block: &Value) -> Vec<SearchEntry> {
         return Vec::new();
     }
 
-    block.get("richText")
+    block
+        .get("richText")
         .and_then(Value::as_array)
         .map(|segments| {
             segments
                 .iter()
                 .enumerate()
                 .filter_map(|(index, segment)| {
-                    let text = segment.get("text").and_then(Value::as_str)?.trim().to_string();
+                    let text = segment
+                        .get("text")
+                        .and_then(Value::as_str)?
+                        .trim()
+                        .to_string();
                     let relation_kind = segment
                         .get("relationKind")
                         .and_then(Value::as_str)

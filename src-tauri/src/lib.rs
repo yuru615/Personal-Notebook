@@ -60,6 +60,7 @@ pub fn run() {
             storage::commands::save_app_settings,
             storage::commands::enable_local_mcp,
             storage::commands::disable_local_mcp,
+            storage::commands::regenerate_local_mcp_token,
             storage::commands::export_page_package,
             storage::commands::export_page_package_to_path,
             storage::commands::import_page_package,

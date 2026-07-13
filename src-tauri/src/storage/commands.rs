@@ -1,14 +1,13 @@
-use rand::{RngExt, distr::Alphanumeric};
+use rand::{distr::Alphanumeric, RngExt};
 use tauri::{async_runtime, AppHandle, Emitter, State};
 
 use crate::mcp::McpServerState;
 
 use super::{
     AppSettings, AssetMeta, BoardRecord, BootstrapPayload, DataTableRecord, DeleteResult,
-    ImportAssetFileInput, LoadedPage, MindmapRecord, PagePackageImportResult, PageRecord,
-    McpSettings, SaveResult, SearchResult, Storage, StorageError, StorageResult, StorageState,
-    WorkspaceArchiveProgress, WorkspaceSnapshot, WriteAssetInput,
-    WORKSPACE_ARCHIVE_PROGRESS_EVENT,
+    ImportAssetFileInput, LoadedPage, McpSettings, MindmapRecord, PagePackageImportResult,
+    PageRecord, SaveResult, SearchResult, Storage, StorageError, StorageResult, StorageState,
+    WorkspaceArchiveProgress, WorkspaceSnapshot, WriteAssetInput, WORKSPACE_ARCHIVE_PROGRESS_EVENT,
 };
 
 #[tauri::command]
@@ -90,6 +89,37 @@ pub async fn disable_local_mcp(
         settings.enabled = false;
     }
     state.with_storage(|storage| storage.save_app_settings(&app_settings))
+}
+
+#[tauri::command]
+pub async fn regenerate_local_mcp_token(
+    state: State<'_, StorageState>,
+    mcp: State<'_, McpServerState>,
+) -> StorageResult<McpSettings> {
+    let mut app_settings = state
+        .with_storage(|storage| storage.load_app_settings())?
+        .unwrap_or_default();
+    let previous = app_settings
+        .mcp
+        .clone()
+        .filter(|settings| settings.enabled)
+        .ok_or_else(|| StorageError::new("mcp_unavailable", "MCP server is not enabled"))?;
+    let mut settings = previous;
+    settings.port = 0;
+    settings.token = rand::rng()
+        .sample_iter(&Alphanumeric)
+        .take(48)
+        .map(char::from)
+        .collect();
+
+    mcp.apply(Some(&settings), state.inner().clone()).await?;
+    settings.port = mcp
+        .address()
+        .ok_or_else(|| StorageError::new("mcp_unavailable", "MCP server did not start"))?
+        .port();
+    app_settings.mcp = Some(settings.clone());
+    state.with_storage(|storage| storage.save_app_settings(&app_settings))?;
+    Ok(settings)
 }
 
 #[tauri::command]

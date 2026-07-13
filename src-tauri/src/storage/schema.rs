@@ -347,7 +347,11 @@ fn ensure_column(
     Ok(())
 }
 
-fn column_exists(connection: &Connection, table_name: &str, column_name: &str) -> StorageResult<bool> {
+fn column_exists(
+    connection: &Connection,
+    table_name: &str,
+    column_name: &str,
+) -> StorageResult<bool> {
     let mut statement = connection.prepare(&format!("PRAGMA table_info({table_name})"))?;
     let column_names = statement
         .query_map([], |row| row.get::<_, String>(1))?

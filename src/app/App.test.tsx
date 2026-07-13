@@ -2,8 +2,10 @@ import { StrictMode } from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { WorkspaceSnapshot } from '../domain/types'
+import type { AppSettings, McpSettings, WorkspaceSnapshot } from '../domain/types'
 import { createDefaultAppState } from '../components/dataTable/domain/factory'
+import { createAppSettingsRepository } from '../lib/appSettingsRepository'
+import type { WorkspaceStorageClient } from '../lib/storageClient'
 import type { WorkspaceRepository } from '../lib/workspaceRepository'
 import { createMemoryRepository } from '../test/memoryRepository'
 import { createWorkspaceStore } from '../store/createWorkspaceStore'
@@ -119,6 +121,55 @@ function selectEditableText(element: HTMLElement, start: number, end: number) {
   fireEvent.mouseUp(element)
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+
+  return { promise, resolve, reject }
+}
+
+function createMcpAppSettingsRepository(
+  enableLocalMcp: () => Promise<McpSettings>,
+  initialSettings: AppSettings | null = null,
+) {
+  const client = {
+    loadAppSettings: vi.fn(async () => initialSettings),
+    saveAppSettings: vi.fn(async () => undefined),
+    enableLocalMcp: vi.fn(enableLocalMcp),
+    disableLocalMcp: vi.fn(async () => undefined),
+  } as unknown as WorkspaceStorageClient
+
+  return {
+    client,
+    repository: createAppSettingsRepository({ client, isDesktop: true }),
+  }
+}
+
+function createMcpSettingsSnapshot(): WorkspaceSnapshot {
+  return {
+    boards: [],
+    dataTables: [],
+    mindmaps: [],
+    pages: [
+      {
+        id: 'page_mcp_settings',
+        parentId: null,
+        title: 'MCP 设置测试',
+        icon: null,
+        cover: null,
+        blocks: [],
+        createdAt: '2026-07-12T00:00:00.000Z',
+        updatedAt: '2026-07-12T00:00:00.000Z',
+      },
+    ],
+    settings: { lastOpenedPageId: 'page_mcp_settings' },
+  }
+}
+
 describe('App', () => {
   let scrollTo: ReturnType<typeof vi.spyOn>
 
@@ -211,7 +262,7 @@ describe('App', () => {
       configurable: true,
       value: {},
     })
-    let snapshot: WorkspaceSnapshot = {
+    const snapshot: WorkspaceSnapshot = {
       boards: [],
       dataTables: [],
       mindmaps: [],
@@ -231,33 +282,37 @@ describe('App', () => {
     }
     const repository: WorkspaceRepository = {
       load: async () => structuredClone(snapshot),
-      save: async (nextSnapshot) => {
-        snapshot = structuredClone(nextSnapshot)
-      },
-      replace: async (nextSnapshot) => {
-        snapshot = structuredClone(nextSnapshot)
-      },
+      save: async () => undefined,
+      replace: async () => undefined,
       cleanupOrphanAssets: async () => 0,
     }
 
     const store = createWorkspaceStore(repository)
+    const refreshMcpWorkspace = vi.spyOn(store.getState(), 'refreshMcpWorkspace')
     render(<App store={store} initialEntries={['/pages/page_mcp_refresh']} />)
 
     await screen.findByText('Before MCP')
     snapshot.pages[0]?.blocks.push({ id: 'block_from_mcp', type: 'paragraph', text: 'Saved by MCP' })
+    expect((await repository.load())?.pages[0]?.blocks).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'block_from_mcp' })]),
+    )
 
     await waitFor(() => {
       expect(tauriEvents.listen).toHaveBeenCalledWith('zhixi://mcp-workspace-updated', expect.any(Function))
     })
     const handler = tauriEvents.listen.mock.calls.find(
       ([eventName]) => eventName === 'zhixi://mcp-workspace-updated',
-    )?.[1] as ((event: { payload: { pageId: string; createdBlockIds: string[] } }) => Promise<void>) | undefined
+    )?.[1] as ((event: { payload: { operation: 'append_content'; pageId: string; createdBlockIds: string[] } }) => Promise<void>) | undefined
+
+    expect(handler).toBeDefined()
 
     await act(async () => {
-      await handler?.({ payload: { pageId: 'page_mcp_refresh', createdBlockIds: ['block_from_mcp'] } })
+      await handler?.({ payload: { operation: 'append_content', pageId: 'page_mcp_refresh', createdBlockIds: ['block_from_mcp'] } })
     })
 
-    expect(store.getState().pages[0]?.blocks).toEqual(
+    expect(refreshMcpWorkspace).toHaveBeenCalled()
+
+    expect(store.getState().pages.find((page) => page.id === 'page_mcp_refresh')?.blocks).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: 'block_from_mcp' })]),
     )
   })
@@ -399,6 +454,106 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: '设置中心' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '通用' })).toBeInTheDocument()
     expect(screen.queryByRole('complementary', { name: '侧边栏' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the MCP toggle pending when the settings center remounts', async () => {
+    const user = userEvent.setup()
+    const deferred = createDeferred<McpSettings>()
+    const appSettings = createMcpAppSettingsRepository(() => deferred.promise)
+    const store = createWorkspaceStore(
+      createMemoryRepository(createMcpSettingsSnapshot()),
+      appSettings.repository,
+    )
+
+    render(<App store={store} initialEntries={['/settings/experimental']} />)
+
+    const toggle = await screen.findByRole('checkbox', { name: /启用本机 MCP 接入/ })
+    await user.click(toggle)
+
+    expect(appSettings.client.enableLocalMcp).toHaveBeenCalledTimes(1)
+    expect(toggle).toBeDisabled()
+    expect(screen.getByText('正在启用本机 MCP 接入…')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '返回工作区' }))
+    await screen.findByDisplayValue('MCP 设置测试')
+    await user.click(screen.getByRole('button', { name: '更多' }))
+    await user.click(screen.getByRole('button', { name: '设置' }))
+    await user.click(await screen.findByRole('button', { name: '实验功能' }))
+
+    const remountedToggle = screen.getByRole('checkbox', { name: /启用本机 MCP 接入/ })
+    expect(remountedToggle).toBeDisabled()
+    expect(screen.getByText('正在启用本机 MCP 接入…')).toBeInTheDocument()
+
+    deferred.resolve({ enabled: true, port: 9761, token: 'private-token' })
+    await waitFor(() => expect(remountedToggle).toBeEnabled())
+  })
+
+  it('ignores a pending MCP rejection after the controlled config changes', async () => {
+    const user = userEvent.setup()
+    const deferred = createDeferred<McpSettings>()
+    const appSettings = createMcpAppSettingsRepository(() => deferred.promise)
+    const store = createWorkspaceStore(
+      createMemoryRepository(createMcpSettingsSnapshot()),
+      appSettings.repository,
+    )
+
+    render(<App store={store} initialEntries={['/settings/experimental']} />)
+
+    const toggle = await screen.findByRole('checkbox', { name: /启用本机 MCP 接入/ })
+    await user.click(toggle)
+    expect(toggle).toBeDisabled()
+
+    act(() => {
+      store.setState({
+        appSettings: {
+          closeAction: 'hide_to_tray',
+          mcp: { enabled: true, port: 9762, token: 'new-token' },
+        },
+      })
+    })
+
+    await waitFor(() => expect(toggle).toBeEnabled())
+
+    await act(async () => {
+      deferred.reject({ code: 'mcp_unavailable', message: 'old request failed' })
+      await deferred.promise.catch(() => undefined)
+    })
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(toggle).toBeChecked()
+  })
+
+  it('surfaces a real app-settings repository rejection and retries through the full settings chain', async () => {
+    const user = userEvent.setup()
+    const failure = { code: 'mcp_unavailable', message: 'MCP server did not start' }
+    let attempt = 0
+    const appSettings = createMcpAppSettingsRepository(async () => {
+      attempt += 1
+      if (attempt === 1) {
+        throw failure
+      }
+      return { enabled: true, port: 9761, token: 'private-token' }
+    })
+    const store = createWorkspaceStore(
+      createMemoryRepository(createMcpSettingsSnapshot()),
+      appSettings.repository,
+    )
+
+    render(<App store={store} initialEntries={['/settings/experimental']} />)
+
+    const toggle = await screen.findByRole('checkbox', { name: /启用本机 MCP 接入/ })
+    await user.click(toggle)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('启用失败，请稍后重试。')
+    expect(toggle).toBeEnabled()
+    expect(toggle).not.toBeChecked()
+
+    await user.click(toggle)
+
+    await waitFor(() => expect(toggle).toBeChecked())
+    expect(toggle).toBeEnabled()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(appSettings.client.enableLocalMcp).toHaveBeenCalledTimes(2)
   })
 
   it('returns to the workspace from the settings center', async () => {

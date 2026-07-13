@@ -37,6 +37,10 @@ pub struct WorkspaceSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inbox_page_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub welcome_page_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub welcome_guide_version: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sidebar_layout: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sidebar_width: Option<i64>,
@@ -46,6 +50,12 @@ pub struct WorkspaceSettings {
     pub clipboard_capture_mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub block_selection_start_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_open_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_defaults: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_preferences: Option<Value>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -309,6 +319,12 @@ pub struct AssetMeta {
     pub byte_size: i64,
     pub relative_path: String,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrackedAssetWrite {
+    pub meta: AssetMeta,
+    pub created: bool,
 }
 
 mod serde_bytes_vec {

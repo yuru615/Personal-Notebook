@@ -10,6 +10,7 @@ export interface AppSettingsRepository {
   save(settings: AppSettings): Promise<void>
   enableLocalMcp(): Promise<McpSettings>
   disableLocalMcp(): Promise<void>
+  regenerateLocalMcpToken(): Promise<McpSettings>
 }
 
 interface CreateAppSettingsRepositoryOptions {
@@ -61,6 +62,9 @@ export function createAppSettingsRepository({
       async disableLocalMcp() {
         throw new Error('Local MCP requires the desktop app')
       },
+      async regenerateLocalMcpToken() {
+        throw new Error('Local MCP requires the desktop app')
+      },
     }
   }
 
@@ -78,6 +82,9 @@ export function createAppSettingsRepository({
     },
     disableLocalMcp() {
       return resolvedClient.disableLocalMcp()
+    },
+    regenerateLocalMcpToken() {
+      return resolvedClient.regenerateLocalMcpToken()
     },
   }
 }

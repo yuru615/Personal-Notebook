@@ -66,6 +66,7 @@ export interface WorkspaceStorageClient {
   saveAppSettings(settings: AppSettings): Promise<void>
   enableLocalMcp(): Promise<McpSettings>
   disableLocalMcp(): Promise<void>
+  regenerateLocalMcpToken(): Promise<McpSettings>
   exportPagePackageToPath(
     pageId: string,
     path: string,
@@ -113,6 +114,10 @@ export function createTauriStorageClient(): WorkspaceStorageClient {
 
     disableLocalMcp() {
       return invoke<void>('disable_local_mcp')
+    },
+
+    regenerateLocalMcpToken() {
+      return invoke<McpSettings>('regenerate_local_mcp_token')
     },
 
     exportPagePackageToPath(pageId, path, onProgress) {
