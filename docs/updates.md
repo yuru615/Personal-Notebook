@@ -18,7 +18,8 @@
 验证情况：
 
 - 前端完整测试：797 passed、0 failed；Rust 完整测试：180 passed、0 failed；`npm run lint`：0 error、5 条既有 Hook warning。
-- 1.1.1 Windows 发布可执行程序已编译完成；NSIS 安装器下载官方打包组件时 GitHub 连接被重置。MSI 构建持续无响应后已停止，未生成安装器。网络恢复后重新运行 `npm run tauri:build:windows` 即可继续。
+- 1.1.1 Windows NSIS 安装包已成功生成，并已核对文件与产品版本均为 `1.1.1`；MSI 本次未构建。
+- NSIS 本地工具会复用 `E:\BuildCache\cargo-target\zhixi\mcp-package\.tauri\NSIS` 缓存，后续 NSIS 打包不再依赖 GitHub 下载。
 
 ## 2026-07-13 设置中心版本号
 
