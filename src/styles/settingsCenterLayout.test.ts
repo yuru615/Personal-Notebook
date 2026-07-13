@@ -21,6 +21,8 @@ describe('settings center layout', () => {
     expect(cssRule('.settings-center')).toContain('width: 100%;')
     expect(cssRule('.settings-center')).toContain('min-height: 100vh;')
     expect(cssRule('.settings-center-nav')).toContain('position: sticky;')
+    expect(cssRule('.settings-center-nav')).toContain('min-height: calc(100vh - 48px);')
+    expect(cssRule('.settings-center-version')).toContain('margin-top: auto;')
     expect(cssRule('.settings-center-panel')).toContain('min-width: 0;')
   })
 })

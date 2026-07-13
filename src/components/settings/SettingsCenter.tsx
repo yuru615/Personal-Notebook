@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { version as appVersion } from '../../../package.json'
 import type {
   AppCloseAction,
   AppSettings,
@@ -356,6 +357,7 @@ export function SettingsCenter({
             </button>
           ))}
         </div>
+        <div className="settings-center-version">版本 {appVersion}</div>
       </aside>
 
       <section className="settings-center-panel">

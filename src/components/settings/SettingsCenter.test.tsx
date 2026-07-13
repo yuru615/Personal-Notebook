@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
+import { version as appVersion } from '../../../package.json'
 import { SettingsCenter, type SettingsCenterProps } from './SettingsCenter'
 
 const originalClipboard = navigator.clipboard
@@ -248,6 +249,12 @@ it('shows a back-to-workspace action in the top-left area', async () => {
 
   await user.click(screen.getByRole('button', { name: '返回工作区' }))
   expect(onBackToWorkspace).toHaveBeenCalledTimes(1)
+})
+
+it('shows the installed app version at the bottom of the settings navigation', () => {
+  render(<SettingsCenter {...createProps()} />)
+
+  expect(screen.getByText(`版本 ${appVersion}`)).toBeInTheDocument()
 })
 
 it('renders MCP enablement pending state from its controlled operation', () => {
