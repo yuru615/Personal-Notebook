@@ -1260,11 +1260,11 @@ a {
 .settings-center-nav {
   position: sticky;
   top: 24px;
-  min-height: calc(100vh - 48px);
-  display: grid;
+  min-height: calc(100vh - 56px);
+  display: flex;
+  flex-direction: column;
   gap: 14px;
   align-self: start;
-  align-content: start;
 }
 
 .settings-back-button {
