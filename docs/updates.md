@@ -4,6 +4,22 @@
 
 ## 维护规则
 
+## 2026-07-13 1.1.1 Windows 发布
+
+简要描述：
+
+发布 1.1.1 Windows 安装包，并新增面向用户的版本更新日志。
+
+详细描述：
+
+- 应用前端、Tauri 配置与 Rust crate 版本统一为 `1.1.1`。
+- 新增根目录 `CHANGELOG.md`，汇总本版本新增、优化与修复；后续每次发布均需同步维护。
+
+验证情况：
+
+- 前端完整测试：797 passed、0 failed；Rust 完整测试：180 passed、0 failed；`npm run lint`：0 error、5 条既有 Hook warning。
+- 1.1.1 Windows 发布可执行程序已编译完成；NSIS 与 MSI 安装器均需要下载官方 Windows 打包组件，但当前 GitHub 连接被重置，暂未生成安装器。网络恢复后重新运行 `npm run tauri:build:windows` 即可继续。
+
 ## 2026-07-13 设置中心版本号
 
 提交：未提交
