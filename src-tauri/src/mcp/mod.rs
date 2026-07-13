@@ -53,7 +53,7 @@ impl McpServerState {
         Self {
             active: Arc::default(),
             workspace_updated: Some(Arc::new(move |payload| {
-                let _ = app_handle.emit("zhixi://mcp-workspace-updated", payload);
+                let _ = app_handle.emit("zhiqi://mcp-workspace-updated", payload);
             })),
         }
     }

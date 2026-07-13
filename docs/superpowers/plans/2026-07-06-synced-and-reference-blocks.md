@@ -893,7 +893,7 @@ pub const SCHEMA_VERSION: i64 = 4;
 Inside `initialize_schema`:
 
 ```rust
-CREATE TABLE IF NOT EXISTS zhixi_synced_block_groups (
+CREATE TABLE IF NOT EXISTS zhiqi_synced_block_groups (
   id TEXT PRIMARY KEY NOT NULL,
   blocks_json TEXT NOT NULL,
   primary_instance_id TEXT NOT NULL,
@@ -912,7 +912,7 @@ if current_version < 4 {
 fn migrate_to_v4(connection: &Connection) -> StorageResult<()> {
     connection.execute_batch(
         "
-        CREATE TABLE IF NOT EXISTS zhixi_synced_block_groups (
+        CREATE TABLE IF NOT EXISTS zhiqi_synced_block_groups (
           id TEXT PRIMARY KEY NOT NULL,
           blocks_json TEXT NOT NULL,
           primary_instance_id TEXT NOT NULL,
@@ -974,11 +974,11 @@ fn replace_synced_block_groups(
     groups: &[SyncedBlockGroupRecord],
 ) -> StorageResult<()> {
     self.connection
-        .execute("DELETE FROM zhixi_synced_block_groups", [])?;
+        .execute("DELETE FROM zhiqi_synced_block_groups", [])?;
 
     for group in groups {
         self.connection.execute(
-            "INSERT INTO zhixi_synced_block_groups
+            "INSERT INTO zhiqi_synced_block_groups
               (id, blocks_json, primary_instance_id, created_at, updated_at)
               VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
@@ -997,7 +997,7 @@ fn replace_synced_block_groups(
 fn load_synced_block_groups(&self) -> StorageResult<Vec<SyncedBlockGroupRecord>> {
     let mut statement = self.connection.prepare(
         "SELECT id, blocks_json, primary_instance_id, created_at, updated_at
-          FROM zhixi_synced_block_groups
+          FROM zhiqi_synced_block_groups
           ORDER BY created_at, id",
     )?;
 

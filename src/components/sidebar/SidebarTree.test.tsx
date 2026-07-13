@@ -1180,6 +1180,7 @@ describe('SidebarTree', () => {
       left: '192px',
       top: '208px',
     })
+    expect(popover?.parentElement).toBe(document.body)
 
     rectSpy.mockRestore()
     Object.defineProperty(window, 'innerWidth', {
@@ -1371,6 +1372,7 @@ describe('SidebarTree', () => {
       left: '212px',
       top: '52px',
     })
+    expect(popover?.parentElement).toBe(document.body)
 
     rectSpy.mockRestore()
     Object.defineProperty(window, 'innerWidth', {

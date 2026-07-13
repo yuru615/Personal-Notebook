@@ -466,7 +466,7 @@ it('wires the tray new-note event to the provided handler', async () => {
   let newNoteHandler: (() => Promise<void>) | null = null
 
   mocks.listen.mockImplementation(async (event, handler) => {
-    if (event === 'zhixi://tray-new-note') {
+    if (event === 'zhiqi://tray-new-note') {
       newNoteHandler = handler
     }
     return () => undefined
@@ -484,7 +484,7 @@ it('wires the tray open-inbox event to the provided handler', async () => {
   let openInboxHandler: (() => Promise<void>) | null = null
 
   mocks.listen.mockImplementation(async (event, handler) => {
-    if (event === 'zhixi://tray-open-inbox') {
+    if (event === 'zhiqi://tray-open-inbox') {
       openInboxHandler = handler
     }
     return () => undefined
@@ -582,8 +582,8 @@ Expected:
 In `src/lib/desktopLifecycle.ts`, add new event names and a tiny registrar:
 
 ```ts
-export const DESKTOP_TRAY_NEW_NOTE_EVENT = 'zhixi://tray-new-note'
-export const DESKTOP_TRAY_OPEN_INBOX_EVENT = 'zhixi://tray-open-inbox'
+export const DESKTOP_TRAY_NEW_NOTE_EVENT = 'zhiqi://tray-new-note'
+export const DESKTOP_TRAY_OPEN_INBOX_EVENT = 'zhiqi://tray-open-inbox'
 
 interface DesktopTrayHandlers {
   onNewNote: () => Promise<void> | void
@@ -736,8 +736,8 @@ const TRAY_SHOW_WINDOW_ID: &str = "show-window";
 const TRAY_NEW_NOTE_ID: &str = "new-note";
 const TRAY_OPEN_INBOX_ID: &str = "open-inbox";
 const TRAY_QUIT_APP_ID: &str = "quit-app";
-const FRONTEND_TRAY_NEW_NOTE_EVENT: &str = "zhixi://tray-new-note";
-const FRONTEND_TRAY_OPEN_INBOX_EVENT: &str = "zhixi://tray-open-inbox";
+const FRONTEND_TRAY_NEW_NOTE_EVENT: &str = "zhiqi://tray-new-note";
+const FRONTEND_TRAY_OPEN_INBOX_EVENT: &str = "zhiqi://tray-open-inbox";
 
 enum TrayMenuAction {
     ShowWindow,

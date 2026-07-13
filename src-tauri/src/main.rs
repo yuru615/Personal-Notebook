@@ -1,5 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    zhixi_lib::run()
+    zhiqi_lib::run()
 }

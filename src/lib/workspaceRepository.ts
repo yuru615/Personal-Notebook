@@ -31,7 +31,7 @@ interface CreateStorageWorkspaceRepositoryOptions {
   client?: WorkspaceStorageClient
 }
 
-const BROWSER_WORKSPACE_STORAGE_KEY = 'zhixi.workspace.snapshot.v1'
+const BROWSER_WORKSPACE_STORAGE_KEY = 'zhiqi.workspace.snapshot.v1'
 const ORPHAN_SYNCED_BLOCK_RECOVERY_PAGE_TITLE = '同步块恢复'
 
 function normalizeRepositorySnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {

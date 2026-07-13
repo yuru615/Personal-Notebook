@@ -179,8 +179,8 @@ bootstrap / snapshot 归一化时增加一个很小的修复规则：
 
 本轮沿用同一模式，新增两个桌面事件：
 
-- `zhixi://tray-new-note`
-- `zhixi://tray-open-inbox`
+- `zhiqi://tray-new-note`
+- `zhiqi://tray-open-inbox`
 
 Rust 侧负责：
 

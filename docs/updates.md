@@ -4,6 +4,37 @@
 
 ## 维护规则
 
+## 2026-07-13 Zhiqi 英文标识更新
+
+提交：未提交
+
+简要描述：
+
+将应用英文标识统一更新为 `zhiqi`，作为新的本地应用身份。
+
+详细描述：
+
+- npm 包、Rust crate、Tauri bundle identifier、运行时事件、剪贴板 MIME 类型、页面包标识和图标元数据均切换为 `zhiqi`。
+- SQLite 表和索引前缀、数据库文件、资源目录及浏览器 localStorage 键均采用新前缀，因此新版本不会自动读取旧版本的本地数据。
+
+## 2026-07-13 macOS Tauri 开发启动修复
+
+详细描述：
+
+- 将仅供 Windows 剪贴板与系统通知功能使用的 `windows` crate 移至 Windows 目标专属依赖，避免 macOS 开发构建编译 Windows 依赖链。
+
+## 2026-07-13 macOS 侧边栏菜单层级修复
+
+详细描述：
+
+- 页面操作菜单和顶部工具栏“更多”菜单通过 React Portal 渲染到 `document.body`，不再受侧边栏层叠上下文影响。
+
+## 2026-07-13 macOS Tauri 开发告警清理
+
+详细描述：
+
+- Windows 专属剪贴板实现及辅助类型限定为 Windows；macOS 保留无操作调用契约，消除开发构建告警。
+
 ## 2026-07-12 欢迎手册重复创建修复
 
 提交：未提交
@@ -525,7 +556,7 @@
 详细描述：
 
 - 新增文件系统媒体资产支持，让图片、视频、音频等资源由应用管理到本地资产目录。
-- 将数据库和资源路径统一到知栖命名，例如 `zhixi.db` 和 `zhixi-assets/`。
+- 将数据库和资源路径统一到知栖命名，例如 `zhiqi.db` 和 `zhiqi-assets/`。
 - 更新知栖应用图标，并补充 logo/icon 设计与实施文档。
 - 为 MediaBlock 增加单元测试和样式测试，覆盖媒体块基本显示和交互。
 - 新增孤立资源清理能力，减少无引用文件长期占用本地空间。
@@ -1533,4 +1564,4 @@
 - 已按 red → green 新增工作区替换回归：修复前 MCP 应用设置变为 `None`、审计查询无记录；修复后 2 passed、0 failed，并经规格与代码质量审查。
 - 已通过完整前端测试：89 个测试文件、787 条测试；完整 Rust 测试：155 passed、0 failed；`npm run lint`：0 error、5 条既有 Hook warning；`npm run build` 通过。
 - 已完成真实 Chatbox 六类内容写入与知栖页面、原生数据表、白板、思维导图打开验收；`scripts/mcp-smoke-test.mjs` 的完整隔离实例复跑、令牌轮换与真实重启验收仍待桌面解锁后执行。
-- Windows 1.1.0 release 可执行文件及安装包均已构建并核对：`知栖_1.1.0_x64-setup.exe`（NSIS）与 `知栖_1.1.0_x64_zh-CN.msi`（MSI）。
+- 采用新 `zhiqi` 应用标识的 Windows 1.1.0 release 可执行文件与 `知栖_1.1.0_x64-setup.exe`（NSIS）已重新构建并核对；MSI 在 NSIS 生成后超过本次打包时限，待后续单独补建。

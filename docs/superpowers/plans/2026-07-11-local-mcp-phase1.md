@@ -153,7 +153,7 @@ pub fn normalize_append_content(input: AppendContent) -> StorageResult<Vec<Value
 
 表格必须非空、所有行列数相同且单元格总数不超过 10,000。Markdown 使用 `pulldown-cmark` 的表格与任务列表扩展解析标题、段落、待办、无序/有序列表、代码块和 GFM 表格，并生成既有块 JSON；不支持的 Markdown 降级为段落文本。为每个块通过现有 ID 格式生成唯一 ID。
 
-在 schema 初始化中加入仅本机的 `zhixi_mcp_audit_log(id, created_at, client_name, tool_name, page_id, created_ids)` 表。实现 `search_pages`、`get_page`、`create_page` 与 `append_content`：搜索复用 `Storage::search_workspace` 并过滤为 page；写入在一个 `with_transaction` 内加载页面、追加全部块、更新时间、重建搜索索引并插入审计行。页面不存在时返回 `not_found`，不写入页面或审计记录。
+在 schema 初始化中加入仅本机的 `zhiqi_mcp_audit_log(id, created_at, client_name, tool_name, page_id, created_ids)` 表。实现 `search_pages`、`get_page`、`create_page` 与 `append_content`：搜索复用 `Storage::search_workspace` 并过滤为 page；写入在一个 `with_transaction` 内加载页面、追加全部块、更新时间、重建搜索索引并插入审计行。页面不存在时返回 `not_found`，不写入页面或审计记录。
 
 - [ ] **Step 4: 验证工具和原子性**
 
@@ -194,7 +194,7 @@ Expected: FAIL，MCP 设置控件不存在。
 {"url":"http://127.0.0.1:38472/mcp","headers":{"Authorization":"Bearer <token>"}}
 ```
 
-写入成功后 Rust 发出 `zhixi://mcp-workspace-updated`，payload 是 `{ pageId, createdBlockIds }`。`App.tsx` 订阅该事件：当前页重新加载，其他页使缓存失效。剪贴板写入失败显示明确错误。更新 README 的本机 MCP 配置和能力限制，更新 `docs/updates.md` 的详细验证记录。
+写入成功后 Rust 发出 `zhiqi://mcp-workspace-updated`，payload 是 `{ pageId, createdBlockIds }`。`App.tsx` 订阅该事件：当前页重新加载，其他页使缓存失效。剪贴板写入失败显示明确错误。更新 README 的本机 MCP 配置和能力限制，更新 `docs/updates.md` 的详细验证记录。
 
 - [ ] **Step 4: 运行完整验证**
 

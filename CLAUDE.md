@@ -36,7 +36,7 @@ This file provides guidance to Claude Code and Codex-style agents when working w
 
 ### 持久化走 Rust storage service
 
-桌面端业务读写集中在 `src-tauri/src/storage/`。Rust 侧通过 `rusqlite` 独占 SQLite 连接，数据库文件是 `zhixi.db`，大文件资产进入 app-managed `zhixi-assets/`，SQLite 只保存元数据和引用。前端通过 `src/lib/storageClient.ts` 调 typed Tauri commands，不直接发 SQL。
+桌面端业务读写集中在 `src-tauri/src/storage/`。Rust 侧通过 `rusqlite` 独占 SQLite 连接，数据库文件是 `zhiqi.db`，大文件资产进入 app-managed `zhiqi-assets/`，SQLite 只保存元数据和引用。前端通过 `src/lib/storageClient.ts` 调 typed Tauri commands，不直接发 SQL。
 
 核心表包括：
 

@@ -3,7 +3,7 @@ import { normalizeAppAccentTheme } from '../domain/theme'
 import { isDesktopRuntime } from './fileAccess'
 import { createTauriStorageClient, type WorkspaceStorageClient } from './storageClient'
 
-const BROWSER_APP_SETTINGS_STORAGE_KEY = 'zhixi.app.settings.v1'
+const BROWSER_APP_SETTINGS_STORAGE_KEY = 'zhiqi.app.settings.v1'
 
 export interface AppSettingsRepository {
   load(): Promise<AppSettings | null>

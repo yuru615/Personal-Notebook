@@ -119,7 +119,7 @@ where
         };
 
         connection.execute(
-            "INSERT INTO zhixi_assets
+            "INSERT INTO zhiqi_assets
               (id, sha256, name, mime_type, byte_size, relative_path, created_at)
               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
@@ -398,10 +398,10 @@ pub fn remove_asset_if_unreferenced(
     let result: StorageResult<bool> = (|| {
         let relative_path = connection
             .query_row(
-                "SELECT relative_path FROM zhixi_assets
+                "SELECT relative_path FROM zhiqi_assets
                   WHERE id = ?1
                     AND NOT EXISTS (
-                      SELECT 1 FROM zhixi_asset_refs WHERE asset_id = zhixi_assets.id
+                      SELECT 1 FROM zhiqi_asset_refs WHERE asset_id = zhiqi_assets.id
                     )",
                 [asset_id],
                 |row| row.get::<_, String>(0),
@@ -455,10 +455,10 @@ pub fn remove_asset_if_unreferenced(
         });
 
         let deleted = connection.execute(
-            "DELETE FROM zhixi_assets
+            "DELETE FROM zhiqi_assets
               WHERE id = ?1
                 AND NOT EXISTS (
-                  SELECT 1 FROM zhixi_asset_refs WHERE asset_id = zhixi_assets.id
+                  SELECT 1 FROM zhiqi_asset_refs WHERE asset_id = zhiqi_assets.id
                 )",
             [asset_id],
         )?;
@@ -629,7 +629,7 @@ pub fn read_asset(
 ) -> StorageResult<Vec<u8>> {
     let relative_path: String = connection
         .query_row(
-            "SELECT relative_path FROM zhixi_assets WHERE id = ?1",
+            "SELECT relative_path FROM zhiqi_assets WHERE id = ?1",
             [asset_id],
             |row| row.get(0),
         )
@@ -652,7 +652,7 @@ pub fn asset_file_path(
 ) -> StorageResult<PathBuf> {
     let relative_path: String = connection
         .query_row(
-            "SELECT relative_path FROM zhixi_assets WHERE id = ?1",
+            "SELECT relative_path FROM zhiqi_assets WHERE id = ?1",
             [asset_id],
             |row| row.get(0),
         )
@@ -677,7 +677,7 @@ pub fn load_assets_by_ids(
         let asset = connection
             .query_row(
                 "SELECT id, sha256, name, mime_type, byte_size, relative_path, created_at
-                  FROM zhixi_assets WHERE id = ?1",
+                  FROM zhiqi_assets WHERE id = ?1",
                 [asset_id],
                 |row| {
                     Ok(AssetMeta {
@@ -709,8 +709,8 @@ pub fn cleanup_orphan_assets(connection: &Connection, assets_dir: &Path) -> Stor
     }
 
     let mut statement = connection.prepare(
-        "SELECT id FROM zhixi_assets
-          WHERE id NOT IN (SELECT asset_id FROM zhixi_asset_refs)",
+        "SELECT id FROM zhiqi_assets
+          WHERE id NOT IN (SELECT asset_id FROM zhiqi_asset_refs)",
     )?;
     let asset_ids = statement
         .query_map([], |row| row.get::<_, String>(0))?
@@ -810,7 +810,7 @@ fn asset_path(assets_dir: &Path, relative_path: &str) -> StorageResult<PathBuf> 
 fn load_asset_by_sha(connection: &Connection, sha256: &str) -> StorageResult<Option<AssetMeta>> {
     let mut statement = connection.prepare(
         "SELECT id, sha256, name, mime_type, byte_size, relative_path, created_at
-          FROM zhixi_assets WHERE sha256 = ?1",
+          FROM zhiqi_assets WHERE sha256 = ?1",
     )?;
     let mut rows = statement.query([sha256])?;
 
@@ -881,7 +881,7 @@ mod tests {
     #[test]
     fn released_temp_ownership_does_not_delete_path_reused_by_another_write() {
         let directory = std::env::temp_dir().join(format!(
-            "zhixi-asset-temp-ownership-{}-{}",
+            "zhiqi-asset-temp-ownership-{}-{}",
             process::id(),
             now_millis()
         ));

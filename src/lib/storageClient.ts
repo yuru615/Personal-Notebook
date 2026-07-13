@@ -36,7 +36,7 @@ export interface PagePackageImportResult {
   rootPageId: string
 }
 
-export const WORKSPACE_ARCHIVE_PROGRESS_EVENT = 'zhixi://workspace-archive-progress'
+export const WORKSPACE_ARCHIVE_PROGRESS_EVENT = 'zhiqi://workspace-archive-progress'
 
 export type WorkspaceArchiveOperation = 'export' | 'import'
 export type WorkspaceArchiveProgressPhase =

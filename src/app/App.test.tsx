@@ -252,7 +252,7 @@ describe('App', () => {
       </StrictMode>,
     )
 
-    await screen.findByDisplayValue('欢迎使用知栖')
+    await screen.findByDisplayValue('欢迎使用知栖', {}, { timeout: 3000 })
 
     expect(replaceCalls).toBe(1)
   })

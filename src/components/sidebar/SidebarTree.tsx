@@ -1,4 +1,5 @@
 import { type ReactNode, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Bell, ChevronRight, Download, MoreHorizontal, Plus, Search, Upload } from 'lucide-react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useDismissableLayer } from '../editor/useDismissableLayer'
@@ -397,9 +398,28 @@ export function SidebarTree({
     )
   }
 
+  function renderPageMenuPopover(item: SidebarMenuItem) {
+    return createPortal(
+      <div
+        ref={menuRef}
+        className="page-menu-popover sidebar-tree-page-menu-popover"
+        style={{
+          position: 'fixed',
+          left: `${openMenuPosition?.left ?? 0}px`,
+          top: `${openMenuPosition?.top ?? 0}px`,
+          right: 'auto',
+          visibility: openMenuPosition ? 'visible' : 'hidden',
+        }}
+      >
+        {renderSidebarMenu(item)}
+      </div>,
+      document.body,
+    )
+  }
+
   function renderUtilityMenu(buttonClassName: string) {
     return (
-      <div className="sidebar-utility-menu" ref={isUtilityMenuOpen ? utilityMenuRef : null}>
+      <div className="sidebar-utility-menu">
         <button
           type="button"
           className={buttonClassName}
@@ -421,7 +441,7 @@ export function SidebarTree({
           <MoreHorizontal size={14} strokeWidth={1.9} />
           {buttonClassName.includes('sidebar-link') ? <span>{uiCopy.sidebar.more}</span> : null}
         </button>
-        {isUtilityMenuOpen ? (
+        {isUtilityMenuOpen ? createPortal(
           <div
             ref={utilityMenuRef}
             className="page-menu-popover sidebar-utility-menu-popover"
@@ -517,7 +537,8 @@ export function SidebarTree({
                 <span className="page-menu-item-label">{uiCopy.sidebar.classicMode}</span>
               </button>
             </div>
-          </div>
+          </div>,
+          document.body,
         ) : null}
       </div>
     )
@@ -778,21 +799,7 @@ export function SidebarTree({
                         >
                           <MoreHorizontal size={14} strokeWidth={1.9} />
                         </button>
-                        {isMenuOpen ? (
-                          <div
-                            ref={menuRef}
-                            className="page-menu-popover sidebar-tree-page-menu-popover"
-                            style={{
-                              position: 'fixed',
-                              left: `${openMenuPosition?.left ?? 0}px`,
-                              top: `${openMenuPosition?.top ?? 0}px`,
-                              right: 'auto',
-                              visibility: openMenuPosition ? 'visible' : 'hidden',
-                            }}
-                          >
-                            {renderSidebarMenu(item)}
-                          </div>
-                        ) : null}
+                        {isMenuOpen ? renderPageMenuPopover(item) : null}
                       </div>
                     </div>
                   ) : null}
@@ -912,21 +919,7 @@ export function SidebarTree({
                       >
                         <MoreHorizontal size={14} strokeWidth={1.9} />
                       </button>
-                      {isMenuOpen ? (
-                        <div
-                          ref={menuRef}
-                          className="page-menu-popover sidebar-tree-page-menu-popover"
-                          style={{
-                            position: 'fixed',
-                            left: `${openMenuPosition?.left ?? 0}px`,
-                            top: `${openMenuPosition?.top ?? 0}px`,
-                            right: 'auto',
-                            visibility: openMenuPosition ? 'visible' : 'hidden',
-                          }}
-                        >
-                          {renderSidebarMenu(pageMenuItem)}
-                        </div>
-                      ) : null}
+                      {isMenuOpen ? renderPageMenuPopover(pageMenuItem) : null}
                     </div>
                   </div>
                 ) : null}
@@ -993,21 +986,7 @@ export function SidebarTree({
                           >
                             <MoreHorizontal size={14} strokeWidth={1.9} />
                           </button>
-                          {isDataTableMenuOpen ? (
-                            <div
-                              ref={menuRef}
-                              className="page-menu-popover sidebar-tree-page-menu-popover"
-                              style={{
-                                position: 'fixed',
-                                left: `${openMenuPosition?.left ?? 0}px`,
-                                top: `${openMenuPosition?.top ?? 0}px`,
-                                right: 'auto',
-                                visibility: openMenuPosition ? 'visible' : 'hidden',
-                              }}
-                            >
-                              {renderSidebarMenu(dataTableMenuItem)}
-                            </div>
-                          ) : null}
+                          {isDataTableMenuOpen ? renderPageMenuPopover(dataTableMenuItem) : null}
                         </div>
                       </div>
                     ) : null}

@@ -2079,7 +2079,7 @@ mod tests {
     #[test]
     fn normalizes_base64_and_local_assets_without_retaining_the_source_path() {
         let local_path =
-            std::env::temp_dir().join(format!("zhixi-mcp-asset-{}-clip.mp4", std::process::id()));
+            std::env::temp_dir().join(format!("zhiqi-mcp-asset-{}-clip.mp4", std::process::id()));
         std::fs::write(&local_path, b"local-video").expect("writes local asset");
         let input: AppendContentInput = serde_json::from_value(json!({
             "pageId": "page_target",

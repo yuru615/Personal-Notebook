@@ -58,7 +58,7 @@ import type { PageRelationAutocompleteItem } from './PageRelationAutocomplete'
 import { createBlock } from '../../utils/blockFactory'
 import { createId } from '../../utils/id'
 
-const BLOCK_CLIPBOARD_MIME_TYPE = 'application/x-zhixi-blocks+json'
+const BLOCK_CLIPBOARD_MIME_TYPE = 'application/x-zhiqi-blocks+json'
 const blockTypes = new Set<BlockType>([
   'paragraph',
   'heading_1',

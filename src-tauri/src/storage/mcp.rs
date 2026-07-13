@@ -53,17 +53,17 @@ impl Storage {
             let mut page = self.load_page_record(&page_id)?;
             self.ensure_new_resources(&boards, &data_tables, &mindmaps)?;
 
-            let mut board_position = self.next_position("zhixi_boards");
+            let mut board_position = self.next_position("zhiqi_boards");
             for board in &boards {
                 self.insert_board(board, board_position)?;
                 board_position += 1;
             }
-            let mut data_table_position = self.next_position("zhixi_data_tables");
+            let mut data_table_position = self.next_position("zhiqi_data_tables");
             for data_table in &data_tables {
                 self.insert_data_table(data_table, data_table_position)?;
                 data_table_position += 1;
             }
-            let mut mindmap_position = self.next_position("zhixi_mindmaps");
+            let mut mindmap_position = self.next_position("zhiqi_mindmaps");
             for mindmap in &mindmaps {
                 self.insert_mindmap(mindmap, mindmap_position)?;
                 mindmap_position += 1;
@@ -80,7 +80,7 @@ impl Storage {
             let mut audit_ids = created_block_ids.clone();
             audit_ids.extend(created_object_ids.iter().cloned());
             self.connection.execute(
-                "INSERT INTO zhixi_mcp_audit_log (id, created_at, client_name, tool_name, page_id, created_ids_json)
+                "INSERT INTO zhiqi_mcp_audit_log (id, created_at, client_name, tool_name, page_id, created_ids_json)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 rusqlite::params![
                     audit_id,
@@ -270,7 +270,7 @@ mod tests {
         let audit: String = storage
             .connection
             .query_row(
-                "SELECT created_ids_json FROM zhixi_mcp_audit_log WHERE page_id = ?1",
+                "SELECT created_ids_json FROM zhiqi_mcp_audit_log WHERE page_id = ?1",
                 ["page_mcp_target"],
                 |row| row.get(0),
             )
@@ -288,7 +288,7 @@ mod tests {
             .connection
             .execute_batch(
                 "CREATE TRIGGER fail_mcp_mindmap_insert
-                   BEFORE INSERT ON zhixi_mindmaps
+                   BEFORE INSERT ON zhiqi_mindmaps
                    BEGIN SELECT RAISE(FAIL, 'forced mindmap failure'); END;",
             )
             .expect("install trigger");
@@ -301,7 +301,7 @@ mod tests {
         assert!(storage.load_mindmaps().expect("mindmaps").is_empty());
         let audit_count: i64 = storage
             .connection
-            .query_row("SELECT COUNT(*) FROM zhixi_mcp_audit_log", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM zhiqi_mcp_audit_log", [], |row| row.get(0))
             .expect("audit count");
         assert_eq!(audit_count, 0);
     }

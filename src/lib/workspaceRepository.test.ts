@@ -152,7 +152,7 @@ function normalizeExpectedSnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnapsh
 describe('createStorageWorkspaceRepository', () => {
   it('uses browser local storage when Tauri is unavailable', async () => {
     Reflect.deleteProperty(globalThis, '__TAURI_INTERNALS__')
-    window.localStorage.removeItem('zhixi.workspace.snapshot.v1')
+    window.localStorage.removeItem('zhiqi.workspace.snapshot.v1')
     const repository = createStorageWorkspaceRepository()
     const seed = createSeedWorkspace()
 
@@ -169,7 +169,7 @@ describe('createStorageWorkspaceRepository', () => {
     }
     await repository.save(nextSnapshot)
 
-    expect(JSON.parse(window.localStorage.getItem('zhixi.workspace.snapshot.v1') ?? 'null')).toEqual(
+    expect(JSON.parse(window.localStorage.getItem('zhiqi.workspace.snapshot.v1') ?? 'null')).toEqual(
       nextSnapshot,
     )
     await expect(repository.load()).resolves.toEqual(normalizeExpectedSnapshot(nextSnapshot))

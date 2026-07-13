@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createSeedWorkspace } from './seed'
 
 describe('createSeedWorkspace', () => {
-  it('includes a welcome page that introduces Zhixi and its first-use workflow', () => {
+  it('includes a welcome page that introduces Zhiqi and its first-use workflow', () => {
     const workspace = createSeedWorkspace()
     const welcomePage = workspace.pages.find((page) => page.title === '欢迎使用知栖')
 

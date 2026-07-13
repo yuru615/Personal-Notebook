@@ -951,10 +951,10 @@ pub const SCHEMA_VERSION: i64 = 2;
 Add a post-creation migration helper that runs:
 
 ```rust
-ALTER TABLE zhixi_page_contents ADD COLUMN properties_json TEXT NOT NULL DEFAULT '{}';
-ALTER TABLE zhixi_search_documents ADD COLUMN match_source TEXT NOT NULL DEFAULT 'body';
-ALTER TABLE zhixi_search_documents ADD COLUMN match_key TEXT;
-ALTER TABLE zhixi_search_documents ADD COLUMN source_label TEXT NOT NULL DEFAULT '正文';
+ALTER TABLE zhiqi_page_contents ADD COLUMN properties_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE zhiqi_search_documents ADD COLUMN match_source TEXT NOT NULL DEFAULT 'body';
+ALTER TABLE zhiqi_search_documents ADD COLUMN match_key TEXT;
+ALTER TABLE zhiqi_search_documents ADD COLUMN source_label TEXT NOT NULL DEFAULT '正文';
 ```
 
 Store shared property definitions in the existing settings table with a second row key:
@@ -969,7 +969,7 @@ In `src-tauri/src/storage/mod.rs`, add:
 ```rust
 fn save_page_properties(&self, definitions: &[PagePropertyDefinition]) -> StorageResult<()> {
     self.connection.execute(
-        "INSERT INTO zhixi_settings (id, record_json) VALUES (?1, ?2)
+        "INSERT INTO zhiqi_settings (id, record_json) VALUES (?1, ?2)
           ON CONFLICT(id) DO UPDATE SET record_json = excluded.record_json",
         params![PAGE_PROPERTIES_SETTINGS_ID, serde_json::to_string(definitions)?],
     )?;
@@ -979,7 +979,7 @@ fn save_page_properties(&self, definitions: &[PagePropertyDefinition]) -> Storag
 fn load_page_properties(&self) -> StorageResult<Vec<PagePropertyDefinition>> {
     self.connection
         .query_row(
-            "SELECT record_json FROM zhixi_settings WHERE id = ?1",
+            "SELECT record_json FROM zhiqi_settings WHERE id = ?1",
             [PAGE_PROPERTIES_SETTINGS_ID],
             |row| row.get::<_, String>(0),
         )
@@ -994,7 +994,7 @@ fn load_page_properties(&self) -> StorageResult<Vec<PagePropertyDefinition>> {
 Update page-content persistence to store both blocks and properties:
 
 ```rust
-"INSERT INTO zhixi_page_contents (page_id, blocks_json, properties_json) VALUES (?1, ?2, ?3)
+"INSERT INTO zhiqi_page_contents (page_id, blocks_json, properties_json) VALUES (?1, ?2, ?3)
   ON CONFLICT(page_id) DO UPDATE SET
     blocks_json = excluded.blocks_json,
     properties_json = excluded.properties_json"

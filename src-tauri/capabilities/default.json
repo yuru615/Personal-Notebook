@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default desktop permissions for Zhixi.",
+  "description": "Default desktop permissions for Zhiqi.",
   "windows": ["main"],
   "permissions": [
     "core:default",
