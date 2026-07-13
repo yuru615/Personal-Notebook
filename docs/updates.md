@@ -18,7 +18,7 @@
 验证情况：
 
 - 前端完整测试：797 passed、0 failed；Rust 完整测试：180 passed、0 failed；`npm run lint`：0 error、5 条既有 Hook warning。
-- 1.1.1 Windows 发布可执行程序已编译完成；NSIS 与 MSI 安装器均需要下载官方 Windows 打包组件，但当前 GitHub 连接被重置，暂未生成安装器。网络恢复后重新运行 `npm run tauri:build:windows` 即可继续。
+- 1.1.1 Windows 发布可执行程序已编译完成；NSIS 安装器下载官方打包组件时 GitHub 连接被重置。MSI 构建持续无响应后已停止，未生成安装器。网络恢复后重新运行 `npm run tauri:build:windows` 即可继续。
 
 ## 2026-07-13 设置中心版本号
 
