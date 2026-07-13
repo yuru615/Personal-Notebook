@@ -2996,15 +2996,17 @@
 
   function connectionGeometry(connection, fromNote, toNote) {
     const fromCenter = noteCenter(fromNote);
-    const fromSide = resolveConnectionSide(connection.fromSide, connection.fromAnchor);
-    const toSide = resolveConnectionSide(connection.toSide, connection.toAnchor);
+    const fromAnchor = resolveObjectAnchor(fromNote, connection.fromAnchor);
+    const toAnchor = resolveObjectAnchor(toNote, connection.toAnchor);
+    const fromSide = fromAnchor && !normalizeSide(connection.fromSide) ? null : resolveConnectionSide(connection.fromSide, connection.fromAnchor);
+    const toSide = toAnchor && !normalizeSide(connection.toSide) ? null : resolveConnectionSide(connection.toSide, connection.toAnchor);
     const start =
+      fromAnchor ||
       (fromSide ? sidePoint(fromNote, fromSide) : null) ||
-      resolveObjectAnchor(fromNote, connection.fromAnchor) ||
       edgePoint(fromNote, noteCenter(toNote));
     const end =
+      toAnchor ||
       (toSide ? sidePoint(toNote, toSide) : null) ||
-      resolveObjectAnchor(toNote, connection.toAnchor) ||
       edgePoint(toNote, start || fromCenter);
     if (!start || !end) return null;
     return connectionPathGeometry(start, end, connection.mode, fromSide, toSide);

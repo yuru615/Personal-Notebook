@@ -257,7 +257,7 @@ describe('App', () => {
     expect(replaceCalls).toBe(1)
   })
 
-  it('reloads the open page when the local MCP service reports a write', async () => {
+  it('reloads the parent page when the local MCP service creates a child page', async () => {
     Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
       configurable: true,
       value: {},
@@ -268,7 +268,7 @@ describe('App', () => {
       mindmaps: [],
       pages: [
         {
-          id: 'page_mcp_refresh',
+          id: 'page_mcp_parent',
           parentId: null,
           title: 'MCP note',
           icon: null,
@@ -289,32 +289,50 @@ describe('App', () => {
 
     const store = createWorkspaceStore(repository)
     const refreshMcpWorkspace = vi.spyOn(store.getState(), 'refreshMcpWorkspace')
-    render(<App store={store} initialEntries={['/pages/page_mcp_refresh']} />)
+    render(<App store={store} initialEntries={['/pages/page_mcp_parent']} />)
 
     await screen.findByText('Before MCP')
-    snapshot.pages[0]?.blocks.push({ id: 'block_from_mcp', type: 'paragraph', text: 'Saved by MCP' })
+    snapshot.pages[0]?.blocks.push({ id: 'block_mcp_child', type: 'child_page', pageId: 'page_mcp_child' })
+    snapshot.pages.push({
+      id: 'page_mcp_child',
+      parentId: 'page_mcp_parent',
+      title: 'Child page',
+      icon: null,
+      cover: null,
+      blocks: [],
+      createdAt: '2026-07-11T00:00:00.000Z',
+      updatedAt: '2026-07-11T00:00:00.000Z',
+    })
     expect((await repository.load())?.pages[0]?.blocks).toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: 'block_from_mcp' })]),
+      expect.arrayContaining([expect.objectContaining({ id: 'block_mcp_child' })]),
     )
 
     await waitFor(() => {
-      expect(tauriEvents.listen).toHaveBeenCalledWith('zhixi://mcp-workspace-updated', expect.any(Function))
+      expect(tauriEvents.listen).toHaveBeenCalledWith('zhiqi://mcp-workspace-updated', expect.any(Function))
     })
     const handler = tauriEvents.listen.mock.calls.find(
-      ([eventName]) => eventName === 'zhixi://mcp-workspace-updated',
-    )?.[1] as ((event: { payload: { operation: 'append_content'; pageId: string; createdBlockIds: string[] } }) => Promise<void>) | undefined
+      ([eventName]) => eventName === 'zhiqi://mcp-workspace-updated',
+    )?.[1] as ((event: { payload: { operation: 'create_page'; pageId: string; parentId: string; createdPageIds: string[] } }) => Promise<void>) | undefined
 
     expect(handler).toBeDefined()
 
     await act(async () => {
-      await handler?.({ payload: { operation: 'append_content', pageId: 'page_mcp_refresh', createdBlockIds: ['block_from_mcp'] } })
+      await handler?.({
+        payload: {
+          operation: 'create_page',
+          pageId: 'page_mcp_child',
+          parentId: 'page_mcp_parent',
+          createdPageIds: ['page_mcp_child'],
+        },
+      })
     })
 
     expect(refreshMcpWorkspace).toHaveBeenCalled()
 
-    expect(store.getState().pages.find((page) => page.id === 'page_mcp_refresh')?.blocks).toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: 'block_from_mcp' })]),
+    expect(store.getState().pages.find((page) => page.id === 'page_mcp_parent')?.blocks).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'block_mcp_child' })]),
     )
+    expect(store.getState().pages.some((page) => page.id === 'page_mcp_child')).toBe(true)
   })
 
   it('flushes pending saves when the page is being hidden', async () => {

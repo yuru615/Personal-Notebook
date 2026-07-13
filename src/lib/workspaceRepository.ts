@@ -8,9 +8,13 @@ import { createTauriStorageClient, type WorkspaceStorageClient } from './storage
 
 export interface WorkspaceRepository {
   load(): Promise<WorkspaceSnapshot | null>
-  save(snapshot: WorkspaceSnapshot): Promise<void>
+  save(snapshot: WorkspaceSnapshot, options?: WorkspaceSaveOptions): Promise<void>
   replace(snapshot: WorkspaceSnapshot): Promise<void>
   cleanupOrphanAssets(): Promise<number>
+}
+
+export interface WorkspaceSaveOptions {
+  expectedBoardUpdatedAts?: Record<string, string>
 }
 
 export async function ensureSnapshot(
@@ -87,7 +91,7 @@ export function createStorageWorkspaceRepository({
       return normalizedSnapshot
     },
 
-    async save(snapshot) {
+    async save(snapshot, options) {
       return queueWrite(async () => {
         const persistedSnapshot = await client.exportWorkspaceBackup()
         const nextSnapshot = {
@@ -98,15 +102,26 @@ export function createStorageWorkspaceRepository({
             snapshot.syncedBlockGroups ?? persistedSnapshot?.syncedBlockGroups ?? [],
           pageProperties: snapshot.pageProperties ?? persistedSnapshot?.pageProperties ?? [],
         }
+        const expectedBoardUpdatedAts = mergeExpectedBoardUpdatedAts(
+          persistedSnapshot,
+          nextSnapshot,
+          options?.expectedBoardUpdatedAts,
+        )
+        const saveOptions = { expectedBoardUpdatedAts: expectedBoardUpdatedAts ?? {} }
 
         if (persistedSnapshot && canSaveIncrementally(persistedSnapshot, nextSnapshot)) {
-          const savedIncrementally = await saveChangedRecords(client, persistedSnapshot, nextSnapshot)
+          const savedIncrementally = await saveChangedRecords(
+            client,
+            persistedSnapshot,
+            nextSnapshot,
+            saveOptions,
+          )
           if (savedIncrementally) {
             return
           }
         }
 
-        await client.replaceWorkspaceBackup(nextSnapshot)
+        await client.replaceWorkspaceBackup(nextSnapshot, saveOptions.expectedBoardUpdatedAts)
       })
     },
 
@@ -120,6 +135,26 @@ export function createStorageWorkspaceRepository({
       return queueWrite(() => client.cleanupOrphanAssets())
     },
   }
+}
+
+function mergeExpectedBoardUpdatedAts(
+  persistedSnapshot: WorkspaceSnapshot | null,
+  nextSnapshot: WorkspaceSnapshot,
+  explicit: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  const persistedBoards = new Map(
+    (persistedSnapshot?.boards ?? []).map((board) => [board.id, board]),
+  )
+  const derived = Object.fromEntries(
+    nextSnapshot.boards.flatMap((board) => {
+      const persisted = persistedBoards.get(board.id)
+      return persisted && JSON.stringify(persisted) !== JSON.stringify(board)
+        ? [[board.id, board.updatedAt]]
+        : []
+    }),
+  )
+  const merged = { ...derived, ...explicit }
+  return Object.keys(merged).length > 0 ? merged : undefined
 }
 
 function createBrowserWorkspaceRepository(): WorkspaceRepository {
@@ -160,6 +195,7 @@ async function saveChangedRecords(
   client: WorkspaceStorageClient,
   previous: RequiredWorkspaceSnapshot,
   next: RequiredWorkspaceSnapshot,
+  options?: WorkspaceSaveOptions,
 ): Promise<boolean> {
   const pagePropertiesChanged =
     JSON.stringify(previous.pageProperties) !== JSON.stringify(next.pageProperties)
@@ -199,7 +235,10 @@ async function saveChangedRecords(
   }
 
   if (changedBoards[0]) {
-    await client.saveBoard(changedBoards[0])
+    await client.saveBoard(
+      changedBoards[0],
+      options?.expectedBoardUpdatedAts?.[changedBoards[0].id],
+    )
     return true
   }
 

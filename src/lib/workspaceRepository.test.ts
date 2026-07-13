@@ -8,12 +8,15 @@ import { createStorageWorkspaceRepository, ensureSnapshot } from './workspaceRep
 function createRepository() {
   let snapshot: WorkspaceSnapshot | null = null
   const calls: string[] = []
+  const boardSaveExpectedUpdatedAts: Array<string | undefined> = []
+  const replaceExpectedBoardUpdatedAts: Array<Record<string, string> | undefined> = []
   const client: WorkspaceStorageClient = {
     async exportWorkspaceBackup() {
       return snapshot ? structuredClone(snapshot) : null
     },
-    async replaceWorkspaceBackup(nextSnapshot) {
+    async replaceWorkspaceBackup(nextSnapshot, expectedBoardUpdatedAts) {
       calls.push('replaceWorkspaceBackup')
+      replaceExpectedBoardUpdatedAts.push(expectedBoardUpdatedAts)
       snapshot = structuredClone(nextSnapshot)
     },
     async exportPagePackageToPath() {
@@ -40,8 +43,9 @@ function createRepository() {
         ),
       }
     },
-    async saveBoard(board) {
+    async saveBoard(board, expectedUpdatedAt) {
       calls.push(`saveBoard:${board.id}`)
+      boardSaveExpectedUpdatedAts.push(expectedUpdatedAt)
     },
     async saveDataTable(dataTable) {
       calls.push(`saveDataTable:${dataTable.id}`)
@@ -72,6 +76,11 @@ function createRepository() {
 
   return {
     calls,
+    boardSaveExpectedUpdatedAts,
+    replaceExpectedBoardUpdatedAts,
+    setSnapshot(nextSnapshot: WorkspaceSnapshot | null) {
+      snapshot = nextSnapshot ? structuredClone(nextSnapshot) : null
+    },
     repository: createStorageWorkspaceRepository({ client }),
   }
 }
@@ -500,6 +509,129 @@ describe('createStorageWorkspaceRepository', () => {
 
     expect(calls).toEqual(['savePage:page_1'])
     await expect(repository.load()).resolves.toEqual(next)
+  })
+
+  it('forwards the expected board version during an incremental board save', async () => {
+    const { calls, boardSaveExpectedUpdatedAts, repository } = createRepository()
+    const original = createSnapshot()
+    const next: WorkspaceSnapshot = {
+      ...original,
+      boards: [
+        {
+          ...original.boards[0]!,
+          title: 'Updated board',
+          updatedAt: '2026-07-13T00:00:00.000Z',
+        },
+      ],
+    }
+
+    await repository.replace(original)
+    calls.length = 0
+    await repository.save(next, {
+      expectedBoardUpdatedAts: {
+        board_1: original.boards[0]!.updatedAt,
+      },
+    })
+
+    expect(calls).toEqual(['saveBoard:board_1'])
+    expect(boardSaveExpectedUpdatedAts).toEqual([original.boards[0]!.updatedAt])
+  })
+
+  it('forwards expected board versions when multiple changes require a full replace', async () => {
+    const { calls, replaceExpectedBoardUpdatedAts, repository } = createRepository()
+    const original = createSnapshot()
+    const next: WorkspaceSnapshot = {
+      ...original,
+      boards: [
+        {
+          ...original.boards[0]!,
+          title: 'Updated board',
+          updatedAt: '2026-07-13T00:00:00.000Z',
+        },
+      ],
+      pages: [
+        {
+          ...original.pages[0],
+          title: 'Updated page',
+        },
+      ],
+    }
+    const expectedBoardUpdatedAts = { board_1: original.boards[0]!.updatedAt }
+
+    await repository.replace(original)
+    calls.length = 0
+    replaceExpectedBoardUpdatedAts.length = 0
+    await repository.save(next, { expectedBoardUpdatedAts })
+
+    expect(calls).toEqual(['replaceWorkspaceBackup'])
+    expect(replaceExpectedBoardUpdatedAts).toEqual([expectedBoardUpdatedAts])
+  })
+
+  it('derives expected versions for stale boards when a page change falls back to full replace', async () => {
+    const { calls, replaceExpectedBoardUpdatedAts, repository, setSnapshot } = createRepository()
+    const original = createSnapshot()
+    const staleIncoming: WorkspaceSnapshot = {
+      ...original,
+      pages: [
+        {
+          ...original.pages[0],
+          title: 'Pending page change',
+        },
+      ],
+    }
+    const mcpSnapshot: WorkspaceSnapshot = {
+      ...original,
+      boards: [
+        {
+          ...original.boards[0]!,
+          snapshot: { shapes: [{ id: 'mcp-node' }] },
+          updatedAt: '2026-07-13T00:00:00.000Z',
+        },
+      ],
+    }
+
+    await repository.replace(original)
+    setSnapshot(mcpSnapshot)
+    calls.length = 0
+    replaceExpectedBoardUpdatedAts.length = 0
+    await repository.save(staleIncoming)
+
+    expect(calls).toEqual(['replaceWorkspaceBackup'])
+    expect(replaceExpectedBoardUpdatedAts).toEqual([
+      { board_1: original.boards[0]!.updatedAt },
+    ])
+  })
+
+  it('keeps the MCP revision guard when a stale page save has no changed board', async () => {
+    const { calls, replaceExpectedBoardUpdatedAts, repository, setSnapshot } = createRepository()
+    const original = createSnapshot()
+    const staleIncoming: WorkspaceSnapshot = {
+      ...original,
+      pages: [{ ...original.pages[0], title: 'Pending page change' }],
+    }
+    const mcpSnapshot: WorkspaceSnapshot = {
+      ...original,
+      settings: { ...original.settings, mcpRevision: 1 },
+      pages: [
+        ...original.pages,
+        {
+          ...original.pages[0],
+          id: 'page_mcp_child',
+          parentId: 'page_1',
+          title: 'MCP child',
+          blocks: [],
+        },
+      ],
+    }
+
+    await repository.replace(original)
+    setSnapshot(mcpSnapshot)
+    calls.length = 0
+    replaceExpectedBoardUpdatedAts.length = 0
+    await repository.save(staleIncoming)
+
+    expect(calls).toEqual(['replaceWorkspaceBackup'])
+    expect(replaceExpectedBoardUpdatedAts).toEqual([{}])
   })
 
   it('falls back to a full replace when one save changes multiple record groups', async () => {

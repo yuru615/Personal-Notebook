@@ -88,14 +88,14 @@ npm run dev
 
 ## 🤖 本机 AI / MCP 接入
 
-知栖桌面版可启动仅监听 `127.0.0.1` 的 Streamable HTTP MCP 服务。获得令牌的本机 AI 客户端可以搜索、读取和创建页面，并向页面原子写入 Markdown、普通表格、图片/视频/音频/附件、数据表、白板和思维导图。
+知栖桌面版可启动仅监听 `127.0.0.1` 的 Streamable HTTP MCP 服务。获得令牌的本机 AI 客户端可以搜索、读取和创建页面，并向页面原子写入 Markdown、普通表格、图片/视频/音频/附件、数据表、白板和思维导图；创建子页面时会同步在父页面追加对应的子页面块。
 
 ### 在 Chatbox 或 Cherry Studio 中配置
 
 1. 打开知栖“设置”，启用“本机 MCP 接入”。
 2. 点击“复制 MCP 配置”。复制内容已经包含当前端口和 Bearer 令牌，不需要手工拼接。
 3. 在 Chatbox 或 Cherry Studio 的 MCP 设置中新增或导入服务，粘贴配置并刷新工具列表。
-4. 确认客户端能看到 `search_pages`、`get_page`、`create_page`、`append_content` 四个工具。
+4. 确认客户端能看到 `search_pages`、`get_page`、`create_page`、`append_content`、`get_whiteboard`、`update_whiteboard` 六个工具。
 
 复制出的配置使用下面的标准结构（占位符不是实际值）：
 
@@ -112,6 +112,17 @@ npm run dev
   }
 }
 ```
+
+### 页面与白板工具
+
+- `search_pages` 搜索页面；`get_page(pageId)` 读取页面；`create_page` 创建页面。传入 `parentId` 创建子页面时，知栖会在同一事务中把 `child_page` 块追加到父页面，并在回执中返回 `parentBlockId`。
+- `append_content` 只用于向页面原子追加内容；其中的 `whiteboard` 项用于新建白板。
+- `get_whiteboard(boardId)` 返回白板标题和完整快照。AI 在引用元素或擦除前应先读取快照。
+- `update_whiteboard(boardId, nodes?, edges?, strokes?, eraseIds?)` 仅作增量追加或局部擦除，不支持整板覆盖或清空。至少提供一种新增内容或 `eraseIds`。
+
+白板节点使用 `nodes`：`kind` 可为 `rect`、`ellipse`、`diamond`、`triangle`、`note`、`text`；每个节点必须提供 `id` 和 `text`，并可指定 `x`、`y`、`w`、`h`、`color`、`size`、`z`。流程图和架构图可通过 `edges` 指定 `from`、`to`、`fromSide`、`toSide`（`n`/`e`/`s`/`w`）、精确锚点 `fromAnchor`/`toAnchor`、`mode`（`straight` 或 `curve`）、起止标记、颜色和线宽。`strokes` 是画笔权限，写入 `id`、`color`、`size` 和坐标 `points`；`eraseIds` 是橡皮擦权限，可擦除形状、便签、文本、连线和笔画，擦除节点会级联删除关联连线。
+
+同一白板内的节点、连线和笔画 ID 必须全局唯一。历史图片可以作为连线已有端点，但目前 MCP 不新增或擦除图片；指定不存在、不可擦除或重复的 `eraseIds` 时，整次更新会以 `invalid_payload` 回滚，不写入快照或审计记录。
 
 ### `append_content` 完整批次规则
 
@@ -153,7 +164,7 @@ npm run dev
 ### 安全与排障
 
 - 令牌等同于对当前知栖工作区的本机写入权限。不要把完整配置粘贴到聊天、截图、日志或公开仓库。
-- 服务不接受局域网或公网连接，也不提供删除、覆盖和移动工具。
+- 服务不接受局域网或公网连接，也不提供页面删除、整页覆盖和移动工具；仅 `update_whiteboard` 允许受限的元素擦除。
 - 点击“重新生成令牌”后，旧令牌立即失效；所有 AI 客户端都要重新粘贴配置。
 - 客户端看不到工具时，先确认知栖仍在运行、MCP 已启用，再刷新客户端工具列表；更新知栖后建议重启客户端，使其重新读取工具描述和 schema。
 - 出现 `401` 表示令牌缺失或已失效；出现 `content[n]` 错误时按提示修正第 `n` 项，并重发完整批次。

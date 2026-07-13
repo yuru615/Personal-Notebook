@@ -82,6 +82,31 @@ function loadConnectionHitTest() {
   ) => boolean
 }
 
+function loadConnectionGeometry() {
+  const factory = new Function(
+    [
+      extractFunction(legacyAppScript, 'clamp'),
+      extractFunction(legacyAppScript, 'normalizeSide'),
+      extractFunction(legacyAppScript, 'normalizeAnchor'),
+      extractFunction(legacyAppScript, 'noteCenter'),
+      extractFunction(legacyAppScript, 'sidePoint'),
+      extractFunction(legacyAppScript, 'resolveConnectionSide'),
+      extractFunction(legacyAppScript, 'resolveObjectAnchor'),
+      extractFunction(legacyAppScript, 'edgePoint'),
+      extractFunction(legacyAppScript, 'sideVector'),
+      extractFunction(legacyAppScript, 'connectionPathGeometry'),
+      extractFunction(legacyAppScript, 'connectionGeometry'),
+      'return connectionGeometry;',
+    ].join('\n\n'),
+  )
+
+  return factory() as (
+    connection: Record<string, unknown>,
+    from: { x: number; y: number; w: number; h: number },
+    to: { x: number; y: number; w: number; h: number },
+  ) => { start: { x: number; y: number }; end: { x: number; y: number } }
+}
+
 describe('legacy connection geometry', () => {
   it('keeps fixed left-to-right tangents even when endpoints swap vertically', () => {
     const connectionPathGeometry = loadConnectionPathGeometry()
@@ -114,5 +139,28 @@ describe('legacy connection geometry', () => {
         6,
       ),
     ).toBe(true)
+  })
+
+  it('uses explicit anchors as the rendered connection endpoints when sides are null', () => {
+    const connectionGeometry = loadConnectionGeometry()
+
+    expect(
+      connectionGeometry(
+        {
+          from: 'from',
+          to: 'to',
+          fromSide: null,
+          toSide: null,
+          fromAnchor: { x: 0.25, y: 1 },
+          toAnchor: { x: 0.75, y: 0 },
+          mode: 'straight',
+        },
+        { x: 20, y: 40, w: 200, h: 100 },
+        { x: 500, y: 300, w: 160, h: 120 },
+      ),
+    ).toEqual({
+      start: { x: 70, y: 140 },
+      end: { x: 620, y: 300 },
+    })
   })
 })

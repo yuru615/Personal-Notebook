@@ -91,8 +91,10 @@ interface CreatePageOptions {
 }
 
 export interface McpWorkspaceUpdate {
-  operation?: 'append_content' | 'create_page'
+  operation?: 'append_content' | 'create_page' | 'update_whiteboard'
   pageId?: string
+  parentId?: string | null
+  boardId?: string
   createdPageIds?: string[]
   createdObjectIds?: string[]
 }
@@ -1641,6 +1643,16 @@ export function createWorkspaceStore(
       const nextDataTables = nextAssets.dataTables ?? state.dataTables
       const nextMindmaps = nextAssets.mindmaps ?? state.mindmaps
       const persistVersion = ++nonPageAssetsPersistVersion
+      const expectedBoardUpdatedAts = nextAssets.boards
+        ? Object.fromEntries(
+            nextBoards.flatMap((board) => {
+              const previous = state.boards.find((item) => item.id === board.id)
+              return previous && JSON.stringify(previous) !== JSON.stringify(board)
+                ? [[board.id, previous.updatedAt]]
+                : []
+            }),
+          )
+        : undefined
       set({
         boards: nextBoards,
         dataTables: nextDataTables,
@@ -1650,15 +1662,18 @@ export function createWorkspaceStore(
 
       const persistTask = nonPageAssetsPersistQueue.then(() => {
         const latestState = get()
-        return repository.save({
-          boards: nextBoards,
-          dataTables: nextDataTables,
-          mindmaps: nextMindmaps,
-          syncedBlockGroups: latestState.syncedBlockGroups,
-          pages: latestState.pages,
-          pageProperties: latestState.pageProperties,
-          settings: latestState.settings,
-        })
+        return repository.save(
+          {
+            boards: nextBoards,
+            dataTables: nextDataTables,
+            mindmaps: nextMindmaps,
+            syncedBlockGroups: latestState.syncedBlockGroups,
+            pages: latestState.pages,
+            pageProperties: latestState.pageProperties,
+            settings: latestState.settings,
+          },
+          { expectedBoardUpdatedAts },
+        )
       })
       nonPageAssetsPersistQueue = persistTask.catch(() => undefined)
 
@@ -1976,12 +1991,16 @@ export function createWorkspaceStore(
     },
 
     refreshMcpWorkspace: async (update) => {
+      try {
+        await flushPendingSaves()
+      } catch {
+        // A conflicting local save must not block the MCP snapshot refresh.
+      }
       const snapshot = await repository.load()
       if (!snapshot) {
         return
       }
-      await flushPendingSaves()
-      const pageIds = new Set([update.pageId, ...(update.createdPageIds ?? [])].filter(Boolean))
+      const pageIds = new Set([update.pageId, update.parentId, ...(update.createdPageIds ?? [])].filter(Boolean))
       const byId = <T extends { id: string }>(current: T[], incoming: T[]) => {
         const incomingById = new Map(incoming.map((item) => [item.id, item]))
         const next = current.map((item) => incomingById.get(item.id) ?? item)
@@ -2008,6 +2027,7 @@ export function createWorkspaceStore(
         boards: byId(state.boards, snapshot.boards),
         dataTables: byId(state.dataTables, snapshot.dataTables ?? []),
         mindmaps: byId(state.mindmaps, snapshot.mindmaps ?? []),
+        settings: snapshot.settings,
       }))
     },
 

@@ -2139,6 +2139,151 @@ describe('createWorkspaceStore autosave', () => {
     expect(snapshot?.dataTables?.[0]?.title).toBe('新数据表')
   })
 
+  it('flushes a queued local save before loading the MCP workspace update', async () => {
+    const workspace = createWorkspace()
+    workspace.boards = [
+      {
+        id: 'board_mcp_refresh',
+        title: '旧白板',
+        snapshot: { shapes: [] },
+        createdAt: '2026-07-12T00:00:00.000Z',
+        updatedAt: '2026-07-12T00:00:00.000Z',
+      },
+    ]
+    let snapshot: WorkspaceSnapshot | null = structuredClone(workspace)
+    const calls: string[] = []
+    let resolveSaveStarted!: () => void
+    let resolveSave!: () => void
+    const saveStarted = new Promise<void>((resolve) => {
+      resolveSaveStarted = resolve
+    })
+    const saveDone = new Promise<void>((resolve) => {
+      resolveSave = resolve
+    })
+    const repository = {
+      async load() {
+        calls.push('load')
+        return snapshot ? structuredClone(snapshot) : null
+      },
+      async save() {
+        calls.push('save:start')
+        resolveSaveStarted()
+        await saveDone
+        calls.push('save:end')
+      },
+      async replace(nextSnapshot: WorkspaceSnapshot) {
+        snapshot = structuredClone(nextSnapshot)
+      },
+    }
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    calls.length = 0
+    const renameTask = store.getState().renameBoard('board_mcp_refresh', '本地修改')
+    await saveStarted
+    snapshot = {
+      ...workspace,
+      boards: [
+        {
+          ...workspace.boards[0]!,
+          title: 'MCP 最新白板',
+          updatedAt: '2026-07-13T00:00:00.000Z',
+        },
+      ],
+    }
+
+    const refreshTask = store.getState().refreshMcpWorkspace({
+      operation: 'update_whiteboard',
+      boardId: 'board_mcp_refresh',
+    })
+    await Promise.resolve()
+    expect(calls).toEqual(['save:start'])
+
+    resolveSave()
+    await renameTask
+    await refreshTask
+
+    expect(calls).toEqual(['save:start', 'save:end', 'load'])
+    expect(store.getState().boards[0]?.title).toBe('MCP 最新白板')
+  })
+
+  it('refreshes the MCP board snapshot after a conflicting local block save', async () => {
+    const workspace = createWorkspaceWithParagraphBlock()
+    workspace.boards = [
+      {
+        id: 'board_mcp_conflict',
+        title: '本地白板',
+        snapshot: { shapes: [] },
+        createdAt: '2026-07-12T00:00:00.000Z',
+        updatedAt: '2026-07-12T00:00:00.000Z',
+      },
+    ]
+    let snapshot: WorkspaceSnapshot | null = structuredClone(workspace)
+    const repository = {
+      async load() {
+        return snapshot ? structuredClone(snapshot) : null
+      },
+      async save() {
+        throw new Error('conflict')
+      },
+      async replace(nextSnapshot: WorkspaceSnapshot) {
+        snapshot = structuredClone(nextSnapshot)
+      },
+    }
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    const block = store.getState().pages[0].blocks[0] as BlockRecord
+    await store.getState().updateBlock('page_1', 'block_1', { ...block, text: '本地冲突' })
+    snapshot = {
+      ...workspace,
+      boards: [
+        {
+          ...workspace.boards[0]!,
+          title: 'MCP 最新白板',
+          updatedAt: '2026-07-13T00:00:00.000Z',
+        },
+      ],
+    }
+
+    await expect(
+      store.getState().refreshMcpWorkspace({
+        operation: 'update_whiteboard',
+        boardId: 'board_mcp_conflict',
+      }),
+    ).resolves.toBeUndefined()
+
+    expect(store.getState().boards[0]?.title).toBe('MCP 最新白板')
+    expect(store.getState().saveStatus).toBe('error')
+  })
+
+  it('refreshes the MCP revision together with an MCP workspace update', async () => {
+    const workspace = createWorkspace()
+    let snapshot: WorkspaceSnapshot | null = structuredClone(workspace)
+    const repository = {
+      async load() {
+        return snapshot ? structuredClone(snapshot) : null
+      },
+      async save() {
+        return undefined
+      },
+      async replace(nextSnapshot: WorkspaceSnapshot) {
+        snapshot = structuredClone(nextSnapshot)
+      },
+    }
+    const store = createWorkspaceStore(repository)
+
+    await store.getState().bootstrap()
+    snapshot = {
+      ...workspace,
+      settings: { ...workspace.settings, mcpRevision: 1 },
+    }
+
+    await store.getState().refreshMcpWorkspace({ operation: 'append_content', pageId: 'page_1' })
+
+    expect(store.getState().settings.mcpRevision).toBe(1)
+  })
+
   it('preserves syncedBlockGroups through non-page asset saves', async () => {
     const workspace = createWorkspace()
     workspace.syncedBlockGroups = createSyncedBlockGroup()

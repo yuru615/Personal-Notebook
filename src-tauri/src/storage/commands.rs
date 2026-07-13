@@ -26,8 +26,14 @@ pub fn export_workspace_backup(
 pub fn replace_workspace_backup(
     state: State<'_, StorageState>,
     payload: WorkspaceSnapshot,
+    expected_board_updated_ats: Option<std::collections::BTreeMap<String, String>>,
 ) -> StorageResult<()> {
-    state.with_storage(|storage| storage.replace_workspace_backup(payload))
+    state.with_storage(|storage| {
+        storage.replace_workspace_backup_with_expected_board_updated_ats(
+            payload,
+            expected_board_updated_ats.as_ref(),
+        )
+    })
 }
 
 #[tauri::command]
@@ -223,8 +229,12 @@ pub fn delete_page_branch(
 }
 
 #[tauri::command]
-pub fn save_board(state: State<'_, StorageState>, board: BoardRecord) -> StorageResult<SaveResult> {
-    state.with_storage(|storage| storage.save_board(board))
+pub fn save_board(
+    state: State<'_, StorageState>,
+    board: BoardRecord,
+    expected_updated_at: Option<String>,
+) -> StorageResult<SaveResult> {
+    state.with_storage(|storage| storage.save_board(board, expected_updated_at.as_deref()))
 }
 
 #[tauri::command]

@@ -7,7 +7,7 @@ mod schema;
 mod search;
 
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     fs,
     io::{self, BufReader, BufWriter, Cursor, Read, Seek, Write},
     path::{Path, PathBuf},
@@ -23,7 +23,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 pub use error::{StorageError, StorageResult};
-pub use mcp::{McpWriteBatch, McpWriteResult};
+pub use mcp::{McpWhiteboardUpdate, McpWhiteboardUpdateResult, McpWriteBatch, McpWriteResult};
 #[allow(unused_imports)]
 pub use models::PagePackageImportResult;
 pub use models::{
@@ -216,7 +216,21 @@ impl Storage {
     }
 
     pub fn replace_workspace_backup(&self, snapshot: WorkspaceSnapshot) -> StorageResult<()> {
+        self.replace_workspace_backup_with_expected_board_updated_ats(snapshot, None)
+    }
+
+    pub fn replace_workspace_backup_with_expected_board_updated_ats(
+        &self,
+        snapshot: WorkspaceSnapshot,
+        expected_board_updated_ats: Option<&BTreeMap<String, String>>,
+    ) -> StorageResult<()> {
         self.with_transaction(|| {
+            if let Some(expected_board_updated_ats) = expected_board_updated_ats {
+                self.ensure_expected_board_updated_ats(expected_board_updated_ats)?;
+                self.ensure_expected_mcp_revision(
+                    snapshot.settings.mcp_revision.unwrap_or_default(),
+                )?;
+            }
             let app_settings = self.load_app_settings()?;
             let mcp_audit_log = {
                 let mut statement = self.connection.prepare(
@@ -358,15 +372,80 @@ impl Storage {
         })
     }
 
-    pub fn save_board(&self, board: BoardRecord) -> StorageResult<SaveResult> {
+    pub fn save_board(
+        &self,
+        board: BoardRecord,
+        expected_updated_at: Option<&str>,
+    ) -> StorageResult<SaveResult> {
         self.with_transaction(|| {
-            let position = self
-                .board_position(&board.id)?
-                .unwrap_or_else(|| self.next_position("zhiqi_boards"));
+            let position = self.board_position(&board.id)?;
+            if let (Some(expected_updated_at), Some(_)) = (expected_updated_at, position) {
+                let current_updated_at: String = self.connection.query_row(
+                    "SELECT updated_at FROM zhiqi_boards WHERE id = ?1",
+                    [&board.id],
+                    |row| row.get(0),
+                )?;
+                if current_updated_at != expected_updated_at {
+                    return Err(StorageError::new(
+                        "conflict",
+                        format!("board was updated by another writer: {}", board.id),
+                    ));
+                }
+            }
+            let position = position.unwrap_or_else(|| self.next_position("zhiqi_boards"));
             self.insert_board(&board, position)?;
             self.rebuild_resource_search_documents()?;
             Ok(SaveResult { id: board.id })
         })
+    }
+
+    fn ensure_expected_board_updated_ats(
+        &self,
+        expected_board_updated_ats: &BTreeMap<String, String>,
+    ) -> StorageResult<()> {
+        for (board_id, expected_updated_at) in expected_board_updated_ats {
+            let current_updated_at = self
+                .connection
+                .query_row(
+                    "SELECT updated_at FROM zhiqi_boards WHERE id = ?1",
+                    [board_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+            if current_updated_at.as_deref() != Some(expected_updated_at) {
+                return Err(StorageError::new(
+                    "conflict",
+                    format!("board was updated by another writer: {board_id}"),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn ensure_expected_mcp_revision(&self, expected_revision: i64) -> StorageResult<()> {
+        let current_revision = self
+            .load_settings()?
+            .and_then(|settings| settings.mcp_revision)
+            .unwrap_or_default();
+        if current_revision != expected_revision {
+            return Err(StorageError::new(
+                "conflict",
+                "workspace was updated by MCP; reload before saving",
+            ));
+        }
+        Ok(())
+    }
+
+    fn advance_mcp_revision(&self) -> StorageResult<()> {
+        let mut settings = self.load_settings()?.unwrap_or_default();
+        settings.mcp_revision = Some(
+            settings
+                .mcp_revision
+                .unwrap_or_default()
+                .checked_add(1)
+                .ok_or_else(|| StorageError::new("conflict", "MCP revision limit reached"))?,
+        );
+        self.save_settings(&settings)
     }
 
     pub fn load_board_snapshot(&self, board_id: &str) -> StorageResult<Value> {
@@ -2887,6 +2966,211 @@ mod tests {
     }
 
     #[test]
+    fn rejects_stale_board_saves_without_overwriting_a_newer_snapshot() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let original = sample_snapshot().boards.remove(0);
+        storage
+            .save_board(original.clone(), None)
+            .expect("save initial board");
+        let mcp_board = BoardRecord {
+            snapshot: json!({ "shapes": [{ "id": "mcp-node" }] }),
+            updated_at: "2026-07-13T00:00:00.000Z".to_string(),
+            ..original.clone()
+        };
+        storage
+            .save_board(mcp_board.clone(), Some(&original.updated_at))
+            .expect("save matching expected version");
+        let stale_local = BoardRecord {
+            snapshot: json!({ "shapes": [{ "id": "local-node" }] }),
+            updated_at: "2026-07-12T00:00:00.000Z".to_string(),
+            ..original.clone()
+        };
+
+        let error = storage
+            .save_board(stale_local, Some(&original.updated_at))
+            .expect_err("stale save is rejected");
+
+        assert_eq!(error.code, "conflict");
+        assert_eq!(
+            storage
+                .load_mcp_whiteboard(&original.id)
+                .expect("load current board")
+                .snapshot,
+            mcp_board.snapshot
+        );
+    }
+
+    #[test]
+    fn rejects_a_stale_full_workspace_replace_without_clearing_the_mcp_board() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let original = sample_snapshot();
+        let original_board = original.boards[0].clone();
+        storage
+            .replace_workspace_backup(original.clone())
+            .expect("seed workspace");
+        let mcp_board = BoardRecord {
+            snapshot: json!({ "shapes": [{ "id": "mcp-node" }] }),
+            updated_at: "2026-07-13T00:00:00.000Z".to_string(),
+            ..original_board.clone()
+        };
+        storage
+            .save_board(mcp_board.clone(), None)
+            .expect("persist MCP board");
+        let mut stale_replace = original.clone();
+        stale_replace.pages[0].title = "Stale local title".to_string();
+
+        let error = storage
+            .replace_workspace_backup_with_expected_board_updated_ats(
+                stale_replace,
+                Some(&std::collections::BTreeMap::from([(
+                    original_board.id.clone(),
+                    original_board.updated_at.clone(),
+                )])),
+            )
+            .expect_err("stale full replace is rejected");
+
+        assert_eq!(error.code, "conflict");
+        assert_eq!(
+            storage
+                .load_mcp_whiteboard(&original_board.id)
+                .expect("MCP board survives")
+                .snapshot,
+            mcp_board.snapshot
+        );
+        assert_eq!(
+            storage
+                .load_page_record("page_1")
+                .expect("page survives")
+                .title,
+            original.pages[0].title
+        );
+    }
+
+    #[test]
+    fn rejects_a_stale_full_workspace_replace_after_mcp_creates_a_child_page() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let original = sample_snapshot();
+        storage
+            .replace_workspace_backup(original.clone())
+            .expect("seed workspace");
+
+        storage
+            .create_mcp_page(
+                PageRecord {
+                    id: "page_mcp_child".to_string(),
+                    parent_id: Some("page_1".to_string()),
+                    title: "MCP child".to_string(),
+                    icon: None,
+                    cover: None,
+                    properties: None,
+                    is_full_width: None,
+                    is_small_text: None,
+                    font_family: None,
+                    show_outline: None,
+                    blocks: Vec::new(),
+                    created_at: "2026-07-13T00:00:00.000Z".to_string(),
+                    updated_at: "2026-07-13T00:00:00.000Z".to_string(),
+                },
+                Some("block_mcp_child".to_string()),
+            )
+            .expect("MCP creates child page");
+
+        let error = storage
+            .replace_workspace_backup_with_expected_board_updated_ats(
+                original.clone(),
+                Some(&std::collections::BTreeMap::new()),
+            )
+            .expect_err("stale full replace is rejected");
+
+        assert_eq!(error.code, "conflict");
+        assert!(storage.load_page_record("page_mcp_child").is_ok());
+        assert!(storage
+            .load_page_record("page_1")
+            .expect("parent remains")
+            .blocks
+            .iter()
+            .any(|block| block["id"] == "block_mcp_child"));
+    }
+
+    #[test]
+    fn rejects_a_stale_full_workspace_replace_after_mcp_creates_a_whiteboard() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let original = sample_snapshot();
+        storage
+            .replace_workspace_backup(original.clone())
+            .expect("seed workspace");
+
+        storage
+            .append_mcp_content(McpWriteBatch {
+                page_id: "page_1".to_string(),
+                blocks: vec![json!({
+                    "id": "block_mcp_whiteboard",
+                    "type": "whiteboard",
+                    "boardId": "board_mcp_new",
+                })],
+                boards: vec![BoardRecord {
+                    id: "board_mcp_new".to_string(),
+                    title: "MCP board".to_string(),
+                    snapshot: json!({ "shapes": [], "connections": [] }),
+                    created_at: "2026-07-13T00:00:00.000Z".to_string(),
+                    updated_at: "2026-07-13T00:00:00.000Z".to_string(),
+                }],
+                data_tables: Vec::new(),
+                mindmaps: Vec::new(),
+                updated_at: "2026-07-13T00:00:00.000Z".to_string(),
+                client_name: "test".to_string(),
+                tool_name: "append_content".to_string(),
+            })
+            .expect("MCP creates whiteboard");
+
+        let error = storage
+            .replace_workspace_backup_with_expected_board_updated_ats(
+                original,
+                Some(&std::collections::BTreeMap::new()),
+            )
+            .expect_err("stale full replace is rejected");
+
+        assert_eq!(error.code, "conflict");
+        assert!(storage.load_mcp_whiteboard("board_mcp_new").is_ok());
+        assert!(storage
+            .load_page_record("page_1")
+            .expect("page remains")
+            .blocks
+            .iter()
+            .any(|block| block["boardId"] == "board_mcp_new"));
+    }
+
+    #[test]
+    fn replaces_workspace_when_all_expected_board_versions_match() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let original = sample_snapshot();
+        let original_board = original.boards[0].clone();
+        storage
+            .replace_workspace_backup(original.clone())
+            .expect("seed workspace");
+        let mut replacement = original.clone();
+        replacement.pages[0].title = "Updated local title".to_string();
+
+        storage
+            .replace_workspace_backup_with_expected_board_updated_ats(
+                replacement,
+                Some(&std::collections::BTreeMap::from([(
+                    original_board.id,
+                    original_board.updated_at,
+                )])),
+            )
+            .expect("matching full replace succeeds");
+
+        assert_eq!(
+            storage
+                .load_page_record("page_1")
+                .expect("load replaced page")
+                .title,
+            "Updated local title"
+        );
+    }
+
+    #[test]
     fn workspace_backup_and_bootstrap_include_synced_block_groups() {
         let storage = Storage::open_in_memory_for_tests().expect("storage opens");
         let mut snapshot_value =
@@ -2942,6 +3226,7 @@ mod tests {
         let mut snapshot = sample_snapshot();
         snapshot.settings = WorkspaceSettings {
             last_opened_page_id: Some("page_1".to_string()),
+            mcp_revision: Some(3),
             inbox_page_id: Some("page_inbox".to_string()),
             welcome_page_id: Some("page_welcome".to_string()),
             welcome_guide_version: Some(2),
@@ -6713,10 +6998,20 @@ mod tests {
             "text": "Saved locally"
         }));
         stale_local_page.updated_at = "2026-07-12T00:00:01.000Z".to_string();
-        storage.save_page(stale_local_page).expect("save stale local page");
+        storage
+            .save_page(stale_local_page)
+            .expect("save stale local page");
 
-        let page = storage.load_page_record("page_1").expect("load merged page");
-        assert!(page.blocks.iter().any(|block| block["id"] == "block_mcp_concurrent"));
-        assert!(page.blocks.iter().any(|block| block["id"] == "block_local_concurrent"));
+        let page = storage
+            .load_page_record("page_1")
+            .expect("load merged page");
+        assert!(page
+            .blocks
+            .iter()
+            .any(|block| block["id"] == "block_mcp_concurrent"));
+        assert!(page
+            .blocks
+            .iter()
+            .any(|block| block["id"] == "block_local_concurrent"));
     }
 }

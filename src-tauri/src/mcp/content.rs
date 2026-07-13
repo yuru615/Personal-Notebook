@@ -14,8 +14,8 @@ use crate::storage::{StorageError, StorageResult};
 
 use super::semantic::{
     normalize_data_table, normalize_mindmap, normalize_whiteboard, DataTableColumnInput,
-    DataTableInput, DataTableRecordInput, MindmapInput, MindmapNodeInput, WhiteboardEdgeInput,
-    WhiteboardInput, WhiteboardNodeInput,
+    DataTableInput, DataTableRecordInput, LimitedWhiteboardStrokes, MindmapInput, MindmapNodeInput,
+    WhiteboardEdgeInput, WhiteboardInput, WhiteboardNodeInput, WhiteboardStrokeInput,
 };
 
 const MAX_CONTENT_ITEMS: usize = 100;
@@ -65,6 +65,8 @@ pub(super) enum ContentItem {
         title: String,
         nodes: Vec<WhiteboardNodeInput>,
         edges: Vec<WhiteboardEdgeInput>,
+        #[serde(default)]
+        strokes: Vec<WhiteboardStrokeInput>,
     },
     Mindmap {
         title: String,
@@ -113,6 +115,7 @@ impl<'de> Visitor<'de> for ContentItemVisitor {
             "records",
             "nodes",
             "edges",
+            "strokes",
             "root",
             "name",
             "mimeType",
@@ -130,6 +133,7 @@ impl<'de> Visitor<'de> for ContentItemVisitor {
         let mut records = None;
         let mut nodes = None;
         let mut edges = None;
+        let mut strokes = None;
         let mut root = None;
         let mut name = None;
         let mut mime_type = None;
@@ -194,6 +198,12 @@ impl<'de> Visitor<'de> for ContentItemVisitor {
                     }
                     edges = Some(map.next_value::<Vec<WhiteboardEdgeInput>>()?);
                 }
+                "strokes" => {
+                    if strokes.is_some() {
+                        return Err(de::Error::duplicate_field("strokes"));
+                    }
+                    strokes = Some(map.next_value::<LimitedWhiteboardStrokes>()?.0);
+                }
                 "root" => {
                     if root.is_some() {
                         return Err(de::Error::duplicate_field("root"));
@@ -254,6 +264,9 @@ impl<'de> Visitor<'de> for ContentItemVisitor {
                         &["type", "markdown"],
                     ));
                 }
+                if strokes.is_some() {
+                    return Err(de::Error::unknown_field("strokes", &["type", "markdown"]));
+                }
                 Ok(ContentItem::Markdown {
                     markdown: markdown.ok_or_else(|| de::Error::missing_field("markdown"))?,
                 })
@@ -262,6 +275,12 @@ impl<'de> Visitor<'de> for ContentItemVisitor {
                 if markdown.is_some() {
                     return Err(de::Error::unknown_field(
                         "markdown",
+                        &["type", "rows", "hasHeaderRow"],
+                    ));
+                }
+                if strokes.is_some() {
+                    return Err(de::Error::unknown_field(
+                        "strokes",
                         &["type", "rows", "hasHeaderRow"],
                     ));
                 }
@@ -276,6 +295,7 @@ impl<'de> Visitor<'de> for ContentItemVisitor {
                     || has_header_row.is_some()
                     || nodes.is_some()
                     || edges.is_some()
+                    || strokes.is_some()
                     || root.is_some()
                 {
                     return Err(de::Error::custom(
@@ -304,6 +324,7 @@ impl<'de> Visitor<'de> for ContentItemVisitor {
                     title: title.ok_or_else(|| de::Error::missing_field("title"))?,
                     nodes: nodes.unwrap_or_default(),
                     edges: edges.unwrap_or_default(),
+                    strokes: strokes.unwrap_or_default(),
                 })
             }
             "mindmap" => {
@@ -314,6 +335,7 @@ impl<'de> Visitor<'de> for ContentItemVisitor {
                     || records.is_some()
                     || nodes.is_some()
                     || edges.is_some()
+                    || strokes.is_some()
                 {
                     return Err(de::Error::custom(
                         "mindmap content item contains fields for another content type",
@@ -333,6 +355,7 @@ impl<'de> Visitor<'de> for ContentItemVisitor {
                     || records.is_some()
                     || nodes.is_some()
                     || edges.is_some()
+                    || strokes.is_some()
                     || root.is_some()
                 {
                     return Err(de::Error::custom(
@@ -642,12 +665,14 @@ pub(super) fn normalize_content_batch(
                     title,
                     nodes,
                     edges,
+                    strokes,
                 } => {
                     let normalized = normalize_whiteboard(
                         &WhiteboardInput {
                             title: title.clone(),
                             nodes: nodes.clone(),
                             edges: edges.clone(),
+                            strokes: strokes.clone(),
                         },
                         &item_batch_id,
                         now,
@@ -787,11 +812,15 @@ fn validate_input(input: &AppendContentInput) -> StorageResult<()> {
                 title,
                 nodes,
                 edges,
+                strokes,
             } => {
                 add_text_bytes(&mut text_bytes, title.len())?;
                 for node in nodes {
                     add_text_bytes(&mut text_bytes, node.id.len())?;
                     add_text_bytes(&mut text_bytes, node.text.len())?;
+                    if let Some(color) = &node.color {
+                        add_text_bytes(&mut text_bytes, color.len())?;
+                    }
                 }
                 for edge in edges {
                     add_text_bytes(&mut text_bytes, edge.from.len())?;
@@ -799,6 +828,15 @@ fn validate_input(input: &AppendContentInput) -> StorageResult<()> {
                     if let Some(id) = &edge.id {
                         add_text_bytes(&mut text_bytes, id.len())?;
                     }
+                    if let Some(color) = &edge.color {
+                        add_text_bytes(&mut text_bytes, color.len())?;
+                    }
+                }
+                for stroke in strokes {
+                    if let Some(id) = &stroke.id {
+                        add_text_bytes(&mut text_bytes, id.len())?;
+                    }
+                    add_text_bytes(&mut text_bytes, stroke.color.len())?;
                 }
             }
             ContentItem::Mindmap { title, root } => {
@@ -1405,6 +1443,98 @@ mod tests {
     }
 
     #[test]
+    fn accepts_fully_styled_whiteboard_content_fields() {
+        let input: AppendContentInput = serde_json::from_value(json!({
+            "pageId": "page_target",
+            "content": [{
+                "type": "whiteboard",
+                "title": "架构图",
+                "nodes": [{
+                    "id": "service",
+                    "kind": "rect",
+                    "text": "服务",
+                    "w": 240,
+                    "h": 120,
+                    "color": "#2563eb",
+                    "size": 4,
+                    "z": 2
+                }],
+                "edges": [],
+                "strokes": [{
+                    "color": "#dc2626",
+                    "size": 4,
+                    "points": [{ "x": 0, "y": 0 }, { "x": 40, "y": 40 }]
+                }]
+            }]
+        }))
+        .expect("fully styled whiteboard content input");
+
+        let batch = normalize_content_batch(&input, "content_test", "2026-07-13T00:00:00.000Z")
+            .expect("normalizes whiteboard content");
+        assert_eq!(
+            batch.boards[0].snapshot["strokes"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn rejects_strokes_on_non_whiteboard_content() {
+        let error = serde_json::from_value::<AppendContentInput>(json!({
+            "pageId": "page_target",
+            "content": [{
+                "type": "table",
+                "rows": [["名称"]],
+                "strokes": []
+            }]
+        }))
+        .expect_err("table cannot accept whiteboard strokes");
+
+        assert!(error.to_string().contains("strokes"));
+    }
+
+    #[test]
+    fn rejects_extra_whiteboard_strokes_while_deserializing() {
+        let strokes = (0..501)
+            .map(|index| {
+                json!({
+                    "id": format!("stroke_{index}"),
+                    "color": "#000000",
+                    "size": 3,
+                    "points": [{ "x": 0, "y": 0 }]
+                })
+            })
+            .collect::<Vec<_>>();
+        let error = serde_json::from_value::<AppendContentInput>(json!({
+            "pageId": "page_target",
+            "content": [{ "type": "whiteboard", "title": "笔画", "strokes": strokes }]
+        }))
+        .expect_err("501st stroke must be rejected before normalization");
+
+        assert!(error.to_string().contains("at most 500 strokes"));
+    }
+
+    #[test]
+    fn rejects_extra_whiteboard_stroke_points_while_deserializing() {
+        let points = (0..1_001)
+            .map(|index| json!({ "x": index, "y": 0 }))
+            .collect::<Vec<_>>();
+        let error = serde_json::from_value::<AppendContentInput>(json!({
+            "pageId": "page_target",
+            "content": [{
+                "type": "whiteboard",
+                "title": "笔画",
+                "strokes": [{ "color": "#000000", "size": 3, "points": points }]
+            }]
+        }))
+        .expect_err("1,001st point must be rejected before normalization");
+
+        assert!(error.to_string().contains("at most 1,000 points"));
+    }
+
+    #[test]
     fn preserves_array_shapes_in_the_generated_schema() {
         let schema = serde_json::to_value(schemars::schema_for!(AppendContentInput))
             .expect("append content schema");
@@ -1436,6 +1566,23 @@ mod tests {
             table_variant["properties"]["rows"]["items"]["items"]["type"],
             "string"
         );
+    }
+
+    #[test]
+    fn keeps_whiteboard_strokes_optional_in_the_generated_schema() {
+        let schema = serde_json::to_value(schemars::schema_for!(AppendContentInput))
+            .expect("append content schema");
+        let whiteboard_variant = schema["$defs"]["ContentItem"]["oneOf"]
+            .as_array()
+            .expect("content variants")
+            .iter()
+            .find(|variant| variant["properties"]["type"]["const"] == "whiteboard")
+            .expect("whiteboard content variant");
+        let required = whiteboard_variant["required"]
+            .as_array()
+            .expect("whiteboard required fields");
+
+        assert!(!required.iter().any(|field| field == "strokes"));
     }
 
     #[test]

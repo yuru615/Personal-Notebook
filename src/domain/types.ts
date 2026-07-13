@@ -333,6 +333,7 @@ export interface PageRecord {
 
 export interface WorkspaceSettings {
   lastOpenedPageId: PageId | null
+  mcpRevision?: number
   inboxPageId?: PageId | null
   welcomePageId?: PageId | null
   welcomeGuideVersion?: number | null

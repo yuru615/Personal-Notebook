@@ -13,7 +13,7 @@ function readLegacyFile(relativePath: string) {
 describe('legacy whiteboard parity', () => {
   it('keeps the embedded app.js identical to the imported standalone whiteboard source', () => {
     expect(sha256(readLegacyFile('./legacy/app.js'))).toBe(
-      '00B30A17097E35E2BF9A2CAB54C231D10579C1BD59529926F2D9DF95830DCA07',
+      'FD432352388D474FC695EFD02959E58890B95C600EA427372DA52B371FB0A02D',
     )
   })
 

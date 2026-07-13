@@ -61,7 +61,10 @@ export type WorkspaceArchiveProgressHandler = (progress: WorkspaceArchiveProgres
 
 export interface WorkspaceStorageClient {
   exportWorkspaceBackup(): Promise<WorkspaceSnapshot | null>
-  replaceWorkspaceBackup(snapshot: WorkspaceSnapshot): Promise<void>
+  replaceWorkspaceBackup(
+    snapshot: WorkspaceSnapshot,
+    expectedBoardUpdatedAts?: Record<string, string>,
+  ): Promise<void>
   loadAppSettings(): Promise<AppSettings | null>
   saveAppSettings(settings: AppSettings): Promise<void>
   enableLocalMcp(): Promise<McpSettings>
@@ -79,7 +82,7 @@ export interface WorkspaceStorageClient {
     onProgress?: WorkspaceArchiveProgressHandler,
   ): Promise<PagePackageImportResult>
   savePage(page: PageRecord): Promise<void>
-  saveBoard(board: BoardRecord): Promise<void>
+  saveBoard(board: BoardRecord, expectedUpdatedAt?: string): Promise<void>
   saveDataTable(dataTable: DataTableRecord): Promise<void>
   saveMindmap(mindmap: MindmapRecord): Promise<void>
   writeAsset(input: WriteAssetInput): Promise<AssetMeta>
@@ -96,8 +99,13 @@ export function createTauriStorageClient(): WorkspaceStorageClient {
       return invoke<WorkspaceSnapshot | null>('export_workspace_backup')
     },
 
-    replaceWorkspaceBackup(snapshot) {
-      return invoke<void>('replace_workspace_backup', { payload: snapshot })
+    replaceWorkspaceBackup(snapshot, expectedBoardUpdatedAts) {
+      return invoke<void>(
+        'replace_workspace_backup',
+        expectedBoardUpdatedAts
+          ? { payload: snapshot, expectedBoardUpdatedAts }
+          : { payload: snapshot },
+      )
     },
 
     loadAppSettings() {
@@ -148,8 +156,8 @@ export function createTauriStorageClient(): WorkspaceStorageClient {
       await invoke('save_page', { page })
     },
 
-    async saveBoard(board) {
-      await invoke('save_board', { board })
+    async saveBoard(board, expectedUpdatedAt) {
+      await invoke('save_board', { board, expectedUpdatedAt })
     },
 
     async saveDataTable(dataTable) {

@@ -3,10 +3,18 @@ mod content;
 mod semantic;
 
 use content::{normalize_content_batch, AppendContentInput};
+use semantic::{
+    normalize_whiteboard_elements, WhiteboardEdgeInput, WhiteboardInput, WhiteboardNodeInput,
+    WhiteboardStrokeInput,
+};
 
 use std::{
+    collections::HashSet,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -36,11 +44,13 @@ use tauri::{AppHandle, Emitter};
 use tokio_util::sync::CancellationToken;
 
 use crate::storage::{
-    McpSettings, McpWriteBatch, PageRecord, StorageError, StorageResult, StorageState,
+    McpSettings, McpWhiteboardUpdate, McpWriteBatch, PageRecord, StorageError, StorageResult,
+    StorageState,
 };
 
 type WorkspaceUpdatedSink = Arc<dyn Fn(serde_json::Value) + Send + Sync>;
 const MAX_MCP_REQUEST_BYTES: usize = 32 * 1024 * 1024;
+static LAST_MCP_TIMESTAMP_MILLIS: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Default)]
 pub struct McpServerState {
@@ -126,6 +136,26 @@ struct GetPageInput {
     page_id: String,
 }
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct GetWhiteboardInput {
+    board_id: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UpdateWhiteboardInput {
+    board_id: String,
+    #[serde(default)]
+    nodes: Option<Vec<WhiteboardNodeInput>>,
+    #[serde(default)]
+    edges: Option<Vec<WhiteboardEdgeInput>>,
+    #[serde(default)]
+    strokes: Option<Vec<WhiteboardStrokeInput>>,
+    #[serde(default)]
+    erase_ids: Option<Vec<String>>,
+}
+
 impl LocalMcpServer {
     fn new(storage: StorageState, workspace_updated: Option<WorkspaceUpdatedSink>) -> Self {
         Self {
@@ -172,6 +202,9 @@ impl LocalMcpServer {
         }
 
         let now = now_timestamp();
+        let parent_block_id = parent_id
+            .as_ref()
+            .map(|_| format!("block_mcp_{}", random_suffix()));
         let page = PageRecord {
             id: format!("page_mcp_{}", random_suffix()),
             parent_id: parent_id.clone(),
@@ -189,10 +222,7 @@ impl LocalMcpServer {
         };
 
         match self.storage.with_storage(|storage| {
-            if let Some(parent_id) = &parent_id {
-                storage.load_page(parent_id)?;
-            }
-            storage.save_page(page.clone())?;
+            storage.create_mcp_page(page.clone(), parent_block_id.clone())?;
             Ok(page)
         }) {
             Ok(page) => {
@@ -200,10 +230,15 @@ impl LocalMcpServer {
                     notify(serde_json::json!({
                         "operation": "create_page",
                         "pageId": page.id,
+                        "parentId": page.parent_id,
                         "createdPageIds": [page.id],
                     }));
                 }
-                tool_success(serde_json::json!(page))
+                let mut receipt = serde_json::json!(page);
+                if let Some(parent_block_id) = parent_block_id {
+                    receipt["parentBlockId"] = serde_json::json!(parent_block_id);
+                }
+                tool_success(receipt)
             }
             Err(error) => tool_error(error),
         }
@@ -219,6 +254,109 @@ impl LocalMcpServer {
             .with_storage(|storage| storage.load_page(&page_id))
         {
             Ok(page) => tool_success(serde_json::json!(page)),
+            Err(error) => tool_error(error),
+        }
+    }
+
+    #[tool(
+        description = "读取指定白板的标题和完整快照；后续增量修改前应先读取并依据其中的元素 ID 操作。"
+    )]
+    fn get_whiteboard(
+        &self,
+        Parameters(GetWhiteboardInput { board_id }): Parameters<GetWhiteboardInput>,
+    ) -> CallToolResult {
+        match self
+            .storage
+            .with_storage(|storage| storage.load_mcp_whiteboard(&board_id))
+        {
+            Ok(board) => tool_success(serde_json::json!(board)),
+            Err(error) => tool_error(error),
+        }
+    }
+
+    #[tool(
+        description = "向已有白板增量追加节点、连线或笔画，或按 eraseIds 擦除节点、便签、文本、笔画和连线。不会整板覆盖或清空；擦除节点会自动删除引用该节点的连线。"
+    )]
+    fn update_whiteboard(
+        &self,
+        Parameters(input): Parameters<UpdateWhiteboardInput>,
+    ) -> CallToolResult {
+        let board_id = input.board_id.clone();
+        let batch_id = random_suffix();
+        let now = now_timestamp();
+        let nodes = input.nodes.unwrap_or_default();
+        let edges = input.edges.unwrap_or_default();
+        let strokes = input.strokes.unwrap_or_default();
+        let erase_ids = input.erase_ids.unwrap_or_default();
+        if nodes.is_empty() && edges.is_empty() && strokes.is_empty() && erase_ids.is_empty() {
+            return tool_error(StorageError::invalid_payload(
+                "whiteboard update requires additions or erase ids",
+            ));
+        }
+        let erase_set = match validated_whiteboard_erase_ids(&erase_ids) {
+            Ok(ids) => ids,
+            Err(error) => return tool_error(error),
+        };
+        if nodes.iter().any(|node| erase_set.contains(node.id.trim()))
+            || edges.iter().any(|edge| {
+                erase_set.contains(edge.from.trim()) || erase_set.contains(edge.to.trim())
+            })
+            || strokes.iter().any(|stroke| {
+                stroke
+                    .id
+                    .as_deref()
+                    .is_some_and(|id| erase_set.contains(id.trim()))
+            })
+        {
+            return tool_error(StorageError::invalid_payload(
+                "whiteboard update cannot add or connect an erased id",
+            ));
+        }
+
+        match self.storage.with_storage(|storage| {
+            let board = storage.load_mcp_whiteboard(&board_id)?;
+            let existing_node_ids = whiteboard_node_ids(&board.snapshot)?;
+            let elements = normalize_whiteboard_elements(
+                &WhiteboardInput {
+                    title: String::new(),
+                    nodes,
+                    edges,
+                    strokes,
+                },
+                &existing_node_ids,
+                &batch_id,
+            )?;
+            storage.update_mcp_whiteboard(McpWhiteboardUpdate {
+                board_id: board_id.clone(),
+                shapes: elements.shapes,
+                notes: elements.notes,
+                texts: elements.texts,
+                connections: elements.connections,
+                strokes: elements.strokes,
+                erase_ids,
+                updated_at: now,
+                audit_id: format!("mcp_audit_whiteboard_{batch_id}"),
+            })
+        }) {
+            Ok(result) => {
+                if let Some(notify) = &self.workspace_updated {
+                    notify(serde_json::json!({
+                        "operation": "update_whiteboard",
+                        "boardId": result.board_id,
+                        "addedNodeIds": result.added_node_ids,
+                        "addedEdgeIds": result.added_edge_ids,
+                        "addedStrokeIds": result.added_stroke_ids,
+                        "erasedIds": result.erased_ids,
+                    }));
+                }
+                tool_success(serde_json::json!({
+                    "boardId": result.board_id,
+                    "addedNodeIds": result.added_node_ids,
+                    "addedEdgeIds": result.added_edge_ids,
+                    "addedStrokeIds": result.added_stroke_ids,
+                    "erasedIds": result.erased_ids,
+                }))
+            }
             Err(error) => tool_error(error),
         }
     }
@@ -314,6 +452,56 @@ fn tool_error(error: StorageError) -> CallToolResult {
     }))
 }
 
+fn validated_whiteboard_erase_ids(ids: &[String]) -> StorageResult<HashSet<String>> {
+    let mut unique = HashSet::new();
+    for value in ids {
+        let id = value.trim();
+        if id.is_empty() {
+            return Err(StorageError::invalid_payload(
+                "whiteboard erase id cannot be empty",
+            ));
+        }
+        if !unique.insert(id.to_string()) {
+            return Err(StorageError::invalid_payload(format!(
+                "duplicate whiteboard erase id: {id}"
+            )));
+        }
+    }
+    Ok(unique)
+}
+
+fn whiteboard_node_ids(snapshot: &serde_json::Value) -> StorageResult<HashSet<String>> {
+    let snapshot = snapshot
+        .as_object()
+        .ok_or_else(|| StorageError::invalid_payload("whiteboard snapshot must be an object"))?;
+    let mut ids = HashSet::new();
+    for key in ["shapes", "notes", "texts", "images"] {
+        let Some(value) = snapshot.get(key) else {
+            continue;
+        };
+        let values = value.as_array().ok_or_else(|| {
+            StorageError::invalid_payload(format!("whiteboard snapshot {key} must be an array"))
+        })?;
+        for value in values {
+            let id = value
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .filter(|id| !id.trim().is_empty())
+                .ok_or_else(|| {
+                    StorageError::invalid_payload(format!(
+                        "whiteboard snapshot {key} has an invalid id"
+                    ))
+                })?;
+            if !ids.insert(id.to_string()) {
+                return Err(StorageError::invalid_payload(format!(
+                    "duplicate whiteboard node id: {id}"
+                )));
+            }
+        }
+    }
+    Ok(ids)
+}
+
 fn random_suffix() -> String {
     rand::rng()
         .sample_iter(&Alphanumeric)
@@ -327,7 +515,21 @@ fn now_timestamp() -> String {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or_default();
-    format!("unix-ms:{millis}")
+    format!(
+        "unix-ms:{}",
+        next_monotonic_millis(&LAST_MCP_TIMESTAMP_MILLIS, millis as u64)
+    )
+}
+
+fn next_monotonic_millis(last: &AtomicU64, millis: u64) -> u64 {
+    let mut current = last.load(Ordering::Relaxed);
+    loop {
+        let next = millis.max(current.saturating_add(1));
+        match last.compare_exchange_weak(current, next, Ordering::SeqCst, Ordering::Relaxed) {
+            Ok(_) => return next,
+            Err(observed) => current = observed,
+        }
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
@@ -463,6 +665,7 @@ mod tests {
     use std::{
         io::{Read, Write},
         net::{IpAddr, Shutdown, TcpStream},
+        sync::{Arc, Mutex},
         time::Duration,
     };
 
@@ -473,14 +676,32 @@ mod tests {
     use rmcp::{handler::server::wrapper::Parameters, model::CallToolResult};
 
     use super::{
-        buffer_limited_request, start_local_server, AppendContentInput, CreatePageInput,
-        GetPageInput, LocalMcpServer, McpServerState, MAX_MCP_REQUEST_BYTES,
+        buffer_limited_request, next_monotonic_millis, start_local_server, whiteboard_node_ids,
+        AppendContentInput, CreatePageInput, GetPageInput, GetWhiteboardInput, LocalMcpServer,
+        McpServerState, UpdateWhiteboardInput, MAX_MCP_REQUEST_BYTES,
     };
-    use crate::storage::{McpSettings, PageRecord, StorageState};
+    use crate::storage::{BoardRecord, McpSettings, PageRecord, StorageState};
 
     fn successful_value(result: CallToolResult) -> serde_json::Value {
         assert_eq!(result.is_error, Some(false));
         result.structured_content.expect("structured tool result")
+    }
+
+    #[test]
+    fn allocates_strictly_monotonic_timestamps_within_one_millisecond() {
+        let last = std::sync::atomic::AtomicU64::new(0);
+        assert_eq!(next_monotonic_millis(&last, 42), 42);
+        assert_eq!(next_monotonic_millis(&last, 42), 43);
+    }
+
+    #[test]
+    fn treats_legacy_images_as_existing_whiteboard_connection_targets() {
+        let ids = whiteboard_node_ids(&serde_json::json!({
+            "images": [{ "id": "architecture-image" }],
+        }))
+        .expect("image ids");
+
+        assert!(ids.contains("architecture-image"));
     }
 
     #[test]
@@ -692,6 +913,58 @@ mod tests {
     }
 
     #[test]
+    fn creates_child_page_with_a_parent_block_receipt() {
+        let storage = StorageState::open_in_memory_for_tests().expect("storage");
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events_for_sink = events.clone();
+        let server = LocalMcpServer::new(
+            storage.clone(),
+            Some(Arc::new(move |payload| {
+                events_for_sink.lock().expect("event lock").push(payload);
+            })),
+        );
+        let parent: PageRecord = serde_json::from_value(successful_value(server.create_page(
+            Parameters(CreatePageInput {
+                parent_id: None,
+                title: "Parent".to_string(),
+                icon: None,
+            }),
+        )))
+        .expect("parent page response");
+
+        let response = server.create_page(Parameters(CreatePageInput {
+            parent_id: Some(parent.id.clone()),
+            title: "Child".to_string(),
+            icon: None,
+        }));
+        let value = successful_value(response);
+        let child: PageRecord = serde_json::from_value(value.clone()).expect("child page response");
+        let parent_block_id = value["parentBlockId"]
+            .as_str()
+            .expect("parent block id response");
+        let persisted_parent = storage
+            .with_storage(|storage| storage.load_page(&parent.id))
+            .expect("load parent page");
+
+        assert_eq!(
+            persisted_parent.blocks,
+            vec![serde_json::json!({
+                "id": parent_block_id,
+                "type": "child_page",
+                "pageId": child.id,
+            })]
+        );
+        assert_eq!(
+            events
+                .lock()
+                .expect("event lock")
+                .last()
+                .and_then(|event| event["parentId"].as_str()),
+            Some(parent.id.as_str())
+        );
+    }
+
+    #[test]
     fn reads_a_page_through_the_existing_storage_path() {
         let storage = StorageState::open_in_memory_for_tests().expect("storage");
         let server = LocalMcpServer::new(storage.clone(), None);
@@ -712,6 +985,99 @@ mod tests {
 
         assert_eq!(page.id, created.id);
         assert_eq!(page.title, "MCP 读取");
+    }
+
+    #[test]
+    fn reads_and_incrementally_edits_a_whiteboard_without_replacing_its_snapshot() {
+        let storage = StorageState::open_in_memory_for_tests().expect("storage");
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events_for_sink = events.clone();
+        let server = LocalMcpServer::new(
+            storage.clone(),
+            Some(Arc::new(move |payload| {
+                events_for_sink.lock().expect("event lock").push(payload);
+            })),
+        );
+        let page: PageRecord = serde_json::from_value(successful_value(server.create_page(
+            Parameters(CreatePageInput {
+                parent_id: None,
+                title: "Whiteboard edits".to_string(),
+                icon: None,
+            }),
+        )))
+        .expect("page response");
+        let append: AppendContentInput = serde_json::from_value(serde_json::json!({
+            "pageId": page.id,
+            "content": [{
+                "type": "whiteboard",
+                "title": "Architecture",
+                "nodes": [{ "id": "entry", "kind": "ellipse", "text": "Entry" }],
+                "edges": []
+            }]
+        }))
+        .expect("whiteboard input");
+        let append_result = successful_value(server.append_content(Parameters(append)));
+        let board_id = append_result["createdObjectIds"][0]
+            .as_str()
+            .expect("board id")
+            .to_string();
+
+        let before: BoardRecord = serde_json::from_value(successful_value(server.get_whiteboard(
+            Parameters(GetWhiteboardInput {
+                board_id: board_id.clone(),
+            }),
+        )))
+        .expect("whiteboard response");
+        assert_eq!(before.title, "Architecture");
+        assert_eq!(before.snapshot["shapes"].as_array().unwrap().len(), 1);
+
+        let update: UpdateWhiteboardInput = serde_json::from_value(serde_json::json!({
+            "boardId": board_id,
+            "nodes": [
+                { "id": "service", "kind": "rect", "text": "Service", "color": "#2563eb" },
+                { "id": "note", "kind": "note", "text": "Owned by platform" },
+                { "id": "label", "kind": "text", "text": "Production" }
+            ],
+            "edges": [{ "id": "entry-service", "from": "entry", "to": "service", "mode": "curve" }],
+            "strokes": [{
+                "id": "annotation",
+                "color": "#dc2626",
+                "size": 6,
+                "points": [{ "x": 8, "y": 12 }, { "x": 32, "y": 48 }]
+            }]
+        }))
+        .expect("incremental update input");
+        successful_value(server.update_whiteboard(Parameters(update)));
+
+        let erase: UpdateWhiteboardInput = serde_json::from_value(serde_json::json!({
+            "boardId": board_id,
+            "eraseIds": ["entry", "note", "label", "annotation"]
+        }))
+        .expect("erase update input");
+        let erased = successful_value(server.update_whiteboard(Parameters(erase)));
+        assert!(erased["erasedIds"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("entry-service")));
+
+        let after: BoardRecord = serde_json::from_value(successful_value(
+            server.get_whiteboard(Parameters(GetWhiteboardInput { board_id })),
+        ))
+        .expect("updated whiteboard response");
+        assert_eq!(after.snapshot["shapes"].as_array().unwrap().len(), 1);
+        assert_eq!(after.snapshot["shapes"][0]["id"], "service");
+        assert!(after.snapshot["notes"].as_array().unwrap().is_empty());
+        assert!(after.snapshot["texts"].as_array().unwrap().is_empty());
+        assert!(after.snapshot["connections"].as_array().unwrap().is_empty());
+        assert!(after.snapshot["strokes"].as_array().unwrap().is_empty());
+        assert_eq!(
+            events
+                .lock()
+                .expect("event lock")
+                .last()
+                .and_then(|event| event["operation"].as_str()),
+            Some("update_whiteboard")
+        );
     }
 
     #[test]

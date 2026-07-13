@@ -296,7 +296,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
     }
 
     let unlistenMcpWorkspace: (() => void) | null = null
-    void listen<McpWorkspaceUpdate>('zhixi://mcp-workspace-updated', async (event) => {
+    void listen<McpWorkspaceUpdate>('zhiqi://mcp-workspace-updated', async (event) => {
       await store.getState().refreshMcpWorkspace(event.payload)
     })
       .then((unlisten) => {

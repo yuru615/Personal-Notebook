@@ -35,6 +35,8 @@ pub struct PagePropertyDefinition {
 pub struct WorkspaceSettings {
     pub last_opened_page_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_revision: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inbox_page_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub welcome_page_id: Option<String>,

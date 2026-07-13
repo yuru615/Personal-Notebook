@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use super::{
-    BoardRecord, DataTableRecord, MindmapRecord, Storage, StorageError, StorageResult,
+    BoardRecord, DataTableRecord, MindmapRecord, PageRecord, Storage, StorageError, StorageResult,
 };
 
 pub struct McpWriteBatch {
@@ -23,7 +23,88 @@ pub struct McpWriteResult {
     pub created_object_ids: Vec<String>,
 }
 
+pub struct McpWhiteboardUpdate {
+    pub board_id: String,
+    pub shapes: Vec<Value>,
+    pub notes: Vec<Value>,
+    pub texts: Vec<Value>,
+    pub connections: Vec<Value>,
+    pub strokes: Vec<Value>,
+    pub erase_ids: Vec<String>,
+    pub updated_at: String,
+    pub audit_id: String,
+}
+
+#[derive(Debug)]
+pub struct McpWhiteboardUpdateResult {
+    pub board_id: String,
+    pub added_node_ids: Vec<String>,
+    pub added_edge_ids: Vec<String>,
+    pub added_stroke_ids: Vec<String>,
+    pub erased_ids: Vec<String>,
+}
+
 impl Storage {
+    pub fn load_mcp_whiteboard(&self, board_id: &str) -> StorageResult<BoardRecord> {
+        self.load_boards()?
+            .into_iter()
+            .find(|board| board.id == board_id)
+            .ok_or_else(|| StorageError::not_found(format!("board not found: {board_id}")))
+    }
+
+    pub fn create_mcp_page(
+        &self,
+        page: PageRecord,
+        parent_block_id: Option<String>,
+    ) -> StorageResult<()> {
+        let Some(parent_id) = page.parent_id.clone() else {
+            if parent_block_id.is_some() {
+                return Err(StorageError::invalid_payload(
+                    "top-level MCP page cannot include a parent block id",
+                ));
+            }
+            return self.with_transaction(|| {
+                let position = self
+                    .page_position(&page.id)?
+                    .unwrap_or_else(|| self.next_position("zhiqi_pages"));
+                self.insert_page(&page, position)?;
+                self.rebuild_resource_search_documents()?;
+                self.advance_mcp_revision()
+            });
+        };
+        let parent_block_id = parent_block_id
+            .filter(|id| !id.trim().is_empty())
+            .ok_or_else(|| {
+                StorageError::invalid_payload("MCP child page requires a parent block id")
+            })?;
+
+        self.with_transaction(|| {
+            let mut parent = self.load_page_record(&parent_id)?;
+            if self.page_position(&page.id)?.is_some() {
+                return Err(StorageError::new(
+                    "conflict",
+                    format!("MCP page id already exists: {}", page.id),
+                ));
+            }
+
+            let child_position = self.next_position("zhiqi_pages");
+            let parent_position = self
+                .page_position(&parent.id)?
+                .ok_or_else(|| StorageError::not_found("parent page not found"))?;
+            parent.blocks.push(json!({
+                "id": parent_block_id,
+                "type": "child_page",
+                "pageId": page.id,
+            }));
+            parent.updated_at = page.updated_at.clone();
+
+            self.insert_page(&page, child_position)?;
+            self.insert_page(&parent, parent_position)?;
+            self.rebuild_resource_search_documents()?;
+            self.advance_mcp_revision()
+        })
+    }
+
     pub fn append_mcp_content(&self, batch: McpWriteBatch) -> StorageResult<McpWriteResult> {
         if batch.blocks.is_empty() {
             return Err(StorageError::invalid_payload(
@@ -92,10 +173,168 @@ impl Storage {
                 ],
             )?;
 
+            self.advance_mcp_revision()?;
+
             Ok(McpWriteResult {
                 page_id: page.id,
                 created_block_ids,
                 created_object_ids,
+            })
+        })
+    }
+
+    pub fn update_mcp_whiteboard(
+        &self,
+        update: McpWhiteboardUpdate,
+    ) -> StorageResult<McpWhiteboardUpdateResult> {
+        let McpWhiteboardUpdate {
+            board_id,
+            shapes,
+            notes,
+            texts,
+            connections: new_connections,
+            strokes,
+            erase_ids,
+            updated_at,
+            audit_id,
+        } = update;
+        let added_node_ids = collect_value_ids(
+            shapes.iter().chain(notes.iter()).chain(texts.iter()),
+            "whiteboard node",
+        )?;
+        let added_edge_ids = collect_value_ids(new_connections.iter(), "whiteboard edge")?;
+        let added_stroke_ids = collect_value_ids(strokes.iter(), "whiteboard stroke")?;
+        let erase_ids = collect_string_ids(erase_ids, "whiteboard erase")?;
+
+        if added_node_ids.is_empty()
+            && added_edge_ids.is_empty()
+            && added_stroke_ids.is_empty()
+            && erase_ids.is_empty()
+        {
+            return Err(StorageError::invalid_payload(
+                "whiteboard update requires additions or erase ids",
+            ));
+        }
+
+        let erase_set = erase_ids.iter().cloned().collect::<HashSet<_>>();
+        if added_node_ids
+            .iter()
+            .chain(added_edge_ids.iter())
+            .chain(added_stroke_ids.iter())
+            .any(|id| erase_set.contains(id))
+        {
+            return Err(StorageError::invalid_payload(
+                "whiteboard update cannot add and erase the same id",
+            ));
+        }
+
+        self.with_transaction(|| {
+            let mut board = self.load_mcp_whiteboard(&board_id)?;
+            let page_id = self
+                .page_id_for_ref("board", &board.id)?
+                .ok_or_else(|| StorageError::not_found("whiteboard is not attached to a page"))?;
+            let snapshot = board.snapshot.as_object_mut().ok_or_else(|| {
+                StorageError::invalid_payload("whiteboard snapshot must be an object")
+            })?;
+            let erasable_ids = whiteboard_element_ids(
+                snapshot,
+                &["shapes", "notes", "texts", "connections", "strokes"],
+            )?;
+            if let Some(id) = erase_ids.iter().find(|id| !erasable_ids.contains(*id)) {
+                return Err(StorageError::invalid_payload(format!(
+                    "whiteboard erase id was not found: {id}"
+                )));
+            }
+            let mut erased_ids = Vec::new();
+            let mut removed_node_ids = HashSet::new();
+
+            for key in ["shapes", "notes", "texts"] {
+                let values = whiteboard_collection_mut(snapshot, key)?;
+                remove_whiteboard_elements(values, &erase_set, &mut erased_ids, Some(&mut removed_node_ids));
+            }
+            remove_whiteboard_elements(
+                whiteboard_collection_mut(snapshot, "strokes")?,
+                &erase_set,
+                &mut erased_ids,
+                None,
+            );
+            {
+                let connections = whiteboard_collection_mut(snapshot, "connections")?;
+                connections.retain(|connection| {
+                    let id = connection.get("id").and_then(Value::as_str);
+                    let from = connection.get("from").and_then(Value::as_str);
+                    let to = connection.get("to").and_then(Value::as_str);
+                    let removed = id.is_some_and(|id| erase_set.contains(id))
+                        || from.is_some_and(|id| removed_node_ids.contains(id))
+                        || to.is_some_and(|id| removed_node_ids.contains(id));
+                    if removed {
+                        if let Some(id) = id {
+                            erased_ids.push(id.to_string());
+                        }
+                    }
+                    !removed
+                });
+            }
+
+            let added_ids = collect_string_ids(
+                added_node_ids
+                    .iter()
+                    .chain(added_edge_ids.iter())
+                    .chain(added_stroke_ids.iter())
+                    .cloned()
+                    .collect(),
+                "whiteboard element",
+            )?;
+            let remaining_ids = whiteboard_element_ids(
+                snapshot,
+                &["shapes", "notes", "texts", "images", "connections", "strokes"],
+            )?;
+            if let Some(id) = added_ids.iter().find(|id| remaining_ids.contains(*id)) {
+                return Err(StorageError::new(
+                    "conflict",
+                    format!("whiteboard element id already exists: {id}"),
+                ));
+            }
+
+            whiteboard_collection_mut(snapshot, "shapes")?.extend(shapes);
+            whiteboard_collection_mut(snapshot, "notes")?.extend(notes);
+            whiteboard_collection_mut(snapshot, "texts")?.extend(texts);
+            whiteboard_collection_mut(snapshot, "connections")?.extend(new_connections);
+            whiteboard_collection_mut(snapshot, "strokes")?.extend(strokes);
+
+            board.updated_at = updated_at.clone();
+            let position = self
+                .board_position(&board.id)?
+                .ok_or_else(|| StorageError::not_found("board not found"))?;
+            self.insert_board(&board, position)?;
+            self.rebuild_resource_search_documents()?;
+
+            let mut audit_ids = vec![board.id.clone()];
+            audit_ids.extend(added_node_ids.iter().cloned());
+            audit_ids.extend(added_edge_ids.iter().cloned());
+            audit_ids.extend(added_stroke_ids.iter().cloned());
+            audit_ids.extend(erased_ids.iter().cloned());
+            self.connection.execute(
+                "INSERT INTO zhiqi_mcp_audit_log (id, created_at, client_name, tool_name, page_id, created_ids_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![
+                    audit_id,
+                    updated_at,
+                    "local-mcp",
+                    "update_whiteboard",
+                    page_id,
+                    serde_json::to_string(&audit_ids)?,
+                ],
+            )?;
+
+            self.advance_mcp_revision()?;
+
+            Ok(McpWhiteboardUpdateResult {
+                board_id,
+                added_node_ids,
+                added_edge_ids,
+                added_stroke_ids,
+                erased_ids,
             })
         })
     }
@@ -132,6 +371,115 @@ impl Storage {
         }
         Ok(())
     }
+}
+
+fn collect_value_ids<'a>(
+    values: impl Iterator<Item = &'a Value>,
+    label: &str,
+) -> StorageResult<Vec<String>> {
+    let mut ids = HashSet::new();
+    let mut collected = Vec::new();
+    for value in values {
+        let id = value
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.trim().is_empty())
+            .ok_or_else(|| {
+                StorageError::invalid_payload(format!("{label} is missing a non-empty id"))
+            })?
+            .to_string();
+        if !ids.insert(id.clone()) {
+            return Err(StorageError::invalid_payload(format!(
+                "duplicate {label} id: {id}"
+            )));
+        }
+        collected.push(id);
+    }
+    Ok(collected)
+}
+
+fn collect_string_ids(values: Vec<String>, label: &str) -> StorageResult<Vec<String>> {
+    let mut ids = HashSet::new();
+    let mut collected = Vec::new();
+    for value in values {
+        let id = value.trim();
+        if id.is_empty() {
+            return Err(StorageError::invalid_payload(format!(
+                "{label} id cannot be empty"
+            )));
+        }
+        if !ids.insert(id.to_string()) {
+            return Err(StorageError::invalid_payload(format!(
+                "duplicate {label} id: {id}"
+            )));
+        }
+        collected.push(id.to_string());
+    }
+    Ok(collected)
+}
+
+fn whiteboard_collection_mut<'a>(
+    snapshot: &'a mut serde_json::Map<String, Value>,
+    key: &str,
+) -> StorageResult<&'a mut Vec<Value>> {
+    let value = snapshot.entry(key.to_string()).or_insert_with(|| json!([]));
+    value.as_array_mut().ok_or_else(|| {
+        StorageError::invalid_payload(format!("whiteboard snapshot {key} must be an array"))
+    })
+}
+
+fn remove_whiteboard_elements(
+    values: &mut Vec<Value>,
+    erase_ids: &HashSet<String>,
+    erased_ids: &mut Vec<String>,
+    removed_node_ids: Option<&mut HashSet<String>>,
+) {
+    let mut removed_node_ids = removed_node_ids;
+    values.retain(|value| {
+        let id = value.get("id").and_then(Value::as_str);
+        let removed = id.is_some_and(|id| erase_ids.contains(id));
+        if removed {
+            if let Some(id) = id {
+                erased_ids.push(id.to_string());
+                if let Some(node_ids) = removed_node_ids.as_deref_mut() {
+                    node_ids.insert(id.to_string());
+                }
+            }
+        }
+        !removed
+    });
+}
+
+fn whiteboard_element_ids(
+    snapshot: &serde_json::Map<String, Value>,
+    keys: &[&str],
+) -> StorageResult<HashSet<String>> {
+    let mut ids = HashSet::new();
+    for key in keys {
+        let Some(value) = snapshot.get(*key) else {
+            continue;
+        };
+        let values = value.as_array().ok_or_else(|| {
+            StorageError::invalid_payload(format!("whiteboard snapshot {key} must be an array"))
+        })?;
+        for value in values {
+            let id = value
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.trim().is_empty())
+                .ok_or_else(|| {
+                    StorageError::invalid_payload(format!(
+                        "whiteboard snapshot {key} has an invalid id"
+                    ))
+                })?;
+            if !ids.insert(id.to_string()) {
+                return Err(StorageError::invalid_payload(format!(
+                    "duplicate whiteboard element id: {id}"
+                )));
+            }
+        }
+    }
+    Ok(ids)
 }
 
 fn collect_block_ids(blocks: &[Value]) -> StorageResult<Vec<String>> {
@@ -183,7 +531,7 @@ fn collect_resource_ids(batch: &McpWriteBatch) -> StorageResult<Vec<String>> {
 mod tests {
     use serde_json::json;
 
-    use super::McpWriteBatch;
+    use super::{McpWhiteboardUpdate, McpWriteBatch};
     use crate::storage::{BoardRecord, DataTableRecord, MindmapRecord, PageRecord, Storage};
 
     const NOW: &str = "2026-07-12T00:00:00.000Z";
@@ -222,7 +570,11 @@ mod tests {
             boards: vec![BoardRecord {
                 id: "board_mcp".to_string(),
                 title: "Board".to_string(),
-                snapshot: json!({ "shapes": [], "connections": [] }),
+                snapshot: json!({
+                    "shapes": [{ "id": "entry", "type": "ellipse" }],
+                    "notes": [], "texts": [], "strokes": [],
+                    "connections": [{ "id": "entry-service", "from": "entry", "to": "service" }]
+                }),
                 created_at: NOW.to_string(),
                 updated_at: NOW.to_string(),
             }],
@@ -256,12 +608,19 @@ mod tests {
     fn appends_blocks_resources_search_refs_and_audit_in_one_transaction() {
         let storage = seed_storage();
 
-        let result = storage.append_mcp_content(complete_batch()).expect("append batch");
+        let result = storage
+            .append_mcp_content(complete_batch())
+            .expect("append batch");
 
         assert_eq!(result.page_id, "page_mcp_target");
         assert_eq!(result.created_block_ids.len(), 4);
-        assert_eq!(result.created_object_ids, vec!["board_mcp", "table_mcp", "map_mcp"]);
-        let page = storage.load_page_record("page_mcp_target").expect("load page");
+        assert_eq!(
+            result.created_object_ids,
+            vec!["board_mcp", "table_mcp", "map_mcp"]
+        );
+        let page = storage
+            .load_page_record("page_mcp_target")
+            .expect("load page");
         assert_eq!(page.blocks.len(), 4);
         assert_eq!(storage.block_ref_count().expect("refs"), 3);
         assert_eq!(storage.load_boards().expect("boards").len(), 1);
@@ -295,14 +654,284 @@ mod tests {
 
         assert!(storage.append_mcp_content(complete_batch()).is_err());
 
-        assert!(storage.load_page_record("page_mcp_target").expect("page").blocks.is_empty());
+        assert!(storage
+            .load_page_record("page_mcp_target")
+            .expect("page")
+            .blocks
+            .is_empty());
         assert!(storage.load_boards().expect("boards").is_empty());
         assert!(storage.load_data_tables().expect("tables").is_empty());
         assert!(storage.load_mindmaps().expect("mindmaps").is_empty());
         let audit_count: i64 = storage
             .connection
-            .query_row("SELECT COUNT(*) FROM zhiqi_mcp_audit_log", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM zhiqi_mcp_audit_log", [], |row| {
+                row.get(0)
+            })
             .expect("audit count");
         assert_eq!(audit_count, 0);
+    }
+
+    #[test]
+    fn appends_whiteboard_elements_cascades_connections_and_audits_the_change() {
+        let storage = seed_storage();
+        storage
+            .append_mcp_content(complete_batch())
+            .expect("seed whiteboard");
+
+        let result = storage
+            .update_mcp_whiteboard(McpWhiteboardUpdate {
+                board_id: "board_mcp".to_string(),
+                shapes: vec![json!({ "id": "service", "type": "rect" })],
+                notes: Vec::new(),
+                texts: Vec::new(),
+                connections: Vec::new(),
+                strokes: vec![json!({ "id": "annotation", "points": [] })],
+                erase_ids: vec!["entry".to_string()],
+                updated_at: NOW.to_string(),
+                audit_id: "mcp_audit_whiteboard_test".to_string(),
+            })
+            .expect("update whiteboard");
+
+        assert_eq!(result.added_node_ids, vec!["service"]);
+        assert_eq!(result.erased_ids, vec!["entry", "entry-service"]);
+        let board = storage
+            .load_mcp_whiteboard("board_mcp")
+            .expect("load updated board");
+        assert_eq!(board.snapshot["shapes"][0]["id"], "service");
+        assert!(board.snapshot["connections"].as_array().unwrap().is_empty());
+        assert_eq!(board.snapshot["strokes"][0]["id"], "annotation");
+        let audit: String = storage
+            .connection
+            .query_row(
+                "SELECT created_ids_json FROM zhiqi_mcp_audit_log WHERE id = ?1",
+                ["mcp_audit_whiteboard_test"],
+                |row| row.get(0),
+            )
+            .expect("whiteboard audit");
+        assert!(audit.contains("entry-service"));
+        assert!(audit.contains("service"));
+    }
+
+    #[test]
+    fn rolls_back_whiteboard_elements_and_audit_together_when_snapshot_write_fails() {
+        let storage = seed_storage();
+        storage
+            .append_mcp_content(complete_batch())
+            .expect("seed whiteboard");
+        storage
+            .connection
+            .execute_batch(
+                "CREATE TRIGGER fail_mcp_whiteboard_snapshot
+                   BEFORE UPDATE ON zhiqi_board_snapshots
+                   WHEN OLD.board_id = 'board_mcp'
+                   BEGIN SELECT RAISE(FAIL, 'forced whiteboard snapshot failure'); END;",
+            )
+            .expect("install trigger");
+
+        assert!(storage
+            .update_mcp_whiteboard(McpWhiteboardUpdate {
+                board_id: "board_mcp".to_string(),
+                shapes: vec![json!({ "id": "service", "type": "rect" })],
+                notes: Vec::new(),
+                texts: Vec::new(),
+                connections: Vec::new(),
+                strokes: Vec::new(),
+                erase_ids: vec!["entry".to_string()],
+                updated_at: NOW.to_string(),
+                audit_id: "mcp_audit_whiteboard_rollback".to_string(),
+            })
+            .is_err());
+
+        let board = storage
+            .load_mcp_whiteboard("board_mcp")
+            .expect("load rolled back board");
+        assert_eq!(board.snapshot["shapes"][0]["id"], "entry");
+        let audit_count: i64 = storage
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM zhiqi_mcp_audit_log WHERE id = ?1",
+                ["mcp_audit_whiteboard_rollback"],
+                |row| row.get(0),
+            )
+            .expect("audit count");
+        assert_eq!(audit_count, 0);
+    }
+
+    #[test]
+    fn rejects_unknown_erase_ids_without_changing_the_board_or_audit() {
+        let storage = seed_storage();
+        storage
+            .append_mcp_content(complete_batch())
+            .expect("seed board");
+        let before = storage
+            .load_mcp_whiteboard("board_mcp")
+            .expect("board before");
+
+        let error = storage
+            .update_mcp_whiteboard(McpWhiteboardUpdate {
+                board_id: "board_mcp".to_string(),
+                shapes: Vec::new(),
+                notes: Vec::new(),
+                texts: Vec::new(),
+                connections: Vec::new(),
+                strokes: Vec::new(),
+                erase_ids: vec!["missing".to_string()],
+                updated_at: "later".to_string(),
+                audit_id: "missing_erase".to_string(),
+            })
+            .expect_err("unknown erase fails");
+
+        assert_eq!(error.code, "invalid_payload");
+        assert_eq!(
+            storage
+                .load_mcp_whiteboard("board_mcp")
+                .expect("board after"),
+            before
+        );
+        let audit_count: i64 = storage
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM zhiqi_mcp_audit_log WHERE id = 'missing_erase'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("audit count");
+        assert_eq!(audit_count, 0);
+    }
+
+    #[test]
+    fn rejects_an_image_erase_id_without_changing_the_board_or_audit() {
+        let storage = seed_storage();
+        let mut batch = complete_batch();
+        batch.boards[0].snapshot["images"] = json!([{ "id": "legacy-image" }]);
+        storage.append_mcp_content(batch).expect("seed board");
+        let before = storage
+            .load_mcp_whiteboard("board_mcp")
+            .expect("board before");
+
+        let error = storage
+            .update_mcp_whiteboard(McpWhiteboardUpdate {
+                board_id: "board_mcp".to_string(),
+                shapes: Vec::new(),
+                notes: Vec::new(),
+                texts: Vec::new(),
+                connections: Vec::new(),
+                strokes: Vec::new(),
+                erase_ids: vec!["legacy-image".to_string()],
+                updated_at: "later".to_string(),
+                audit_id: "image_erase".to_string(),
+            })
+            .expect_err("image erase fails");
+
+        assert_eq!(error.code, "invalid_payload");
+        assert_eq!(
+            storage
+                .load_mcp_whiteboard("board_mcp")
+                .expect("board after"),
+            before
+        );
+        let audit_count: i64 = storage
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM zhiqi_mcp_audit_log WHERE id = 'image_erase'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("audit count");
+        assert_eq!(audit_count, 0);
+    }
+
+    #[test]
+    fn creates_child_page_and_parent_block_atomically() {
+        let storage = seed_storage();
+        let child_page = PageRecord {
+            id: "page_mcp_child".to_string(),
+            parent_id: Some("page_mcp_target".to_string()),
+            title: "Child".to_string(),
+            icon: None,
+            cover: None,
+            properties: None,
+            is_full_width: None,
+            is_small_text: None,
+            font_family: None,
+            show_outline: None,
+            blocks: Vec::new(),
+            created_at: NOW.to_string(),
+            updated_at: NOW.to_string(),
+        };
+
+        storage
+            .create_mcp_page(child_page.clone(), Some("block_mcp_child".to_string()))
+            .expect("create child page");
+
+        let parent = storage
+            .load_page_record("page_mcp_target")
+            .expect("load parent page");
+        assert_eq!(
+            parent.blocks,
+            vec![json!({
+                "id": "block_mcp_child",
+                "type": "child_page",
+                "pageId": "page_mcp_child",
+            })]
+        );
+        assert_eq!(
+            storage
+                .load_page_record("page_mcp_child")
+                .expect("load child page")
+                .parent_id
+                .as_deref(),
+            Some("page_mcp_target")
+        );
+
+        let missing_parent_child = PageRecord {
+            id: "page_mcp_orphan".to_string(),
+            parent_id: Some("page_missing".to_string()),
+            ..child_page
+        };
+        assert!(storage
+            .create_mcp_page(missing_parent_child, Some("block_mcp_orphan".to_string()))
+            .is_err());
+        assert!(storage.load_page_record("page_mcp_orphan").is_err());
+    }
+
+    #[test]
+    fn rolls_back_child_page_when_parent_block_write_fails() {
+        let storage = seed_storage();
+        storage
+            .connection
+            .execute_batch(
+                "CREATE TRIGGER fail_mcp_parent_block_write
+                   BEFORE UPDATE ON zhiqi_page_contents
+                   WHEN OLD.page_id = 'page_mcp_target'
+                   BEGIN SELECT RAISE(FAIL, 'forced parent block failure'); END;",
+            )
+            .expect("install trigger");
+        let child_page = PageRecord {
+            id: "page_mcp_child_rollback".to_string(),
+            parent_id: Some("page_mcp_target".to_string()),
+            title: "Child".to_string(),
+            icon: None,
+            cover: None,
+            properties: None,
+            is_full_width: None,
+            is_small_text: None,
+            font_family: None,
+            show_outline: None,
+            blocks: Vec::new(),
+            created_at: NOW.to_string(),
+            updated_at: NOW.to_string(),
+        };
+
+        assert!(storage
+            .create_mcp_page(child_page, Some("block_mcp_child_rollback".to_string()))
+            .is_err());
+
+        assert!(storage
+            .load_page_record("page_mcp_target")
+            .expect("load parent page")
+            .blocks
+            .is_empty());
+        assert!(storage.load_page_record("page_mcp_child_rollback").is_err());
     }
 }
