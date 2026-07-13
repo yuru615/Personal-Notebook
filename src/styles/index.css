@@ -1260,6 +1260,7 @@ a {
 .settings-center-nav {
   position: sticky;
   top: 24px;
+  min-height: calc(100vh - 48px);
   display: grid;
   gap: 14px;
   align-self: start;
@@ -1302,6 +1303,14 @@ a {
 .settings-center-nav-item-active {
   background: #f3f2ef;
   color: #37352f;
+}
+
+.settings-center-version {
+  margin-top: auto;
+  color: #9b9a97;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 0 12px;
 }
 
 .settings-center-panel {
