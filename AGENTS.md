@@ -108,6 +108,12 @@ npx vitest run src/lib/workspaceRepository.test.ts
 npx vitest run -t "restores window"
 ```
 
+## 构建缓存位置
+
+- Rust/Cargo 构建缓存只能放在 `E:` 盘，默认使用 `E:\BuildCache\cargo-target\zhixi`。
+- 禁止把 `CARGO_TARGET_DIR` 指向 `TEMP`、`TMP` 或任何 `C:` 盘路径；不要使用 `$env:TEMP\zhixi-*` 作为临时构建目录。
+- 需要隔离并行任务时，在 `E:\BuildCache\cargo-target\zhixi\` 下创建任务子目录，并在任务结束后清理不再使用的子目录。
+
 ## 桌面端边界
 
 - Tauri 配置集中在 `src-tauri/tauri.conf.json`。其中 `beforeDevCommand`/`beforeBuildCommand` 连接 Vite 构建，`devUrl` 是 `http://localhost:5173`，`frontendDist` 指向 `../dist`。

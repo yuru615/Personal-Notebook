@@ -21,6 +21,11 @@ export type SettingsSectionKey =
   | 'experimental'
 
 export const DEFAULT_SETTINGS_SECTION: SettingsSectionKey = 'general'
+export type LocalMcpOperation = 'idle' | 'enabling' | 'disabling' | 'regenerating'
+export interface LocalMcpOperationFailure {
+  operation: Exclude<LocalMcpOperation, 'idle'>
+  error: unknown
+}
 
 const SETTINGS_SECTIONS: Array<{ key: SettingsSectionKey; label: string }> = [
   { key: 'general', label: '通用' },
@@ -43,11 +48,16 @@ export function normalizeSettingsSection(section: string | undefined): SettingsS
 export interface SettingsCenterProps {
   activeSection: SettingsSectionKey
   appSettings: AppSettings
+  localMcpOperation: LocalMcpOperation
+  localMcpOperationError: LocalMcpOperationFailure | null
   workspaceSettings: WorkspaceSettings
   onSectionChange: (section: SettingsSectionKey) => void
   onSetPageDefaults: (defaults: Partial<PageDisplayDefaults>) => void | Promise<void>
   onSetAppCloseAction: (closeAction: AppCloseAction) => void | Promise<void>
   onSetAppAccentTheme: (theme: AppAccentTheme) => void | Promise<void>
+  onEnableLocalMcp: () => Promise<void>
+  onDisableLocalMcp: () => Promise<void>
+  onRegenerateLocalMcpToken: () => Promise<void>
   onSetSidebarLayout: (layout: NonNullable<WorkspaceSettings['sidebarLayout']>) => void | Promise<void>
   onSetSidebarWidth: (width: number) => void | Promise<void>
   onSetClipboardCaptureMode: (
@@ -101,14 +111,64 @@ function getSidebarWidthMax() {
   return Math.max(220, Math.round(window.innerWidth / 4))
 }
 
+function serializeLocalMcpConfig(mcp: NonNullable<AppSettings['mcp']>) {
+  return JSON.stringify({
+    mcpServers: {
+      zhixi: {
+        type: 'streamableHttp',
+        url: `http://127.0.0.1:${mcp.port}/mcp`,
+        headers: { Authorization: `Bearer ${mcp.token}` },
+      },
+    },
+  })
+}
+
+function getLocalMcpOperationError(error: unknown, nextEnabled: boolean) {
+  let code = ''
+  let message = ''
+
+  if (error instanceof Error) {
+    message = error.message
+  } else if (typeof error === 'string') {
+    message = error
+  } else if (error && typeof error === 'object') {
+    const record = error as { code?: unknown; message?: unknown }
+    code = typeof record.code === 'string' ? record.code : ''
+    message = typeof record.message === 'string' ? record.message : ''
+  }
+
+  if (/requires the desktop app|desktop[-_ ]only|仅支持.*桌面/i.test(message)) {
+    return '本机 MCP 仅支持知栖桌面版，请在桌面应用中重试。'
+  }
+
+  const action = nextEnabled ? '启用' : '停用'
+  const hasPortInUseMessage =
+    /port(?: is)? (?:busy|in use)|address already in use|only one usage of each socket address|os error (?:48|98|10048)\b|端口(?:已被|被|已|正被|正在被)?占用/i.test(
+      message,
+    )
+  const isPortInUse =
+    (code === 'io_error' || code === '') && hasPortInUseMessage
+
+  if (isPortInUse) {
+    return `${action}失败，请检查端口是否被占用，然后重试。`
+  }
+
+  return `${action}失败，请稍后重试。`
+}
+
 export function SettingsCenter({
   activeSection,
   appSettings,
+  localMcpOperation: mcpOperation,
+  localMcpOperationError: mcpOperationError,
   workspaceSettings,
   onSectionChange,
   onSetPageDefaults,
   onSetAppCloseAction,
   onSetAppAccentTheme,
+  onEnableLocalMcp,
+  onDisableLocalMcp,
+  onRegenerateLocalMcpToken,
   onSetSidebarLayout,
   onSetSidebarWidth,
   onSetClipboardCaptureMode,
@@ -148,11 +208,27 @@ export function SettingsCenter({
   )
   const closeAction = appSettings.closeAction === 'quit' ? 'quit' : 'hide_to_tray'
   const accentTheme = appSettings.accentTheme ?? 'blue_gray'
+  const localMcp = appSettings.mcp
+  const [mcpCopyStatus, setMcpCopyStatus] = useState<
+    'idle' | 'copying' | 'copied' | 'error'
+  >('idle')
+  const mcpCopyPendingRef = useRef(false)
+  const mcpCopyVersionRef = useRef(0)
+  const mcpOperationPendingRef = useRef(false)
+  const mcpOperationVersionRef = useRef(0)
 
   useEffect(() => {
     setDraftSidebarWidth(sidebarWidth)
     pendingSidebarWidthRef.current = null
   }, [sidebarWidth])
+
+  useEffect(() => {
+    mcpCopyVersionRef.current += 1
+    mcpCopyPendingRef.current = false
+    mcpOperationVersionRef.current += 1
+    mcpOperationPendingRef.current = false
+    setMcpCopyStatus('idle')
+  }, [localMcp?.enabled, localMcp?.port, localMcp?.token])
 
   function openSection(section: SettingsSectionKey) {
     setCurrentSection(section)
@@ -176,6 +252,76 @@ export function SettingsCenter({
     } catch {
       if (pendingSidebarWidthRef.current === normalizedWidth) {
         pendingSidebarWidthRef.current = null
+      }
+    }
+  }
+
+  async function copyLocalMcpConfig() {
+    if (mcpCopyPendingRef.current) {
+      return
+    }
+
+    if (!localMcp?.enabled || !navigator.clipboard) {
+      setMcpCopyStatus('error')
+      return
+    }
+
+    mcpCopyPendingRef.current = true
+    const copyVersion = ++mcpCopyVersionRef.current
+    setMcpCopyStatus('copying')
+
+    try {
+      await navigator.clipboard.writeText(serializeLocalMcpConfig(localMcp))
+      if (mcpCopyVersionRef.current === copyVersion) {
+        setMcpCopyStatus('copied')
+      }
+    } catch {
+      if (mcpCopyVersionRef.current === copyVersion) {
+        setMcpCopyStatus('error')
+      }
+    } finally {
+      if (mcpCopyVersionRef.current === copyVersion) {
+        mcpCopyPendingRef.current = false
+      }
+    }
+  }
+
+  async function toggleLocalMcp(nextEnabled: boolean) {
+    if (mcpOperationPendingRef.current || mcpOperation !== 'idle') {
+      return
+    }
+
+    mcpOperationPendingRef.current = true
+    const operationVersion = ++mcpOperationVersionRef.current
+
+    try {
+      await (nextEnabled ? onEnableLocalMcp() : onDisableLocalMcp())
+    } catch {
+      // The stable parent operation state carries the visible error.
+    } finally {
+      if (mcpOperationVersionRef.current === operationVersion) {
+        mcpOperationPendingRef.current = false
+      }
+    }
+  }
+
+  async function regenerateLocalMcpToken() {
+    if (mcpOperationPendingRef.current || mcpOperation !== 'idle') {
+      return
+    }
+    if (!window.confirm('重新生成后，已配置的 AI 客户端需要粘贴新的 MCP 配置。是否继续？')) {
+      return
+    }
+
+    mcpOperationPendingRef.current = true
+    const operationVersion = ++mcpOperationVersionRef.current
+    try {
+      await onRegenerateLocalMcpToken()
+    } catch {
+      // The stable parent operation state carries the visible error.
+    } finally {
+      if (mcpOperationVersionRef.current === operationVersion) {
+        mcpOperationPendingRef.current = false
       }
     }
   }
@@ -679,10 +825,77 @@ export function SettingsCenter({
         ) : null}
 
         {currentSection === 'experimental' ? (
-          <section className="settings-section">
-            <h2 className="settings-section-title">实验功能</h2>
-            <p className="settings-placeholder">这里先留空，后面逐项接入。</p>
-          </section>
+          <div className="settings-section-stack">
+            <section className="settings-section">
+              <h2 className="settings-section-title">实验功能</h2>
+              <div className="settings-card">
+                <label className="settings-toggle-row">
+                  <span>
+                    <span className="settings-card-label">启用本机 MCP 接入</span>
+                    <span className="settings-card-help">允许已授权的本机 AI 客户端访问知栖。</span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={localMcp?.enabled === true}
+                    disabled={mcpOperation !== 'idle'}
+                    onChange={(event) => {
+                      void toggleLocalMcp(event.currentTarget.checked)
+                    }}
+                  />
+                </label>
+                {mcpOperation === 'enabling' ? (
+                  <div className="settings-card-help" role="status">正在启用本机 MCP 接入…</div>
+                ) : null}
+                {mcpOperation === 'disabling' ? (
+                  <div className="settings-card-help" role="status">正在停用本机 MCP 接入…</div>
+                ) : null}
+                {mcpOperation === 'regenerating' ? (
+                  <div className="settings-card-help" role="status">正在重新生成 MCP 令牌…</div>
+                ) : null}
+                {mcpOperationError ? (
+                  <div className="settings-card-help" role="alert">
+                    {getLocalMcpOperationError(
+                      mcpOperationError.error,
+                      mcpOperationError.operation === 'enabling',
+                    )}
+                  </div>
+                ) : null}
+                {localMcp?.enabled ? (
+                  <>
+                    <div className="settings-card-divider" />
+                    <div className="settings-card-field">
+                      <div className="settings-card-label">连接地址</div>
+                      <div className="settings-card-help">http://127.0.0.1:{localMcp.port}/mcp</div>
+                      <button
+                        type="button"
+                        className="settings-action-button"
+                        disabled={mcpCopyStatus === 'copying'}
+                        onClick={() => void copyLocalMcpConfig()}
+                      >
+                        复制 MCP 配置
+                      </button>
+                      <button
+                        type="button"
+                        className="settings-action-button"
+                        disabled={mcpOperation !== 'idle'}
+                        onClick={() => void regenerateLocalMcpToken()}
+                      >
+                        重新生成令牌
+                      </button>
+                      {mcpCopyStatus === 'copied' ? (
+                        <div className="settings-card-help" role="status">配置已复制。</div>
+                      ) : null}
+                      {mcpCopyStatus === 'error' ? (
+                        <div className="settings-card-help" role="alert">
+                          复制失败，请检查系统剪贴板权限。
+                        </div>
+                      ) : null}
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            </section>
+          </div>
         ) : null}
       </section>
     </div>

@@ -250,6 +250,13 @@ export interface SearchPreferences {
 export interface AppSettings {
   closeAction?: AppCloseAction
   accentTheme?: AppAccentTheme
+  mcp?: McpSettings
+}
+
+export interface McpSettings {
+  enabled: boolean
+  port: number
+  token: string
 }
 
 export type BlockRecord =

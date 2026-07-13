@@ -21,11 +21,21 @@ describe('appSettingsRepository', () => {
     await repository.save({
       closeAction: 'quit',
       accentTheme: 'violet',
+      mcp: {
+        enabled: true,
+        port: 38472,
+        token: 'test-token',
+      },
     })
 
     await expect(repository.load()).resolves.toEqual({
       closeAction: 'quit',
       accentTheme: 'violet',
+      mcp: {
+        enabled: true,
+        port: 38472,
+        token: 'test-token',
+      },
     })
   })
 })

@@ -2,7 +2,7 @@ use rusqlite::{Connection, OptionalExtension};
 
 use super::error::StorageResult;
 
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
     connection.pragma_update(None, "foreign_keys", "ON")?;
@@ -20,6 +20,15 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
         CREATE TABLE IF NOT EXISTS zhixi_settings (
           id TEXT PRIMARY KEY NOT NULL,
           record_json TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS zhixi_mcp_audit_log (
+          id TEXT PRIMARY KEY NOT NULL,
+          created_at TEXT NOT NULL,
+          client_name TEXT NOT NULL,
+          tool_name TEXT NOT NULL,
+          page_id TEXT NOT NULL REFERENCES zhixi_pages(id) ON DELETE CASCADE,
+          created_ids_json TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS zhixi_pages (
@@ -209,6 +218,10 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
         migrate_to_v4(connection)?;
     }
 
+    if current_version < 5 {
+        migrate_to_v5(connection)?;
+    }
+
     connection.execute(
         "INSERT INTO zhixi_meta (key, value) VALUES ('schema_version', ?1)
           ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -302,6 +315,22 @@ fn migrate_to_v4(connection: &Connection) -> StorageResult<()> {
     Ok(())
 }
 
+fn migrate_to_v5(connection: &Connection) -> StorageResult<()> {
+    connection.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS zhixi_mcp_audit_log (
+          id TEXT PRIMARY KEY NOT NULL,
+          created_at TEXT NOT NULL,
+          client_name TEXT NOT NULL,
+          tool_name TEXT NOT NULL,
+          page_id TEXT NOT NULL REFERENCES zhixi_pages(id) ON DELETE CASCADE,
+          created_ids_json TEXT NOT NULL
+        );
+        ",
+    )?;
+    Ok(())
+}
+
 fn ensure_column(
     connection: &Connection,
     table_name: &str,
@@ -318,7 +347,11 @@ fn ensure_column(
     Ok(())
 }
 
-fn column_exists(connection: &Connection, table_name: &str, column_name: &str) -> StorageResult<bool> {
+fn column_exists(
+    connection: &Connection,
+    table_name: &str,
+    column_name: &str,
+) -> StorageResult<bool> {
     let mut statement = connection.prepare(&format!("PRAGMA table_info({table_name})"))?;
     let column_names = statement
         .query_map([], |row| row.get::<_, String>(1))?

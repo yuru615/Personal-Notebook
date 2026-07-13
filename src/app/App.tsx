@@ -1,6 +1,7 @@
 ﻿import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Suspense, lazy } from 'react'
 import { useMemo } from 'react'
+import { listen } from '@tauri-apps/api/event'
 import {
   HashRouter,
   MemoryRouter,
@@ -30,6 +31,8 @@ import { SearchDialog } from '../components/search/SearchDialog'
 import {
   DEFAULT_SETTINGS_SECTION,
   SettingsCenter,
+  type LocalMcpOperation,
+  type LocalMcpOperationFailure,
   normalizeSettingsSection,
 } from '../components/settings/SettingsCenter'
 import ConfirmDialog from '../components/dataTable/components/table/ConfirmDialog'
@@ -90,7 +93,7 @@ import {
   saveTextFile,
 } from '../lib/fileAccess'
 import { type WorkspaceArchiveProgress } from '../lib/storageClient'
-import { createWorkspaceStore } from '../store/createWorkspaceStore'
+import { createWorkspaceStore, type McpWorkspaceUpdate } from '../store/createWorkspaceStore'
 import { uiCopy } from '../ui/copy'
 import { sanitizeFileNameSegment } from '../utils/fileName'
 import { createId } from '../utils/id'
@@ -208,9 +211,23 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
   const [bootstrapError, setBootstrapError] = useState<unknown>(null)
   const [archiveTask, setArchiveTask] = useState<ArchiveTaskStatus | null>(null)
   const [desktopRouteRequest, setDesktopRouteRequest] = useState<DesktopRouteRequest | null>(null)
+  const [localMcpOperation, setLocalMcpOperation] = useState<LocalMcpOperation>('idle')
+  const [localMcpOperationError, setLocalMcpOperationError] =
+    useState<LocalMcpOperationFailure | null>(null)
   const bootstrapPromiseRef = useRef<Promise<void> | null>(null)
   const archiveTaskClearTimerRef = useRef<number | null>(null)
+  const localMcpOperationVersionRef = useRef(0)
   const setCurrentPage = store.getState().setCurrentPage
+
+  useEffect(() => {
+    localMcpOperationVersionRef.current += 1
+    setLocalMcpOperation('idle')
+    setLocalMcpOperationError(null)
+  }, [
+    state.appSettings.mcp?.enabled,
+    state.appSettings.mcp?.port,
+    state.appSettings.mcp?.token,
+  ])
 
   useDesktopClipboardCapture({
     isBootstrapped,
@@ -221,6 +238,31 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
   function ensureBootstrap() {
     bootstrapPromiseRef.current ??= store.getState().bootstrap()
     return bootstrapPromiseRef.current
+  }
+
+  function runLocalMcpOperation(
+    operation: Exclude<LocalMcpOperation, 'idle'>,
+    action: () => Promise<void>,
+  ) {
+    const operationVersion = ++localMcpOperationVersionRef.current
+    setLocalMcpOperation(operation)
+    setLocalMcpOperationError(null)
+
+    const task = (async () => {
+      try {
+        await action()
+      } catch (error) {
+        if (localMcpOperationVersionRef.current === operationVersion) {
+          setLocalMcpOperationError({ operation, error })
+        }
+        throw error
+      } finally {
+        if (localMcpOperationVersionRef.current === operationVersion) {
+          setLocalMcpOperation('idle')
+        }
+      }
+    })()
+    return task
   }
 
   useEffect(() => {
@@ -245,6 +287,25 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
 
     return () => {
       isActive = false
+    }
+  }, [store])
+
+  useEffect(() => {
+    if (!isDesktopRuntime()) {
+      return
+    }
+
+    let unlistenMcpWorkspace: (() => void) | null = null
+    void listen<McpWorkspaceUpdate>('zhixi://mcp-workspace-updated', async (event) => {
+      await store.getState().refreshMcpWorkspace(event.payload)
+    })
+      .then((unlisten) => {
+        unlistenMcpWorkspace = unlisten
+      })
+      .catch(() => undefined)
+
+    return () => {
+      unlistenMcpWorkspace?.()
     }
   }, [store])
 
@@ -558,6 +619,8 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       pages={state.pages}
       pageProperties={state.pageProperties}
       appSettings={state.appSettings}
+      localMcpOperation={localMcpOperation}
+      localMcpOperationError={localMcpOperationError}
       workspaceSettings={state.settings}
       currentPageId={state.currentPageId}
       inboxPageId={state.settings.inboxPageId ?? null}
@@ -572,6 +635,19 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onSetSidebarWidth={(width) => store.getState().setSidebarWidth(width)}
       onSetAppCloseAction={(closeAction) => store.getState().setAppCloseAction(closeAction)}
       onSetAppAccentTheme={(theme) => store.getState().setAppAccentTheme(theme)}
+      onEnableLocalMcp={() =>
+        runLocalMcpOperation('enabling', async () => {
+          await store.getState().enableLocalMcp()
+        })
+      }
+      onDisableLocalMcp={() =>
+        runLocalMcpOperation('disabling', () => store.getState().disableLocalMcp())
+      }
+      onRegenerateLocalMcpToken={() =>
+        runLocalMcpOperation('regenerating', async () => {
+          await store.getState().regenerateLocalMcpToken()
+        })
+      }
       onSetClipboardCaptureMode={(mode) => store.getState().setClipboardCaptureMode(mode)}
       onSetBlockSelectionStartMode={(mode) =>
         store.getState().setBlockSelectionStartMode(mode)
@@ -830,6 +906,8 @@ interface AppRoutesProps {
   pages: AppState['pages']
   pageProperties: PagePropertyDefinition[]
   appSettings: AppState['appSettings']
+  localMcpOperation: LocalMcpOperation
+  localMcpOperationError: LocalMcpOperationFailure | null
   workspaceSettings: WorkspaceSettings
   currentPageId: AppState['currentPageId']
   inboxPageId: string | null
@@ -842,6 +920,9 @@ interface AppRoutesProps {
   onCreatePage: (parentId?: string, options?: CreatePageOptions) => Promise<PageRecord>
   onSetAppCloseAction: (closeAction: 'hide_to_tray' | 'quit') => Promise<void>
   onSetAppAccentTheme: (theme: AppAccentTheme) => Promise<void>
+  onEnableLocalMcp: () => Promise<void>
+  onDisableLocalMcp: () => Promise<void>
+  onRegenerateLocalMcpToken: () => Promise<void>
   onSetSidebarLayout: (layout: NonNullable<WorkspaceSettings['sidebarLayout']>) => Promise<void>
   onSetSidebarWidth: (width: number) => Promise<void>
   onSetClipboardCaptureMode: (
@@ -987,6 +1068,8 @@ function AppRoutes({
   pages,
   pageProperties,
   appSettings,
+  localMcpOperation,
+  localMcpOperationError,
   workspaceSettings,
   currentPageId,
   inboxPageId,
@@ -999,6 +1082,9 @@ function AppRoutes({
   onCreatePage,
   onSetAppCloseAction,
   onSetAppAccentTheme,
+  onEnableLocalMcp,
+  onDisableLocalMcp,
+  onRegenerateLocalMcpToken,
   onSetSidebarLayout,
   onSetSidebarWidth,
   onSetClipboardCaptureMode,
@@ -1262,9 +1348,14 @@ function AppRoutes({
             element={
               <SettingsRoute
                 appSettings={appSettings}
+                localMcpOperation={localMcpOperation}
+                localMcpOperationError={localMcpOperationError}
                 workspaceSettings={workspaceSettings}
                 onSetAppCloseAction={onSetAppCloseAction}
                 onSetAppAccentTheme={onSetAppAccentTheme}
+                onEnableLocalMcp={onEnableLocalMcp}
+                onDisableLocalMcp={onDisableLocalMcp}
+                onRegenerateLocalMcpToken={onRegenerateLocalMcpToken}
                 onSetSidebarLayout={onSetSidebarLayout}
                 onSetSidebarWidth={onSetSidebarWidth}
                 onSetClipboardCaptureMode={onSetClipboardCaptureMode}
@@ -1462,9 +1553,14 @@ function AppRoutes({
 
 interface SettingsRouteProps {
   appSettings: AppState['appSettings']
+  localMcpOperation: LocalMcpOperation
+  localMcpOperationError: LocalMcpOperationFailure | null
   workspaceSettings: WorkspaceSettings
   onSetAppCloseAction: (closeAction: 'hide_to_tray' | 'quit') => Promise<void>
   onSetAppAccentTheme: (theme: AppAccentTheme) => Promise<void>
+  onEnableLocalMcp: () => Promise<void>
+  onDisableLocalMcp: () => Promise<void>
+  onRegenerateLocalMcpToken: () => Promise<void>
   onSetSidebarLayout: (layout: NonNullable<WorkspaceSettings['sidebarLayout']>) => Promise<void>
   onSetSidebarWidth: (width: number) => Promise<void>
   onSetClipboardCaptureMode: (
@@ -1491,9 +1587,14 @@ interface SettingsRouteProps {
 
 function SettingsRoute({
   appSettings,
+  localMcpOperation,
+  localMcpOperationError,
   workspaceSettings,
   onSetAppCloseAction,
   onSetAppAccentTheme,
+  onEnableLocalMcp,
+  onDisableLocalMcp,
+  onRegenerateLocalMcpToken,
   onSetSidebarLayout,
   onSetSidebarWidth,
   onSetClipboardCaptureMode,
@@ -1519,6 +1620,8 @@ function SettingsRoute({
     <SettingsCenter
       activeSection={activeSection}
       appSettings={appSettings}
+      localMcpOperation={localMcpOperation}
+      localMcpOperationError={localMcpOperationError}
       workspaceSettings={workspaceSettings}
       onSectionChange={(nextSection) => {
         navigate(`/settings/${nextSection}`, { replace: nextSection === activeSection })
@@ -1532,6 +1635,9 @@ function SettingsRoute({
       onSetAppAccentTheme={(theme) => {
         void onSetAppAccentTheme(theme)
       }}
+      onEnableLocalMcp={onEnableLocalMcp}
+      onDisableLocalMcp={onDisableLocalMcp}
+      onRegenerateLocalMcpToken={onRegenerateLocalMcpToken}
       onSetSidebarLayout={(layout) => {
         void onSetSidebarLayout(layout)
       }}

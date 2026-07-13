@@ -1,11 +1,13 @@
 mod assets;
 pub mod commands;
 mod error;
+mod mcp;
 mod models;
 mod schema;
 mod search;
 
 use std::{
+    collections::HashSet,
     fs,
     io::{self, BufReader, BufWriter, Cursor, Read, Seek, Write},
     path::{Path, PathBuf},
@@ -21,13 +23,14 @@ use serde::Serialize;
 use serde_json::Value;
 
 pub use error::{StorageError, StorageResult};
+pub use mcp::{McpWriteBatch, McpWriteResult};
 #[allow(unused_imports)]
 pub use models::PagePackageImportResult;
 pub use models::{
     AppSettings, AssetMeta, BoardRecord, BootstrapPayload, DataTableRecord, DeleteResult,
-    ImportAssetFileInput, LoadedPage, MindmapRecord, PageMeta, PagePackageManifest,
+    ImportAssetFileInput, LoadedPage, McpSettings, MindmapRecord, PageMeta, PagePackageManifest,
     PagePropertyDefinition, PageRecord, SaveResult, SearchResult, SyncedBlockGroupRecord,
-    WorkspaceSettings, WorkspaceSnapshot, WriteAssetInput,
+    TrackedAssetWrite, WorkspaceSettings, WorkspaceSnapshot, WriteAssetInput,
 };
 
 const DATABASE_FILE_NAME: &str = "zhixi.db";
@@ -96,6 +99,13 @@ impl StorageState {
             .lock()
             .map_err(|_| StorageError::new("conflict", "storage lock poisoned"))?;
         task(&storage)
+    }
+
+    #[cfg(test)]
+    pub fn open_in_memory_for_tests() -> StorageResult<Self> {
+        Ok(Self {
+            storage: Arc::new(Mutex::new(Storage::open_in_memory_for_tests()?)),
+        })
     }
 }
 
@@ -207,6 +217,24 @@ impl Storage {
 
     pub fn replace_workspace_backup(&self, snapshot: WorkspaceSnapshot) -> StorageResult<()> {
         self.with_transaction(|| {
+            let app_settings = self.load_app_settings()?;
+            let mcp_audit_log = {
+                let mut statement = self.connection.prepare(
+                    "SELECT id, created_at, client_name, tool_name, page_id, created_ids_json
+                     FROM zhixi_mcp_audit_log",
+                )?;
+                let rows = statement.query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                })?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            };
             self.clear_workspace()?;
             self.save_settings(&snapshot.settings)?;
             self.save_page_properties(&snapshot.page_properties)?;
@@ -228,6 +256,28 @@ impl Storage {
             }
             self.rebuild_search_documents()?;
 
+            if let Some(app_settings) = &app_settings {
+                self.save_app_settings(app_settings)?;
+            }
+            for (id, created_at, client_name, tool_name, page_id, created_ids_json) in mcp_audit_log
+            {
+                if self.page_position(&page_id)?.is_some() {
+                    self.connection.execute(
+                        "INSERT INTO zhixi_mcp_audit_log
+                           (id, created_at, client_name, tool_name, page_id, created_ids_json)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        params![
+                            id,
+                            created_at,
+                            client_name,
+                            tool_name,
+                            page_id,
+                            created_ids_json
+                        ],
+                    )?;
+                }
+            }
+
             Ok(())
         })
     }
@@ -236,13 +286,61 @@ impl Storage {
         self.load_page_record(page_id).map(Into::into)
     }
 
-    pub fn save_page(&self, page: PageRecord) -> StorageResult<SaveResult> {
+    pub fn save_page(&self, mut page: PageRecord) -> StorageResult<SaveResult> {
         self.with_transaction(|| {
-            let position = self
-                .page_position(&page.id)?
-                .unwrap_or_else(|| self.next_position("zhixi_pages"));
+            let position = match self.page_position(&page.id)? {
+                Some(position) => {
+                    let persisted = self.load_page_record(&page.id)?;
+                    merge_missing_remote_blocks(&mut page, &persisted);
+                    position
+                }
+                None => self.next_position("zhixi_pages"),
+            };
             self.insert_page(&page, position)?;
             self.rebuild_resource_search_documents()?;
+            Ok(SaveResult { id: page.id })
+        })
+    }
+
+    pub fn append_mcp_page_blocks(
+        &self,
+        page_id: &str,
+        blocks: Vec<Value>,
+        updated_at: String,
+    ) -> StorageResult<SaveResult> {
+        let created_ids = blocks
+            .iter()
+            .filter_map(|block| block.get("id").and_then(Value::as_str))
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+
+        if blocks.is_empty() {
+            return Err(StorageError::invalid_payload(
+                "at least one block is required",
+            ));
+        }
+
+        self.with_transaction(|| {
+            let mut page = self.load_page_record(page_id)?;
+            page.blocks.extend(blocks);
+            page.updated_at = updated_at.clone();
+            let position = self
+                .page_position(&page.id)?
+                .ok_or_else(|| StorageError::not_found("page not found"))?;
+            self.insert_page(&page, position)?;
+            self.rebuild_resource_search_documents()?;
+            self.connection.execute(
+                "INSERT INTO zhixi_mcp_audit_log (id, created_at, client_name, tool_name, page_id, created_ids_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![
+                    format!("mcp_audit_{}", created_ids.first().map(String::as_str).unwrap_or(page_id)),
+                    updated_at,
+                    "local-mcp",
+                    "append_content",
+                    page_id,
+                    serde_json::to_string(&created_ids)?,
+                ],
+            )?;
             Ok(SaveResult { id: page.id })
         })
     }
@@ -333,6 +431,10 @@ impl Storage {
         assets::write_asset(&self.connection, &self.assets_dir, input)
     }
 
+    pub fn write_asset_tracked(&self, input: WriteAssetInput) -> StorageResult<TrackedAssetWrite> {
+        assets::write_asset_tracked(&self.connection, &self.assets_dir, input)
+    }
+
     pub fn import_asset_file(&self, input: ImportAssetFileInput) -> StorageResult<AssetMeta> {
         let path = PathBuf::from(&input.path);
         let name = path
@@ -362,6 +464,40 @@ impl Storage {
 
     pub fn cleanup_orphan_assets(&self) -> StorageResult<usize> {
         assets::cleanup_orphan_assets(&self.connection, &self.assets_dir)
+    }
+
+    pub fn remove_asset_if_unreferenced(&self, asset_id: &str) -> StorageResult<bool> {
+        assets::remove_asset_if_unreferenced(&self.connection, &self.assets_dir, asset_id)
+    }
+
+    pub fn rollback_tracked_asset(&self, written: &TrackedAssetWrite) -> StorageResult<bool> {
+        if !written.created {
+            return Ok(false);
+        }
+
+        self.remove_asset_if_unreferenced(&written.meta.id)
+    }
+
+    pub(crate) fn rollback_tracked_assets(
+        &self,
+        written_assets: &[TrackedAssetWrite],
+        mut error: StorageError,
+    ) -> StorageError {
+        for written in written_assets
+            .iter()
+            .rev()
+            .filter(|written| written.created)
+        {
+            if let Err(rollback_error) = self.rollback_tracked_asset(written) {
+                error.message.push_str(&format!(
+                    "; failed to roll back asset {} at {}: {}",
+                    written.meta.id,
+                    self.assets_dir.join(&written.meta.relative_path).display(),
+                    rollback_error.message
+                ));
+            }
+        }
+        error
     }
 
     #[allow(dead_code)]
@@ -473,8 +609,12 @@ impl Storage {
             }
         }
         let mut data_table_ids = collect_ref_ids_from_pages(&pages, "data_table");
-        for data_table_id in collect_ref_ids_from_synced_groups(&synced_block_groups, "data_table") {
-            if !data_table_ids.iter().any(|existing| existing == &data_table_id) {
+        for data_table_id in collect_ref_ids_from_synced_groups(&synced_block_groups, "data_table")
+        {
+            if !data_table_ids
+                .iter()
+                .any(|existing| existing == &data_table_id)
+            {
                 data_table_ids.push(data_table_id);
             }
         }
@@ -808,9 +948,9 @@ impl Storage {
         let ordered_pages = ordered_page_package_pages(&manifest.pages, &manifest.root_page_id)?;
         let mut asset_id_map = std::collections::HashMap::new();
         let mut bytes_processed = 0;
-        let mut imported_asset_paths = Vec::new();
+        let mut tracked_assets = Vec::new();
 
-        let import_result = self.with_transaction(|| {
+        let asset_result = (|| {
             for (index, asset) in manifest.assets.iter().enumerate() {
                 let archive_path = format!("assets/{}", asset.relative_path);
                 let mut asset_file = archive.by_name(&archive_path).map_err(zip_error)?;
@@ -852,16 +992,16 @@ impl Storage {
                     },
                 )?;
                 bytes_processed += copied_for_asset;
-                if imported.created {
-                    imported_asset_paths.push(assets::asset_file_path(
-                        &self.connection,
-                        &self.assets_dir,
-                        &imported.meta.id,
-                    )?);
-                }
-                asset_id_map.insert(asset.id.clone(), imported.meta.id);
+                asset_id_map.insert(asset.id.clone(), imported.meta.id.clone());
+                tracked_assets.push(imported);
             }
+            Ok(())
+        })();
+        if let Err(error) = asset_result {
+            return Err(self.rollback_tracked_assets(&tracked_assets, error));
+        }
 
+        let import_result = self.with_transaction(|| {
             let mut board_position = self.next_position("zhixi_boards");
             for board in &manifest.boards {
                 let mut next_board = board.clone();
@@ -944,12 +1084,9 @@ impl Storage {
             self.rebuild_resource_search_documents()?;
             Ok(())
         });
-        if import_result.is_err() {
-            for path in imported_asset_paths {
-                let _ = fs::remove_file(path);
-            }
+        if let Err(error) = import_result {
+            return Err(self.rollback_tracked_assets(&tracked_assets, error));
         }
-        import_result?;
 
         report_archive_progress(
             task_id,
@@ -980,14 +1117,36 @@ impl Storage {
     }
 
     fn with_transaction<T>(&self, task: impl FnOnce() -> StorageResult<T>) -> StorageResult<T> {
-        self.connection.execute("BEGIN IMMEDIATE", [])?;
+        if !self.connection.is_autocommit() {
+            return Err(StorageError::new(
+                "conflict",
+                "storage transaction requires an autocommit connection",
+            ));
+        }
+
+        self.connection.execute_batch("BEGIN IMMEDIATE")?;
         match task() {
-            Ok(value) => {
-                self.connection.execute("COMMIT", [])?;
-                Ok(value)
-            }
-            Err(error) => {
-                let _ = self.connection.execute("ROLLBACK", []);
+            Ok(value) => match self.connection.execute_batch("COMMIT") {
+                Ok(()) => Ok(value),
+                Err(commit_error) => {
+                    let mut error = StorageError::new(
+                        "database_error",
+                        format!("failed to commit storage transaction: {commit_error}"),
+                    );
+                    if let Err(rollback_error) = self.connection.execute_batch("ROLLBACK") {
+                        error.message.push_str(&format!(
+                            "; failed to roll back storage transaction: {rollback_error}"
+                        ));
+                    }
+                    Err(error)
+                }
+            },
+            Err(mut error) => {
+                if let Err(rollback_error) = self.connection.execute_batch("ROLLBACK") {
+                    error.message.push_str(&format!(
+                        "; failed to roll back storage transaction: {rollback_error}"
+                    ));
+                }
                 Err(error)
             }
         }
@@ -1029,7 +1188,7 @@ impl Storage {
         Ok(())
     }
 
-    fn save_app_settings(&self, settings: &AppSettings) -> StorageResult<()> {
+    pub fn save_app_settings(&self, settings: &AppSettings) -> StorageResult<()> {
         self.connection.execute(
             "INSERT INTO zhixi_settings (id, record_json) VALUES (?1, ?2)
               ON CONFLICT(id) DO UPDATE SET record_json = excluded.record_json",
@@ -1062,7 +1221,7 @@ impl Storage {
             .transpose()
     }
 
-    fn load_app_settings(&self) -> StorageResult<Option<AppSettings>> {
+    pub fn load_app_settings(&self) -> StorageResult<Option<AppSettings>> {
         self.connection
             .query_row(
                 "SELECT record_json FROM zhixi_settings WHERE id = ?1",
@@ -1477,8 +1636,10 @@ impl Storage {
     }
 
     fn rebuild_search_documents(&self) -> StorageResult<()> {
-        self.connection.execute("DELETE FROM zhixi_search_documents_fts", [])?;
-        self.connection.execute("DELETE FROM zhixi_search_documents", [])?;
+        self.connection
+            .execute("DELETE FROM zhixi_search_documents_fts", [])?;
+        self.connection
+            .execute("DELETE FROM zhixi_search_documents", [])?;
 
         let page_property_definitions = self.load_page_properties()?;
         let synced_block_groups = self.load_synced_block_groups()?;
@@ -1494,9 +1655,11 @@ impl Storage {
     }
 
     fn search_documents_need_rebuild(&self) -> StorageResult<bool> {
-        let has_pages: bool = self
-            .connection
-            .query_row("SELECT EXISTS(SELECT 1 FROM zhixi_pages LIMIT 1)", [], |row| row.get(0))?;
+        let has_pages: bool = self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM zhixi_pages LIMIT 1)",
+            [],
+            |row| row.get(0),
+        )?;
         if !has_pages {
             return Ok(false);
         }
@@ -1785,6 +1948,30 @@ impl Storage {
     }
 }
 
+fn merge_missing_remote_blocks(local: &mut PageRecord, persisted: &PageRecord) {
+    if local.updated_at == persisted.updated_at {
+        return;
+    }
+    let local_ids = local
+        .blocks
+        .iter()
+        .filter_map(|block| block.get("id").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect::<HashSet<_>>();
+    local.blocks.extend(
+        persisted
+            .blocks
+            .iter()
+            .filter(|block| {
+                block
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| !local_ids.contains(id))
+            })
+            .cloned(),
+    );
+}
+
 fn insert_ordered_object_rows(
     connection: &Connection,
     table: &str,
@@ -1929,8 +2116,10 @@ fn validate_page_package_manifest(manifest: &PagePackageManifest) -> StorageResu
     }
     validate_page_package_tree_connected(manifest)?;
 
-    let mut synced_instances_by_group: std::collections::HashMap<&str, std::collections::HashSet<&str>> =
-        std::collections::HashMap::new();
+    let mut synced_instances_by_group: std::collections::HashMap<
+        &str,
+        std::collections::HashSet<&str>,
+    > = std::collections::HashMap::new();
     for page in &manifest.pages {
         for block in &page.blocks {
             let Some(object) = block.as_object() else {
@@ -1953,12 +2142,14 @@ fn validate_page_package_manifest(manifest: &PagePackageManifest) -> StorageResu
     }
 
     for group in &manifest.synced_block_groups {
-        let group_instances = synced_instances_by_group.get(group.id.as_str()).ok_or_else(|| {
-            StorageError::invalid_payload(format!(
-                "synced block group has no page instances in package: {}",
-                group.id
-            ))
-        })?;
+        let group_instances = synced_instances_by_group
+            .get(group.id.as_str())
+            .ok_or_else(|| {
+                StorageError::invalid_payload(format!(
+                    "synced block group has no page instances in package: {}",
+                    group.id
+                ))
+            })?;
         if !group_instances.contains(group.primary_instance_id.as_str()) {
             return Err(StorageError::invalid_payload(format!(
                 "synced block group primary instance is missing from package: {}",
@@ -2370,7 +2561,8 @@ fn normalize_exported_synced_block_groups(
                         && block.get("groupId").and_then(Value::as_str) == Some(group.id.as_str())
                 })
                 .filter_map(|block| {
-                    block.get("instanceId")
+                    block
+                        .get("instanceId")
                         .and_then(Value::as_str)
                         .map(str::to_string)
                 })
@@ -2534,7 +2726,11 @@ fn deserialize_page_properties(value: &str) -> StorageResult<Option<Value>> {
         .map(|object| object.is_empty())
         .unwrap_or(false);
 
-    Ok(if is_empty_object { None } else { Some(properties) })
+    Ok(if is_empty_object {
+        None
+    } else {
+        Some(properties)
+    })
 }
 
 fn now_nanos() -> u128 {
@@ -2693,7 +2889,8 @@ mod tests {
     #[test]
     fn workspace_backup_and_bootstrap_include_synced_block_groups() {
         let storage = Storage::open_in_memory_for_tests().expect("storage opens");
-        let mut snapshot_value = serde_json::to_value(sample_snapshot()).expect("serialize snapshot");
+        let mut snapshot_value =
+            serde_json::to_value(sample_snapshot()).expect("serialize snapshot");
         snapshot_value["syncedBlockGroups"] = json!([
             {
                 "id": "group_1",
@@ -2723,14 +2920,18 @@ mod tests {
         )
         .expect("serialize exported workspace");
         assert_eq!(
-            exported.pointer("/syncedBlockGroups/0/id").and_then(Value::as_str),
+            exported
+                .pointer("/syncedBlockGroups/0/id")
+                .and_then(Value::as_str),
             Some("group_1")
         );
 
         let bootstrap = serde_json::to_value(storage.bootstrap_workspace().expect("bootstrap"))
             .expect("serialize bootstrap");
         assert_eq!(
-            bootstrap.pointer("/syncedBlockGroups/0/id").and_then(Value::as_str),
+            bootstrap
+                .pointer("/syncedBlockGroups/0/id")
+                .and_then(Value::as_str),
             Some("group_1")
         );
     }
@@ -2742,6 +2943,8 @@ mod tests {
         snapshot.settings = WorkspaceSettings {
             last_opened_page_id: Some("page_1".to_string()),
             inbox_page_id: Some("page_inbox".to_string()),
+            welcome_page_id: Some("page_welcome".to_string()),
+            welcome_guide_version: Some(2),
             sidebar_layout: Some("compact".to_string()),
             sidebar_width: Some(272),
             pinned_sidebar_items: vec![json!({
@@ -2750,6 +2953,9 @@ mod tests {
             })],
             clipboard_capture_mode: Some("off".to_string()),
             block_selection_start_mode: Some("content_allowed".to_string()),
+            link_open_mode: Some("modifier".to_string()),
+            page_defaults: Some(json!({ "showOutline": true })),
+            search_preferences: Some(json!({ "includePageProperties": true })),
         };
 
         storage
@@ -2766,7 +2972,8 @@ mod tests {
     #[test]
     fn preserves_block_selection_start_mode_when_loading_and_saving() {
         let storage = Storage::open_in_memory_for_tests().expect("storage opens");
-        let mut snapshot_value = serde_json::to_value(sample_snapshot()).expect("serialize snapshot");
+        let mut snapshot_value =
+            serde_json::to_value(sample_snapshot()).expect("serialize snapshot");
         snapshot_value["settings"]["blockSelectionStartMode"] = json!("content_allowed");
         let snapshot: WorkspaceSnapshot =
             serde_json::from_value(snapshot_value).expect("deserialize snapshot");
@@ -2796,6 +3003,11 @@ mod tests {
         let settings = AppSettings {
             close_action: Some("hide_to_tray".to_string()),
             accent_theme: Some("violet".to_string()),
+            mcp: Some(models::McpSettings {
+                enabled: true,
+                port: 38_472,
+                token: "test-token".to_string(),
+            }),
         };
 
         storage
@@ -2813,6 +3025,38 @@ mod tests {
     }
 
     #[test]
+    fn workspace_replacement_preserves_app_settings() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        storage
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed workspace");
+        let settings = AppSettings {
+            close_action: Some("hide_to_tray".to_string()),
+            accent_theme: Some("violet".to_string()),
+            mcp: Some(models::McpSettings {
+                enabled: true,
+                port: 38_472,
+                token: "preserved-token".to_string(),
+            }),
+        };
+        storage
+            .save_app_settings(&settings)
+            .expect("save app settings");
+        let snapshot = storage
+            .export_workspace_backup()
+            .expect("export workspace backup");
+
+        storage
+            .replace_workspace_backup(snapshot)
+            .expect("replace workspace backup");
+
+        assert_eq!(
+            storage.load_app_settings().expect("load app settings"),
+            Some(settings)
+        );
+    }
+
+    #[test]
     fn page_package_export_includes_referenced_synced_groups_resources_and_assets() {
         let storage = Storage::open_in_memory_for_tests().expect("storage opens");
         let asset = storage
@@ -2822,7 +3066,8 @@ mod tests {
                 bytes: b"shared image".to_vec(),
             })
             .expect("write asset");
-        let mut snapshot_value = serde_json::to_value(sample_snapshot()).expect("serialize snapshot");
+        let mut snapshot_value =
+            serde_json::to_value(sample_snapshot()).expect("serialize snapshot");
         snapshot_value["pages"] = json!([
             {
                 "id": "page_sync",
@@ -2910,9 +3155,7 @@ mod tests {
             Some("board_1")
         );
         assert_eq!(
-            manifest
-                .pointer("/dataTables/0/id")
-                .and_then(Value::as_str),
+            manifest.pointer("/dataTables/0/id").and_then(Value::as_str),
             Some("database_1")
         );
         assert_eq!(
@@ -2928,7 +3171,8 @@ mod tests {
     #[test]
     fn page_package_import_rewrites_synced_group_and_instance_ids() {
         let source = Storage::open_in_memory_for_tests().expect("source opens");
-        let mut snapshot_value = serde_json::to_value(sample_snapshot()).expect("serialize snapshot");
+        let mut snapshot_value =
+            serde_json::to_value(sample_snapshot()).expect("serialize snapshot");
         snapshot_value["pages"] = json!([
             {
                 "id": "page_sync_root",
@@ -3031,9 +3275,7 @@ mod tests {
             .iter()
             .filter_map(|page| page.get("blocks").and_then(Value::as_array))
             .flatten()
-            .filter(|block| {
-                block.get("type").and_then(Value::as_str) == Some("synced_block")
-            })
+            .filter(|block| block.get("type").and_then(Value::as_str) == Some("synced_block"))
             .collect::<Vec<_>>();
 
         assert_eq!(synced_blocks.len(), 2);
@@ -3110,7 +3352,10 @@ mod tests {
     fn initializes_schema_with_wal_foreign_keys_and_version() {
         let storage = Storage::open_in_memory_for_tests().expect("storage opens");
 
-        assert_eq!(storage.schema_version().expect("schema version"), 3);
+        assert_eq!(
+            storage.schema_version().expect("schema version"),
+            schema::SCHEMA_VERSION
+        );
         assert_eq!(
             storage.pragma_string("journal_mode").expect("journal mode"),
             "memory"
@@ -3239,11 +3484,13 @@ mod tests {
         assert!(results
             .iter()
             .any(|result| result.match_source == "property" && result.source_label == "标签"));
-        assert!(results
-            .iter()
-            .filter(|result| result.page_id == "page_1")
-            .count()
-            >= 2);
+        assert!(
+            results
+                .iter()
+                .filter(|result| result.page_id == "page_1")
+                .count()
+                >= 2
+        );
     }
 
     #[test]
@@ -3286,7 +3533,9 @@ mod tests {
             .replace_workspace_backup(snapshot)
             .expect("replace snapshot");
 
-        let image_results = storage.search_workspace("首页截图", 10).expect("search image");
+        let image_results = storage
+            .search_workspace("首页截图", 10)
+            .expect("search image");
         assert!(image_results.iter().any(|result| {
             result.page_id == "page_media"
                 && result.block_id.as_deref() == Some("block_image")
@@ -3294,7 +3543,9 @@ mod tests {
                 && result.excerpt == "Capture001.png / 首页截图 / 搜索弹窗"
         }));
 
-        let audio_results = storage.search_workspace("访谈录音", 10).expect("search audio");
+        let audio_results = storage
+            .search_workspace("访谈录音", 10)
+            .expect("search audio");
         assert!(audio_results.iter().any(|result| {
             result.page_id == "page_media"
                 && result.block_id.as_deref() == Some("block_audio")
@@ -3362,7 +3613,9 @@ mod tests {
             .replace_workspace_backup(snapshot)
             .expect("replace snapshot");
 
-        let results = storage.search_workspace("Product Plan", 20).expect("search");
+        let results = storage
+            .search_workspace("Product Plan", 20)
+            .expect("search");
         assert!(results.iter().any(|result| {
             result.page_id == "page_source"
                 && result.block_id.as_deref() == Some("block_relation")
@@ -3505,7 +3758,7 @@ mod tests {
                         "groupId": "group_1",
                         "instanceId": "instance_reference",
                         "mode": "reference"
-                    })
+                    }),
                 ],
                 created_at: "2026-07-06T00:00:00.000Z".to_string(),
                 updated_at: "2026-07-06T00:00:00.000Z".to_string(),
@@ -3711,10 +3964,7 @@ mod tests {
         connection
             .execute(
                 "INSERT INTO zhixi_settings (id, record_json) VALUES (?1, ?2)",
-                params![
-                    SETTINGS_ID,
-                    r#"{"lastOpenedPageId":"page_1"}"#
-                ],
+                params![SETTINGS_ID, r#"{"lastOpenedPageId":"page_1"}"#],
             )
             .expect("insert settings");
         connection
@@ -3754,7 +4004,10 @@ mod tests {
 
         let storage = Storage::open(&data_dir).expect("open migrated storage");
 
-        assert_eq!(storage.schema_version().expect("schema version"), 3);
+        assert_eq!(
+            storage.schema_version().expect("schema version"),
+            schema::SCHEMA_VERSION
+        );
         let page_content_columns = storage
             .connection
             .prepare("PRAGMA table_info(zhixi_page_contents)")
@@ -3791,9 +4044,15 @@ mod tests {
             )
             .expect("count legacy docs");
 
-        assert!(page_content_columns.iter().any(|name| name == "properties_json"));
-        assert!(search_document_columns.iter().any(|name| name == "match_source"));
-        assert!(search_document_columns.iter().any(|name| name == "source_label"));
+        assert!(page_content_columns
+            .iter()
+            .any(|name| name == "properties_json"));
+        assert!(search_document_columns
+            .iter()
+            .any(|name| name == "match_source"));
+        assert!(search_document_columns
+            .iter()
+            .any(|name| name == "source_label"));
         assert!(rebuilt_page_docs >= 2);
         assert_eq!(legacy_docs, 0);
         assert!(search_results
@@ -3862,6 +4121,763 @@ mod tests {
 
         assert_eq!(first.id, second.id);
         assert_eq!(storage.read_asset(&first.id).expect("read asset"), b"hello");
+    }
+
+    #[test]
+    fn tracked_asset_write_reports_new_asset_as_created() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+
+        let written = storage
+            .write_asset_tracked(WriteAssetInput {
+                name: "new.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                bytes: b"new asset".to_vec(),
+            })
+            .expect("write tracked asset");
+
+        assert!(written.created);
+        assert_eq!(
+            storage.read_asset(&written.meta.id).expect("read asset"),
+            b"new asset"
+        );
+    }
+
+    #[test]
+    fn tracked_asset_write_reports_deduplicated_asset_as_existing() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let first = storage
+            .write_asset_tracked(WriteAssetInput {
+                name: "first.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                bytes: b"same bytes".to_vec(),
+            })
+            .expect("write first asset");
+
+        let second = storage
+            .write_asset_tracked(WriteAssetInput {
+                name: "second.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                bytes: b"same bytes".to_vec(),
+            })
+            .expect("write duplicate asset");
+
+        assert!(first.created);
+        assert!(!second.created);
+        assert_eq!(second.meta.id, first.meta.id);
+    }
+
+    #[test]
+    fn asset_writes_reject_active_transaction_without_changes() {
+        use sha2::Digest;
+
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let first_bytes = b"active transaction write".to_vec();
+        let second_bytes = b"active transaction tracked write".to_vec();
+        let first_sha = hex::encode(sha2::Sha256::digest(&first_bytes));
+        let second_sha = hex::encode(sha2::Sha256::digest(&second_bytes));
+        let first_path = storage
+            .assets_dir
+            .join(&first_sha[..2])
+            .join(format!("{first_sha}.txt"));
+        let second_path = storage
+            .assets_dir
+            .join(&second_sha[..2])
+            .join(format!("{second_sha}.txt"));
+        storage
+            .connection
+            .execute("BEGIN IMMEDIATE", [])
+            .expect("begin outer transaction");
+
+        let first_error = storage
+            .write_asset(WriteAssetInput {
+                name: "first.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                bytes: first_bytes,
+            })
+            .expect_err("plain asset write rejects active transaction");
+        let second_error = storage
+            .write_asset_tracked(WriteAssetInput {
+                name: "second.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                bytes: second_bytes,
+            })
+            .expect_err("tracked asset write rejects active transaction");
+
+        assert_eq!(first_error.code, "conflict");
+        assert_eq!(second_error.code, "conflict");
+        assert!(!storage.connection.is_autocommit());
+        assert_eq!(
+            storage
+                .connection
+                .query_row("SELECT COUNT(*) FROM zhixi_assets", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .expect("count asset rows"),
+            0
+        );
+        assert!(!first_path.exists());
+        assert!(!second_path.exists());
+        storage
+            .connection
+            .execute("ROLLBACK", [])
+            .expect("rollback outer transaction");
+    }
+
+    #[test]
+    fn remove_asset_rejects_active_transaction_without_changes() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let written = storage
+            .write_asset_tracked(WriteAssetInput {
+                name: "keep.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                bytes: b"keep during outer transaction".to_vec(),
+            })
+            .expect("write asset");
+        let asset_path = storage.assets_dir.join(&written.meta.relative_path);
+        storage
+            .connection
+            .execute("BEGIN IMMEDIATE", [])
+            .expect("begin outer transaction");
+
+        let error = storage
+            .remove_asset_if_unreferenced(&written.meta.id)
+            .expect_err("asset removal rejects active transaction");
+
+        assert_eq!(error.code, "conflict");
+        assert!(!storage.connection.is_autocommit());
+        assert_eq!(
+            storage
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM zhixi_assets WHERE id = ?1",
+                    [&written.meta.id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("count asset rows"),
+            1
+        );
+        assert_eq!(
+            std::fs::read(&asset_path).expect("asset file remains"),
+            b"keep during outer transaction"
+        );
+        storage
+            .connection
+            .execute("ROLLBACK", [])
+            .expect("rollback outer transaction");
+    }
+
+    #[test]
+    fn cleanup_orphan_assets_rejects_active_transaction_without_changes() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let written = storage
+            .write_asset_tracked(WriteAssetInput {
+                name: "orphan.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                bytes: b"orphan protected by transaction boundary".to_vec(),
+            })
+            .expect("write orphan asset");
+        let final_path = storage.assets_dir.join(&written.meta.relative_path);
+        storage
+            .connection
+            .execute("BEGIN IMMEDIATE", [])
+            .expect("begin outer transaction");
+
+        let error = storage
+            .cleanup_orphan_assets()
+            .expect_err("orphan cleanup rejects active transaction");
+
+        assert_eq!(error.code, "conflict");
+        assert!(!storage.connection.is_autocommit());
+        assert_eq!(
+            storage
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM zhixi_assets WHERE id = ?1",
+                    [&written.meta.id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("count orphan asset row"),
+            1
+        );
+        assert_eq!(
+            std::fs::read(final_path).expect("orphan final remains"),
+            b"orphan protected by transaction boundary"
+        );
+        storage
+            .connection
+            .execute("ROLLBACK", [])
+            .expect("rollback outer transaction");
+    }
+
+    #[test]
+    fn tracked_asset_writes_are_serialized_across_connections() {
+        let data_dir = unique_test_data_dir("tracked-asset-concurrency");
+        let first_storage = Storage::open(&data_dir).expect("first storage opens");
+        let second_storage = Storage::open(&data_dir).expect("second storage opens");
+        let barrier = Arc::new(std::sync::Barrier::new(3));
+        let bytes = Arc::new(vec![0x5a; 32 * 1024 * 1024]);
+
+        let first_barrier = barrier.clone();
+        let first_bytes = bytes.clone();
+        let first_thread = std::thread::spawn(move || {
+            first_barrier.wait();
+            first_storage.write_asset_tracked(WriteAssetInput {
+                name: "first.bin".to_string(),
+                mime_type: "application/octet-stream".to_string(),
+                bytes: first_bytes.as_ref().clone(),
+            })
+        });
+        let second_barrier = barrier.clone();
+        let second_bytes = bytes.clone();
+        let second_thread = std::thread::spawn(move || {
+            second_barrier.wait();
+            second_storage.write_asset_tracked(WriteAssetInput {
+                name: "second.bin".to_string(),
+                mime_type: "application/octet-stream".to_string(),
+                bytes: second_bytes.as_ref().clone(),
+            })
+        });
+
+        barrier.wait();
+        let first = first_thread
+            .join()
+            .expect("first thread joins")
+            .expect("first write succeeds");
+        let second = second_thread
+            .join()
+            .expect("second thread joins")
+            .expect("second write succeeds");
+
+        assert_eq!(usize::from(first.created) + usize::from(second.created), 1);
+        assert_eq!(first.meta.id, second.meta.id);
+        let verifier = Storage::open(&data_dir).expect("verifier opens");
+        assert_eq!(
+            verifier
+                .connection
+                .query_row("SELECT COUNT(*) FROM zhixi_assets", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .expect("count asset rows"),
+            1
+        );
+        assert_eq!(
+            verifier.read_asset(&first.meta.id).expect("read asset"),
+            bytes.as_ref().as_slice()
+        );
+        drop(verifier);
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    fn failed_competing_asset_write_keeps_file_published_by_other_connection() {
+        let assets_dir =
+            unique_test_data_dir("tracked-asset-failed-competition").join(ASSETS_DIR_NAME);
+        let first_connection = Connection::open_in_memory().expect("first connection opens");
+        schema::initialize_schema(&first_connection).expect("first schema initializes");
+        let second_connection = Connection::open_in_memory().expect("second connection opens");
+        schema::initialize_schema(&second_connection).expect("second schema initializes");
+        second_connection
+            .execute_batch(
+                "CREATE TRIGGER fail_asset_insert
+                 BEFORE INSERT ON zhixi_assets
+                 BEGIN
+                   SELECT RAISE(FAIL, 'forced competing insert failure');
+                 END;",
+            )
+            .expect("install failure trigger");
+
+        let first_storage = Storage {
+            connection: first_connection,
+            assets_dir: assets_dir.clone(),
+        };
+        let second_storage = Storage {
+            connection: second_connection,
+            assets_dir: assets_dir.clone(),
+        };
+        let start = Arc::new(std::sync::Barrier::new(3));
+        let (published_tx, published_rx) = std::sync::mpsc::channel();
+        let bytes = b"shared competing asset".to_vec();
+
+        let first_start = start.clone();
+        let first_bytes = bytes.clone();
+        let first_thread = std::thread::spawn(move || {
+            first_start.wait();
+            let written = first_storage.write_asset_tracked(WriteAssetInput {
+                name: "winner.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                bytes: first_bytes,
+            });
+            published_tx.send(()).expect("signal published asset");
+            (first_storage, written)
+        });
+        let second_start = start.clone();
+        let second_thread = std::thread::spawn(move || {
+            second_start.wait();
+            published_rx.recv().expect("wait for published asset");
+            let written = second_storage.write_asset_tracked(WriteAssetInput {
+                name: "loser.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                bytes,
+            });
+            (second_storage, written)
+        });
+
+        start.wait();
+        let (first_storage, first) = first_thread.join().expect("first thread joins");
+        let first = first.expect("first write succeeds");
+        let (second_storage, second) = second_thread.join().expect("second thread joins");
+        let error = second.expect_err("competing database insert fails");
+
+        assert!(first.created);
+        assert_eq!(error.code, "database_error");
+        assert_eq!(
+            first_storage
+                .read_asset(&first.meta.id)
+                .expect("published asset remains readable"),
+            b"shared competing asset"
+        );
+        assert_eq!(
+            second_storage
+                .connection
+                .query_row("SELECT COUNT(*) FROM zhixi_assets", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .expect("count failed connection rows"),
+            0
+        );
+        drop(first_storage);
+        drop(second_storage);
+        let _ = std::fs::remove_dir_all(
+            assets_dir
+                .parent()
+                .expect("test assets directory has parent"),
+        );
+    }
+
+    #[test]
+    fn tracked_asset_write_never_replaces_existing_regular_final_file() {
+        use sha2::Digest;
+
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let bytes = b"expected content-addressed bytes".to_vec();
+        let sha256 = hex::encode(sha2::Sha256::digest(&bytes));
+        let final_path = storage
+            .assets_dir
+            .join(&sha256[..2])
+            .join(format!("{sha256}.txt"));
+        std::fs::create_dir_all(final_path.parent().expect("final path has parent"))
+            .expect("create final parent");
+        std::fs::write(&final_path, b"pre-existing sentinel").expect("write existing final");
+
+        let error = storage
+            .write_asset_tracked(WriteAssetInput {
+                name: "asset.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                bytes,
+            })
+            .expect_err("existing final file is never replaced");
+        let final_file_name = final_path
+            .file_name()
+            .expect("final path has file name")
+            .to_string_lossy();
+
+        assert_eq!(error.code, "conflict");
+        assert!(
+            error.message.contains(final_file_name.as_ref()),
+            "error did not include final path: {error:?}"
+        );
+        assert_eq!(
+            std::fs::read(&final_path).expect("read existing final"),
+            b"pre-existing sentinel"
+        );
+        assert_eq!(
+            storage
+                .connection
+                .query_row("SELECT COUNT(*) FROM zhixi_assets", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .expect("count asset rows"),
+            0
+        );
+    }
+
+    #[test]
+    fn independent_databases_sharing_assets_dir_do_not_replace_winner_file() {
+        let assets_dir =
+            unique_test_data_dir("tracked-asset-independent-databases").join(ASSETS_DIR_NAME);
+        let winner_connection = Connection::open_in_memory().expect("winner connection opens");
+        schema::initialize_schema(&winner_connection).expect("winner schema initializes");
+        let loser_connection = Connection::open_in_memory().expect("loser connection opens");
+        schema::initialize_schema(&loser_connection).expect("loser schema initializes");
+        let winner = Storage {
+            connection: winner_connection,
+            assets_dir: assets_dir.clone(),
+        };
+        let loser = Storage {
+            connection: loser_connection,
+            assets_dir: assets_dir.clone(),
+        };
+        let bytes = b"shared independent database asset".to_vec();
+
+        let written = winner
+            .write_asset_tracked(WriteAssetInput {
+                name: "winner.bin".to_string(),
+                mime_type: "application/octet-stream".to_string(),
+                bytes: bytes.clone(),
+            })
+            .expect("winner writes asset");
+        let error = loser
+            .write_asset_tracked(WriteAssetInput {
+                name: "loser.bin".to_string(),
+                mime_type: "application/octet-stream".to_string(),
+                bytes: bytes.clone(),
+            })
+            .expect_err("loser cannot replace winner final");
+
+        assert_eq!(error.code, "conflict");
+        assert_eq!(
+            winner
+                .read_asset(&written.meta.id)
+                .expect("winner asset reads"),
+            bytes
+        );
+        assert_eq!(
+            loser
+                .connection
+                .query_row("SELECT COUNT(*) FROM zhixi_assets", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .expect("count loser rows"),
+            0
+        );
+    }
+
+    #[test]
+    fn tracked_asset_write_explicitly_rolls_back_deferred_commit_failure() {
+        use sha2::Digest;
+
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        storage
+            .connection
+            .execute_batch(
+                "CREATE TRIGGER force_asset_commit_failure
+                 AFTER INSERT ON zhixi_assets
+                 BEGIN
+                   INSERT INTO zhixi_asset_refs (asset_id, owner_kind, owner_id)
+                   VALUES ('asset_missing', 'test', 'commit_failure');
+                 END;
+                 PRAGMA defer_foreign_keys = ON;",
+            )
+            .expect("install deferred commit failure");
+        let bytes = b"deferred commit failure".to_vec();
+        let sha256 = hex::encode(sha2::Sha256::digest(&bytes));
+        let final_path = storage
+            .assets_dir
+            .join(&sha256[..2])
+            .join(format!("{sha256}.txt"));
+
+        let error = storage
+            .write_asset_tracked(WriteAssetInput {
+                name: "deferred.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                bytes,
+            })
+            .expect_err("deferred foreign key fails commit");
+
+        assert_eq!(error.code, "database_error");
+        assert!(error.message.contains("failed to commit asset write"));
+        assert!(storage.connection.is_autocommit());
+        assert_eq!(
+            storage
+                .connection
+                .query_row("SELECT COUNT(*) FROM zhixi_assets", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .expect("count asset rows"),
+            0
+        );
+        assert!(!final_path.exists());
+    }
+
+    #[test]
+    fn rollback_tracked_asset_ignores_deduplicated_asset() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let first = storage
+            .write_asset_tracked(WriteAssetInput {
+                name: "first.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                bytes: b"shared asset".to_vec(),
+            })
+            .expect("write first asset");
+        let duplicate = storage
+            .write_asset_tracked(WriteAssetInput {
+                name: "duplicate.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                bytes: b"shared asset".to_vec(),
+            })
+            .expect("write duplicate asset");
+        let asset_path = storage.assets_dir.join(&first.meta.relative_path);
+
+        assert!(!duplicate.created);
+        assert!(!storage
+            .rollback_tracked_asset(&duplicate)
+            .expect("deduplicated asset is not rolled back"));
+        assert!(asset_path.exists());
+        assert_eq!(
+            storage.read_asset(&first.meta.id).expect("read asset"),
+            b"shared asset"
+        );
+    }
+
+    #[test]
+    fn rollback_tracked_asset_keeps_recreated_generation() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let bytes = b"recreated asset generation".to_vec();
+        let original = storage
+            .write_asset_tracked(WriteAssetInput {
+                name: "original.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                bytes: bytes.clone(),
+            })
+            .expect("write original generation");
+        let original_path = storage.assets_dir.join(&original.meta.relative_path);
+
+        assert!(original.created);
+        assert!(storage
+            .remove_asset_if_unreferenced(&original.meta.id)
+            .expect("remove original generation"));
+        assert!(!original_path.exists());
+
+        let recreated = storage
+            .write_asset_tracked(WriteAssetInput {
+                name: "recreated.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                bytes: bytes.clone(),
+            })
+            .expect("write recreated generation");
+        let recreated_path = storage.assets_dir.join(&recreated.meta.relative_path);
+
+        assert!(recreated.created);
+        assert_ne!(recreated.meta.id, original.meta.id);
+        assert_eq!(recreated.meta.relative_path, original.meta.relative_path);
+        assert!(!storage
+            .rollback_tracked_asset(&original)
+            .expect("stale rollback ignores recreated generation"));
+        assert_eq!(
+            storage
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM zhixi_assets WHERE id = ?1",
+                    [&recreated.meta.id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("count recreated generation row"),
+            1
+        );
+        assert!(recreated_path.exists());
+        assert_eq!(
+            std::fs::read(&recreated_path).expect("read recreated generation file"),
+            bytes
+        );
+        assert_eq!(
+            storage
+                .read_asset(&recreated.meta.id)
+                .expect("read recreated generation through storage"),
+            b"recreated asset generation"
+        );
+    }
+
+    #[test]
+    fn remove_asset_if_unreferenced_removes_file_and_row() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let written = storage
+            .write_asset_tracked(WriteAssetInput {
+                name: "temporary.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                bytes: b"temporary asset".to_vec(),
+            })
+            .expect("write tracked asset");
+        let asset_path = storage.assets_dir.join(&written.meta.relative_path);
+
+        assert!(storage
+            .remove_asset_if_unreferenced(&written.meta.id)
+            .expect("remove unreferenced asset"));
+        assert!(!asset_path.exists());
+        assert_eq!(
+            storage
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM zhixi_assets WHERE id = ?1",
+                    [&written.meta.id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("count asset rows"),
+            0
+        );
+        assert!(!storage
+            .remove_asset_if_unreferenced(&written.meta.id)
+            .expect("missing asset is not removed again"));
+    }
+
+    #[test]
+    fn remove_asset_if_unreferenced_keeps_referenced_asset() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let written = storage
+            .write_asset_tracked(WriteAssetInput {
+                name: "referenced.png".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes: b"referenced asset".to_vec(),
+            })
+            .expect("write tracked asset");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages[0].blocks.push(json!({
+            "id": "block_referenced_asset",
+            "type": "image",
+            "assetId": written.meta.id,
+            "name": "referenced.png",
+            "mimeType": "image/png"
+        }));
+        storage
+            .replace_workspace_backup(snapshot)
+            .expect("save asset reference");
+        let asset_path = storage.assets_dir.join(&written.meta.relative_path);
+
+        assert!(!storage
+            .remove_asset_if_unreferenced(&written.meta.id)
+            .expect("referenced asset is retained"));
+        assert!(asset_path.exists());
+        assert_eq!(
+            storage.read_asset(&written.meta.id).expect("read asset"),
+            b"referenced asset"
+        );
+    }
+
+    #[test]
+    fn remove_asset_if_unreferenced_keeps_row_when_file_removal_fails() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let written = storage
+            .write_asset_tracked(WriteAssetInput {
+                name: "cannot-remove.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                bytes: b"cannot remove".to_vec(),
+            })
+            .expect("write tracked asset");
+        let asset_path = storage.assets_dir.join(&written.meta.relative_path);
+        std::fs::remove_file(&asset_path).expect("replace asset file");
+        std::fs::create_dir(&asset_path).expect("create directory at asset path");
+
+        let error = storage
+            .remove_asset_if_unreferenced(&written.meta.id)
+            .expect_err("directory cannot be removed as a file");
+
+        assert_eq!(error.code, "io_error");
+        assert_eq!(
+            storage
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM zhixi_assets WHERE id = ?1",
+                    [&written.meta.id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("count asset rows"),
+            1
+        );
+        std::fs::remove_dir(asset_path).expect("remove test directory");
+    }
+
+    #[test]
+    fn remove_asset_restores_row_and_file_when_commit_fails() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let written = storage
+            .write_asset_tracked(WriteAssetInput {
+                name: "guarded.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                bytes: b"guarded asset".to_vec(),
+            })
+            .expect("write tracked asset");
+        let final_path = storage.assets_dir.join(&written.meta.relative_path);
+        storage
+            .connection
+            .execute_batch(
+                "CREATE TABLE test_asset_guards (
+                   asset_id TEXT NOT NULL
+                     REFERENCES zhixi_assets(id)
+                     DEFERRABLE INITIALLY DEFERRED
+                 );",
+            )
+            .expect("create deferred asset guard");
+        storage
+            .connection
+            .execute(
+                "INSERT INTO test_asset_guards (asset_id) VALUES (?1)",
+                [&written.meta.id],
+            )
+            .expect("insert deferred asset guard");
+
+        let error = storage
+            .remove_asset_if_unreferenced(&written.meta.id)
+            .expect_err("deferred foreign key fails removal commit");
+
+        assert_eq!(error.code, "database_error");
+        assert!(storage.connection.is_autocommit());
+        assert_eq!(
+            storage
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM zhixi_assets WHERE id = ?1",
+                    [&written.meta.id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("count restored asset row"),
+            1
+        );
+        assert_eq!(
+            std::fs::read(final_path).expect("restored final reads"),
+            b"guarded asset"
+        );
+    }
+
+    #[test]
+    fn tracked_asset_write_removes_file_when_database_insert_fails() {
+        use sha2::Digest;
+
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        storage
+            .connection
+            .execute_batch(
+                "CREATE TRIGGER fail_asset_insert
+                 BEFORE INSERT ON zhixi_assets
+                 BEGIN
+                   SELECT RAISE(FAIL, 'forced asset insert failure');
+                 END;",
+            )
+            .expect("install failure trigger");
+        let bytes = b"failed insert asset".to_vec();
+        let sha256 = hex::encode(sha2::Sha256::digest(&bytes));
+        let asset_path = storage
+            .assets_dir
+            .join(&sha256[..2])
+            .join(format!("{sha256}.txt"));
+
+        let error = storage
+            .write_asset_tracked(WriteAssetInput {
+                name: "failed.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                bytes,
+            })
+            .expect_err("database insert fails");
+
+        assert_eq!(error.code, "database_error");
+        assert!(!asset_path.exists());
+        assert_eq!(
+            storage
+                .connection
+                .query_row("SELECT COUNT(*) FROM zhixi_assets", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .expect("count asset rows"),
+            0
+        );
     }
 
     #[test]
@@ -4458,7 +5474,9 @@ mod tests {
         let result = target
             .import_page_package(archive)
             .expect("import page package");
-        let imported = target.export_workspace_backup().expect("export target snapshot");
+        let imported = target
+            .export_workspace_backup()
+            .expect("export target snapshot");
         let root = imported
             .pages
             .iter()
@@ -5255,6 +6273,80 @@ mod tests {
     }
 
     #[test]
+    fn page_package_import_rolls_back_earlier_assets_when_later_asset_stage_fails() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        let first = source
+            .write_asset(WriteAssetInput {
+                name: "first.png".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes: b"first staged image".to_vec(),
+            })
+            .expect("write first source asset");
+        let second = source
+            .write_asset(WriteAssetInput {
+                name: "second.png".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes: b"second staged image".to_vec(),
+            })
+            .expect("write second source asset");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages[0].blocks.extend([
+            json!({
+                "id": "block_first_image",
+                "type": "image",
+                "assetId": first.id,
+                "name": first.name,
+                "mimeType": first.mime_type
+            }),
+            json!({
+                "id": "block_second_image",
+                "type": "image",
+                "assetId": second.id,
+                "name": second.name,
+                "mimeType": second.mime_type
+            }),
+        ]);
+        source
+            .replace_workspace_backup(snapshot)
+            .expect("replace source snapshot");
+        let archive = source
+            .export_page_package("page_1")
+            .expect("export page package");
+        let target = Storage::open_in_memory_for_tests().expect("target opens");
+        target
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed target");
+        let first_path = target.assets_dir.join(&first.relative_path);
+        let second_path = target.assets_dir.join(&second.relative_path);
+        std::fs::create_dir_all(second_path.parent().expect("second path has parent"))
+            .expect("create second asset parent");
+        std::fs::write(&second_path, b"pre-existing second sentinel")
+            .expect("write conflicting second final");
+
+        let error = target
+            .import_page_package(archive)
+            .expect_err("second asset stage fails");
+
+        assert_eq!(error.code, "conflict");
+        assert!(!first_path.exists());
+        assert_eq!(
+            std::fs::read(&second_path).expect("conflicting final remains"),
+            b"pre-existing second sentinel"
+        );
+        assert_eq!(
+            target
+                .connection
+                .query_row(
+                    "SELECT COUNT(*) FROM zhixi_assets WHERE sha256 IN (?1, ?2)",
+                    [first.sha256.as_str(), second.sha256.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("count rolled-back asset rows"),
+            0
+        );
+    }
+
+    #[test]
     fn page_package_import_keeps_existing_asset_file_when_manifest_sha_is_wrong() {
         let source = Storage::open_in_memory_for_tests().expect("source opens");
         let asset = source
@@ -5507,5 +6599,124 @@ mod tests {
             std::fs::read(outside_path).expect("outside file still exists"),
             b"leak"
         );
+    }
+
+    #[test]
+    fn appends_mcp_blocks_and_audit_record_in_one_transaction() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        storage
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed workspace");
+
+        storage
+            .append_mcp_page_blocks(
+                "page_1",
+                vec![
+                    json!({ "id": "block_mcp_audit", "type": "paragraph", "text": "Saved by MCP" }),
+                ],
+                "2026-07-12T00:00:00.000Z".to_string(),
+            )
+            .expect("append MCP blocks");
+
+        let page = storage.load_page_record("page_1").expect("load page");
+        let audit: String = storage
+            .connection
+            .query_row(
+                "SELECT created_ids_json FROM zhixi_mcp_audit_log WHERE page_id = ?1",
+                ["page_1"],
+                |row| row.get(0),
+            )
+            .expect("audit record");
+
+        assert!(page
+            .blocks
+            .iter()
+            .any(|block| block["id"] == "block_mcp_audit"));
+        assert_eq!(audit, r#"["block_mcp_audit"]"#);
+    }
+
+    #[test]
+    fn workspace_replacement_preserves_audit_for_pages_that_still_exist() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        storage
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed workspace");
+        storage
+            .append_mcp_page_blocks(
+                "page_1",
+                vec![json!({
+                    "id": "block_mcp_preserved_audit",
+                    "type": "paragraph",
+                    "text": "Saved by MCP"
+                })],
+                "2026-07-12T00:00:00.000Z".to_string(),
+            )
+            .expect("append MCP block");
+        let snapshot = storage
+            .export_workspace_backup()
+            .expect("export workspace backup");
+
+        storage
+            .replace_workspace_backup(snapshot.clone())
+            .expect("replace same workspace backup");
+
+        let audit: String = storage
+            .connection
+            .query_row(
+                "SELECT created_ids_json FROM zhixi_mcp_audit_log WHERE page_id = ?1",
+                ["page_1"],
+                |row| row.get(0),
+            )
+            .expect("audit survives same-page replacement");
+        assert_eq!(audit, r#"["block_mcp_preserved_audit"]"#);
+
+        let mut snapshot_without_page = snapshot;
+        snapshot_without_page.pages.clear();
+        storage
+            .replace_workspace_backup(snapshot_without_page)
+            .expect("replace workspace without audited page");
+
+        let audit_count: i64 = storage
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM zhixi_mcp_audit_log WHERE page_id = ?1",
+                ["page_1"],
+                |row| row.get(0),
+            )
+            .expect("count audit rows");
+        assert_eq!(audit_count, 0);
+    }
+
+    #[test]
+    fn keeps_mcp_blocks_when_a_stale_local_page_save_arrives_after_the_append() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        storage
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed workspace");
+        let mut stale_local_page = storage.load_page_record("page_1").expect("load local page");
+
+        storage
+            .append_mcp_page_blocks(
+                "page_1",
+                vec![json!({
+                    "id": "block_mcp_concurrent",
+                    "type": "paragraph",
+                    "text": "Saved by MCP"
+                })],
+                "2026-07-12T00:00:00.000Z".to_string(),
+            )
+            .expect("append MCP block");
+
+        stale_local_page.blocks.push(json!({
+            "id": "block_local_concurrent",
+            "type": "paragraph",
+            "text": "Saved locally"
+        }));
+        stale_local_page.updated_at = "2026-07-12T00:00:01.000Z".to_string();
+        storage.save_page(stale_local_page).expect("save stale local page");
+
+        let page = storage.load_page_record("page_1").expect("load merged page");
+        assert!(page.blocks.iter().any(|block| block["id"] == "block_mcp_concurrent"));
+        assert!(page.blocks.iter().any(|block| block["id"] == "block_local_concurrent"));
     }
 }

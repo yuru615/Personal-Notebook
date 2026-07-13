@@ -5,6 +5,17 @@ import { createMemoryRepository } from '../test/memoryRepository'
 import { createWorkspaceStore } from './createWorkspaceStore'
 import type { AppSettings, BlockRecord, WorkspaceSnapshot } from '../domain/types'
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+
+  return { promise, resolve, reject }
+}
+
 function createCountingRepository(initialSnapshot: WorkspaceSnapshot | null = null) {
   let snapshot = initialSnapshot ? structuredClone(initialSnapshot) : null
   let saveCalls = 0
@@ -56,6 +67,16 @@ function createMemoryAppSettingsRepository(initial: AppSettings | null = null) {
       async save(next: AppSettings) {
         settings = structuredClone(next)
         saveCalls += 1
+      },
+      async enableLocalMcp() {
+        const mcp = { enabled: true, port: 38472, token: 'test-token' }
+        settings = { ...(settings ?? {}), mcp }
+        return mcp
+      },
+      async disableLocalMcp() {
+        if (settings?.mcp) {
+          settings = { ...settings, mcp: { ...settings.mcp, enabled: false } }
+        }
       },
     },
     getSettings() {
@@ -449,6 +470,175 @@ describe('createWorkspaceStore data tables', () => {
       accentTheme: 'blue_gray',
     })
     expect(appSettings.getSaveCalls()).toBe(1)
+  })
+
+  it('keeps persisted local MCP settings after bootstrap', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const appSettings = createMemoryAppSettingsRepository({
+      mcp: {
+        enabled: true,
+        port: 1750,
+        token: 'test-token',
+      },
+    })
+    const store = createWorkspaceStore(counted.repository, appSettings.repository)
+
+    await store.getState().bootstrap()
+
+    expect(store.getState().appSettings.mcp).toEqual({
+      enabled: true,
+      port: 1750,
+      token: 'test-token',
+    })
+  })
+
+  it('coalesces concurrent local MCP enable requests into one backend invocation', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const appSettings = createMemoryAppSettingsRepository()
+    const deferred = createDeferred<{ enabled: boolean; port: number; token: string }>()
+    const enableLocalMcp = vi
+      .spyOn(appSettings.repository, 'enableLocalMcp')
+      .mockImplementation(() => deferred.promise)
+    const store = createWorkspaceStore(counted.repository, appSettings.repository)
+    await store.getState().bootstrap()
+
+    const first = store.getState().enableLocalMcp()
+    const second = store.getState().enableLocalMcp()
+
+    expect(enableLocalMcp).toHaveBeenCalledTimes(1)
+
+    const mcp = { enabled: true, port: 1750, token: 'test-token' }
+    deferred.resolve(mcp)
+
+    await expect(Promise.all([first, second])).resolves.toEqual([mcp, mcp])
+    expect(store.getState().appSettings.mcp).toEqual(mcp)
+  })
+
+  it('coalesces concurrent local MCP disable requests into one backend invocation', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const appSettings = createMemoryAppSettingsRepository({
+      mcp: { enabled: true, port: 1750, token: 'test-token' },
+    })
+    const deferred = createDeferred<void>()
+    const disableLocalMcp = vi
+      .spyOn(appSettings.repository, 'disableLocalMcp')
+      .mockImplementation(() => deferred.promise)
+    const store = createWorkspaceStore(counted.repository, appSettings.repository)
+    await store.getState().bootstrap()
+
+    const first = store.getState().disableLocalMcp()
+    const second = store.getState().disableLocalMcp()
+
+    expect(disableLocalMcp).toHaveBeenCalledTimes(1)
+
+    deferred.resolve()
+
+    await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined])
+    expect(store.getState().appSettings.mcp?.enabled).toBe(false)
+  })
+
+  it('rejects enable while disable is pending, then enables after disable settles', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const appSettings = createMemoryAppSettingsRepository({
+      mcp: { enabled: true, port: 1750, token: 'test-token' },
+    })
+    const deferred = createDeferred<void>()
+    vi.spyOn(appSettings.repository, 'disableLocalMcp').mockImplementationOnce(
+      () => deferred.promise,
+    )
+    const enableLocalMcp = vi.spyOn(appSettings.repository, 'enableLocalMcp')
+    const store = createWorkspaceStore(counted.repository, appSettings.repository)
+    await store.getState().bootstrap()
+
+    const pendingDisable = store.getState().disableLocalMcp()
+
+    await expect(store.getState().enableLocalMcp()).rejects.toThrow(
+      'Local MCP disable operation is already in progress',
+    )
+    expect(enableLocalMcp).not.toHaveBeenCalled()
+
+    deferred.resolve()
+    await pendingDisable
+
+    await expect(store.getState().enableLocalMcp()).resolves.toMatchObject({ enabled: true })
+    expect(enableLocalMcp).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects disable while enable is pending, then disables after enable settles', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const appSettings = createMemoryAppSettingsRepository()
+    const deferred = createDeferred<{ enabled: boolean; port: number; token: string }>()
+    vi.spyOn(appSettings.repository, 'enableLocalMcp').mockImplementationOnce(
+      () => deferred.promise,
+    )
+    const disableLocalMcp = vi.spyOn(appSettings.repository, 'disableLocalMcp')
+    const store = createWorkspaceStore(counted.repository, appSettings.repository)
+    await store.getState().bootstrap()
+
+    const pendingEnable = store.getState().enableLocalMcp()
+
+    await expect(store.getState().disableLocalMcp()).rejects.toThrow(
+      'Local MCP enable operation is already in progress',
+    )
+    expect(disableLocalMcp).not.toHaveBeenCalled()
+
+    deferred.resolve({ enabled: true, port: 1750, token: 'test-token' })
+    await pendingEnable
+
+    await expect(store.getState().disableLocalMcp()).resolves.toBeUndefined()
+    expect(disableLocalMcp).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears a rejected local MCP enable single-flight task so it can retry', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const appSettings = createMemoryAppSettingsRepository()
+    const deferred = createDeferred<{ enabled: boolean; port: number; token: string }>()
+    const enabledMcp = { enabled: true, port: 1750, token: 'test-token' }
+    const enableLocalMcp = vi
+      .spyOn(appSettings.repository, 'enableLocalMcp')
+      .mockImplementationOnce(() => deferred.promise)
+      .mockResolvedValue(enabledMcp)
+    const store = createWorkspaceStore(counted.repository, appSettings.repository)
+    await store.getState().bootstrap()
+
+    const first = store.getState().enableLocalMcp()
+    const second = store.getState().enableLocalMcp()
+    const failedRequests = Promise.all([first, second])
+    const failure = new Error('enable failed')
+
+    expect(enableLocalMcp).toHaveBeenCalledTimes(1)
+    deferred.reject(failure)
+    await expect(failedRequests).rejects.toBe(failure)
+
+    await expect(store.getState().enableLocalMcp()).resolves.toEqual(enabledMcp)
+    expect(enableLocalMcp).toHaveBeenCalledTimes(2)
+  })
+
+  it('clears a rejected local MCP disable single-flight task so it can retry', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const appSettings = createMemoryAppSettingsRepository({
+      mcp: { enabled: true, port: 1750, token: 'test-token' },
+    })
+    const deferred = createDeferred<void>()
+    const disableLocalMcp = vi
+      .spyOn(appSettings.repository, 'disableLocalMcp')
+      .mockImplementationOnce(() => deferred.promise)
+      .mockResolvedValue(undefined)
+    const store = createWorkspaceStore(counted.repository, appSettings.repository)
+    await store.getState().bootstrap()
+
+    const first = store.getState().disableLocalMcp()
+    const second = store.getState().disableLocalMcp()
+    const failedRequests = Promise.all([first, second])
+    const failure = new Error('disable failed')
+
+    expect(disableLocalMcp).toHaveBeenCalledTimes(1)
+    deferred.reject(failure)
+    await expect(failedRequests).rejects.toBe(failure)
+
+    await expect(store.getState().disableLocalMcp()).resolves.toBeUndefined()
+    expect(disableLocalMcp).toHaveBeenCalledTimes(2)
+    expect(store.getState().appSettings.mcp?.enabled).toBe(false)
   })
 
   it('defaults search preferences and persists changes', async () => {

@@ -40,6 +40,7 @@ import type {
   DataTableRecord,
   ExternalLinkOpenMode,
   MindmapRecord,
+  McpSettings,
   PageFontFamily,
   PageId,
   PageDisplayDefaults,
@@ -89,6 +90,13 @@ interface CreatePageOptions {
   setCurrent?: boolean
 }
 
+export interface McpWorkspaceUpdate {
+  operation?: 'append_content' | 'create_page'
+  pageId?: string
+  createdPageIds?: string[]
+  createdObjectIds?: string[]
+}
+
 export interface WorkspaceState {
   boards: BoardRecord[]
   dataTables: DataTableRecord[]
@@ -106,6 +114,10 @@ export interface WorkspaceState {
   setCurrentPage: (pageId: PageId) => Promise<void>
   setAppCloseAction: (closeAction: AppCloseAction) => Promise<void>
   setAppAccentTheme: (theme: AppAccentTheme) => Promise<void>
+  enableLocalMcp: () => Promise<McpSettings>
+  disableLocalMcp: () => Promise<void>
+  regenerateLocalMcpToken: () => Promise<McpSettings>
+  refreshMcpWorkspace: (update: McpWorkspaceUpdate) => Promise<void>
   setClipboardCaptureMode: (mode: ClipboardCaptureMode) => Promise<void>
   setBlockSelectionStartMode: (mode: BlockSelectionStartMode) => Promise<void>
   setLinkOpenMode: (mode: ExternalLinkOpenMode) => Promise<void>
@@ -260,6 +272,16 @@ function createEmptyState(): WorkspaceState {
     setAppAccentTheme: async () => {
       throw new Error('not implemented')
     },
+    enableLocalMcp: async () => {
+      throw new Error('not implemented')
+    },
+    disableLocalMcp: async () => {
+      throw new Error('not implemented')
+    },
+    regenerateLocalMcpToken: async () => {
+      throw new Error('not implemented')
+    },
+    refreshMcpWorkspace: async () => undefined,
     setClipboardCaptureMode: async () => {
       throw new Error('not implemented')
     },
@@ -442,10 +464,27 @@ function createEmptyState(): WorkspaceState {
 }
 
 function normalizeAppSettings(settings: AppSettings | null | undefined): AppSettings {
+  const mcp = normalizeMcpSettings(settings?.mcp)
+
   return {
     closeAction: settings?.closeAction === 'quit' ? 'quit' : 'hide_to_tray',
     accentTheme: normalizeAppAccentTheme(settings?.accentTheme),
+    ...(mcp ? { mcp } : {}),
   }
+}
+
+function normalizeMcpSettings(settings: AppSettings['mcp']): McpSettings | undefined {
+  if (
+    !settings ||
+    !Number.isInteger(settings.port) ||
+    settings.port < 1024 ||
+    settings.port > 65535 ||
+    !settings.token
+  ) {
+    return undefined
+  }
+
+  return settings
 }
 
 function normalizePageDefaults(defaults: Partial<PageDisplayDefaults> | undefined): PageDisplayDefaults {
@@ -1393,6 +1432,15 @@ export function createWorkspaceStore(
     async save() {
       return undefined
     },
+    async enableLocalMcp() {
+      throw new Error('Local MCP is unavailable')
+    },
+    async disableLocalMcp() {
+      throw new Error('Local MCP is unavailable')
+    },
+    async regenerateLocalMcpToken() {
+      throw new Error('Local MCP is unavailable')
+    },
   },
 ) {
   const undoStack: WorkspaceSnapshot[] = []
@@ -1405,6 +1453,11 @@ export function createWorkspaceStore(
   let pendingBlockSaveTask: Promise<void> | null = null
   let pendingBlockSaveVersion = 0
   let bootstrapTask: Promise<void> | null = null
+  let localMcpOperation:
+    | { kind: 'enable'; promise: Promise<McpSettings> }
+    | { kind: 'disable'; promise: Promise<void> }
+    | { kind: 'regenerate'; promise: Promise<McpSettings> }
+    | null = null
 
   function getClipboardCaptureMode(settings: WorkspaceSettings) {
     return settings.clipboardCaptureMode === 'prompt_to_inbox' ? 'prompt_to_inbox' : 'off'
@@ -1839,6 +1892,123 @@ export function createWorkspaceStore(
 
       set({ appSettings: nextAppSettings })
       await appSettingsRepository.save(nextAppSettings)
+    },
+
+    enableLocalMcp: () => {
+      if (localMcpOperation?.kind === 'enable') {
+        return localMcpOperation.promise
+      }
+      if (localMcpOperation) {
+        return Promise.reject(
+          new Error('Local MCP disable operation is already in progress'),
+        )
+      }
+
+      const task = (async () => {
+        const mcp = await appSettingsRepository.enableLocalMcp()
+        set({ appSettings: normalizeAppSettings({ ...get().appSettings, mcp }) })
+        return mcp
+      })()
+      const operation = { kind: 'enable' as const, promise: task }
+      const clearTask = () => {
+        if (localMcpOperation === operation) {
+          localMcpOperation = null
+        }
+      }
+      localMcpOperation = operation
+      void task.then(clearTask, clearTask)
+      return task
+    },
+
+    disableLocalMcp: () => {
+      if (localMcpOperation?.kind === 'disable') {
+        return localMcpOperation.promise
+      }
+      if (localMcpOperation) {
+        return Promise.reject(
+          new Error('Local MCP enable operation is already in progress'),
+        )
+      }
+
+      const task = (async () => {
+        await appSettingsRepository.disableLocalMcp()
+        const mcp = get().appSettings.mcp
+        set({
+          appSettings: normalizeAppSettings({
+            ...get().appSettings,
+            ...(mcp ? { mcp: { ...mcp, enabled: false } } : {}),
+          }),
+        })
+      })()
+      const operation = { kind: 'disable' as const, promise: task }
+      const clearTask = () => {
+        if (localMcpOperation === operation) {
+          localMcpOperation = null
+        }
+      }
+      localMcpOperation = operation
+      void task.then(clearTask, clearTask)
+      return task
+    },
+
+    regenerateLocalMcpToken: () => {
+      if (localMcpOperation?.kind === 'regenerate') {
+        return localMcpOperation.promise
+      }
+      if (localMcpOperation) {
+        return Promise.reject(new Error('Local MCP operation is already in progress'))
+      }
+
+      const task = (async () => {
+        const mcp = await appSettingsRepository.regenerateLocalMcpToken()
+        set({ appSettings: normalizeAppSettings({ ...get().appSettings, mcp }) })
+        return mcp
+      })()
+      const operation = { kind: 'regenerate' as const, promise: task }
+      const clearTask = () => {
+        if (localMcpOperation === operation) {
+          localMcpOperation = null
+        }
+      }
+      localMcpOperation = operation
+      void task.then(clearTask, clearTask)
+      return task
+    },
+
+    refreshMcpWorkspace: async (update) => {
+      const snapshot = await repository.load()
+      if (!snapshot) {
+        return
+      }
+      await flushPendingSaves()
+      const pageIds = new Set([update.pageId, ...(update.createdPageIds ?? [])].filter(Boolean))
+      const byId = <T extends { id: string }>(current: T[], incoming: T[]) => {
+        const incomingById = new Map(incoming.map((item) => [item.id, item]))
+        const next = current.map((item) => incomingById.get(item.id) ?? item)
+        const knownIds = new Set(current.map((item) => item.id))
+        return next.concat(incoming.filter((item) => !knownIds.has(item.id)))
+      }
+
+      set((state) => ({
+        pages: state.pages
+          .map((page) => {
+            const incoming = pageIds.has(page.id)
+              ? snapshot.pages.find((item) => item.id === page.id)
+              : undefined
+            if (!incoming) {
+              return page
+            }
+            const blockIds = new Set(page.blocks.map((block) => block.id))
+            return {
+              ...incoming,
+              blocks: page.blocks.concat(incoming.blocks.filter((block) => !blockIds.has(block.id))),
+            }
+          })
+          .concat(snapshot.pages.filter((page) => pageIds.has(page.id) && !state.pages.some((item) => item.id === page.id))),
+        boards: byId(state.boards, snapshot.boards),
+        dataTables: byId(state.dataTables, snapshot.dataTables ?? []),
+        mindmaps: byId(state.mindmaps, snapshot.mindmaps ?? []),
+      }))
     },
 
     setClipboardCaptureMode: async (mode) => {
@@ -4487,7 +4657,8 @@ export function createWorkspaceStore(
                 return { ...block, displayMode: 'inline' as const }
               }
 
-              const { displayMode: _displayMode, ...dataTableBlock } = block
+              const dataTableBlock = { ...block }
+              delete dataTableBlock.displayMode
               return dataTableBlock
             }
 

@@ -5,6 +5,7 @@ import type {
   AppSettings,
   BoardRecord,
   DataTableRecord,
+  McpSettings,
   MindmapRecord,
   PageRecord,
   WorkspaceSnapshot,
@@ -63,6 +64,9 @@ export interface WorkspaceStorageClient {
   replaceWorkspaceBackup(snapshot: WorkspaceSnapshot): Promise<void>
   loadAppSettings(): Promise<AppSettings | null>
   saveAppSettings(settings: AppSettings): Promise<void>
+  enableLocalMcp(): Promise<McpSettings>
+  disableLocalMcp(): Promise<void>
+  regenerateLocalMcpToken(): Promise<McpSettings>
   exportPagePackageToPath(
     pageId: string,
     path: string,
@@ -102,6 +106,18 @@ export function createTauriStorageClient(): WorkspaceStorageClient {
 
     saveAppSettings(settings) {
       return invoke<void>('save_app_settings', { settings })
+    },
+
+    enableLocalMcp() {
+      return invoke<McpSettings>('enable_local_mcp')
+    },
+
+    disableLocalMcp() {
+      return invoke<void>('disable_local_mcp')
+    },
+
+    regenerateLocalMcpToken() {
+      return invoke<McpSettings>('regenerate_local_mcp_token')
     },
 
     exportPagePackageToPath(pageId, path, onProgress) {
