@@ -1533,4 +1533,4 @@
 - 已按 red → green 新增工作区替换回归：修复前 MCP 应用设置变为 `None`、审计查询无记录；修复后 2 passed、0 failed，并经规格与代码质量审查。
 - 已通过完整前端测试：89 个测试文件、787 条测试；完整 Rust 测试：155 passed、0 failed；`npm run lint`：0 error、5 条既有 Hook warning；`npm run build` 通过。
 - 已完成真实 Chatbox 六类内容写入与知栖页面、原生数据表、白板、思维导图打开验收；`scripts/mcp-smoke-test.mjs` 的完整隔离实例复跑、令牌轮换与真实重启验收仍待桌面解锁后执行。
-- Windows release 可执行文件已构建为 `E:\BuildCache\cargo-target\zhixi\mcp-package\release\zhixi.exe`；NSIS/MSI 因官方下载 `nsis-3.11.zip` 两次超时而未生成，待网络恢复后重试。
+- Windows 1.1.0 release 可执行文件及安装包均已构建并核对：`知栖_1.1.0_x64-setup.exe`（NSIS）与 `知栖_1.1.0_x64_zh-CN.msi`（MSI）。
