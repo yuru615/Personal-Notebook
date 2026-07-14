@@ -60,7 +60,6 @@ import type {
   SidebarPinnedItem,
   SyncedBlockMode,
   WorkspaceSettings,
-  WorkspaceSnapshot,
 } from '../domain/types'
 import type { AppAccentTheme } from '../domain/theme'
 import { collectPageRelationMatches } from '../domain/pageRelations'
@@ -71,6 +70,7 @@ import {
   type WorkspaceRepository,
 } from '../lib/workspaceRepository'
 import { createAppSettingsRepository } from '../lib/appSettingsRepository'
+import { exportWorkspaceArchive, importWorkspaceArchive, type WorkspaceArchiveProgress } from '../lib/storageClient'
 import {
   exportPagePackageToPath,
   exportPagePackage,
@@ -92,7 +92,6 @@ import {
   saveBinaryFile,
   saveTextFile,
 } from '../lib/fileAccess'
-import { type WorkspaceArchiveProgress } from '../lib/storageClient'
 import { createWorkspaceStore, type McpWorkspaceUpdate } from '../store/createWorkspaceStore'
 import { uiCopy } from '../ui/copy'
 import { sanitizeFileNameSegment } from '../utils/fileName'
@@ -114,8 +113,28 @@ const DELETE_PAGE_DESCRIPTION_PREFIX = '\u9875\u9762\u201c'
 const DELETE_PAGE_DESCRIPTION_SUFFIX =
   '\u201d\u53ca\u5176\u6240\u6709\u5b50\u9875\u9762\u5c06\u88ab\u5220\u9664\u3002\u672a\u88ab\u5176\u4ed6\u9875\u9762\u6216\u8d44\u6e90\u4f7f\u7528\u7684\u5173\u8054\u6587\u4ef6\u3001\u767d\u677f\u3001\u6570\u636e\u8868\u683c\u548c\u601d\u7ef4\u5bfc\u56fe\u4e5f\u4f1a\u88ab\u6e05\u7406\u3002'
 const JSON_FILE_FILTER = [{ name: 'JSON', extensions: ['json'] }]
-const ZIP_FILE_FILTER = [{ name: 'ZIP', extensions: ['zip'] }]
+const ZHIQI_ARCHIVE_FILE_FILTER = [{ name: '知栖归档', extensions: ['zhiqi'] }]
+const PAGE_IMPORT_FILE_FILTER = [{ name: '知栖页面包', extensions: ['zhiqi', 'zip'] }]
+const WORKSPACE_IMPORT_FILE_FILTER = [{ name: '知栖工作区备份', extensions: ['zhiqi', 'json'] }]
 const MARKDOWN_FILE_FILTER = [{ name: 'Markdown', extensions: ['md', 'markdown'] }]
+
+function archiveErrorMessage(error: unknown, target: 'page' | 'workspace') {
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as { code?: unknown }).code)
+      : ''
+
+  if (code === 'archive_wrong_kind') {
+    return target === 'page'
+      ? uiCopy.export.pageImportWrongKind
+      : uiCopy.export.workspaceImportWrongKind
+  }
+  if (code === 'archive_unsupported_version') return uiCopy.export.unsupportedArchiveVersion
+  if (code === 'archive_missing_asset') return uiCopy.export.archiveMissingAsset
+  if (code === 'archive_corrupt') return uiCopy.export.archiveCorrupt
+  return target === 'page' ? uiCopy.export.importError : uiCopy.export.workspaceImportError
+}
+
 const DataTablePage = lazy(() =>
   import('../components/dataTable/DataTablePage').then((module) => ({
     default: module.DataTablePage,
@@ -202,10 +221,6 @@ function createAppStore(repository?: WorkspaceRepository) {
 
 export function App({ repository, store: injectedStore, initialEntries }: AppProps = {}) {
   const [store] = useState(() => injectedStore ?? createAppStore(repository))
-  const workspaceImportRepository = useMemo(
-    () => repository ?? createStorageWorkspaceRepository(),
-    [repository],
-  )
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState)
   const [isBootstrapped, setIsBootstrapped] = useState(false)
   const [bootstrapError, setBootstrapError] = useState<unknown>(null)
@@ -480,12 +495,12 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       return
     }
 
-    const defaultPath = `${sanitizeFileName(page.title ?? '')}.zip`
+    const defaultPath = `${sanitizeFileName(page.title ?? '')}.zhiqi`
 
     if (isDesktopRuntime()) {
       const path = await pickSaveFilePath({
         defaultPath,
-        filters: ZIP_FILE_FILTER,
+        filters: ZHIQI_ARCHIVE_FILE_FILTER,
       })
 
       if (!path) {
@@ -512,7 +527,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       await saveBinaryFile({
         defaultPath,
         contents,
-        filters: ZIP_FILE_FILTER,
+        filters: ZHIQI_ARCHIVE_FILE_FILTER,
       })
       finishArchiveTask(uiCopy.export.exportComplete)
     } catch {
@@ -525,12 +540,13 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
     showArchiveTask({ label: uiCopy.export.exportingWorkspace, percent: 12 })
 
     try {
-      const snapshot = createWorkspaceBackupSnapshot(store.getState())
+      await store.getState().flushPendingSaves()
+      const contents = await exportWorkspaceArchive()
       showArchiveTask({ label: uiCopy.export.exportingWorkspace, percent: 72 })
-      await saveTextFile({
-        defaultPath: '知栖工作区备份.json',
-        contents: JSON.stringify(snapshot, null, 2),
-        filters: JSON_FILE_FILTER,
+      await saveBinaryFile({
+        defaultPath: '知栖工作区备份.zhiqi',
+        contents,
+        filters: ZHIQI_ARCHIVE_FILE_FILTER,
       })
       finishArchiveTask(uiCopy.export.workspaceExportComplete)
     } catch {
@@ -540,7 +556,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
   }
 
   async function importWorkspaceSnapshot() {
-    const file = await openTextFile({ filters: JSON_FILE_FILTER })
+    const file = await openBinaryFile({ filters: WORKSPACE_IMPORT_FILE_FILTER })
 
     if (!file) {
       return store.getState().currentPageId
@@ -554,14 +570,15 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       showArchiveTask({ label: uiCopy.export.importingWorkspace, percent: 0 })
       await store.getState().flushPendingSaves()
       showArchiveTask({ label: uiCopy.export.importingWorkspace, percent: 24 })
-      await workspaceImportRepository.replace(JSON.parse(file.contents) as WorkspaceSnapshot)
+      await importWorkspaceArchive(file.contents)
       showArchiveTask({ label: uiCopy.export.refreshingWorkspace, percent: 95 })
       await store.getState().bootstrap()
       finishArchiveTask(uiCopy.export.workspaceImportComplete)
       return store.getState().currentPageId
-    } catch {
-      failArchiveTask(uiCopy.export.workspaceImportError)
-      window.alert(uiCopy.export.workspaceImportError)
+    } catch (error) {
+      const message = archiveErrorMessage(error, 'workspace')
+      failArchiveTask(message)
+      window.alert(message)
       return store.getState().currentPageId
     }
   }
@@ -799,7 +816,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onDropFiles={importDroppedFiles}
       onImportArchive={async () => {
         if (isDesktopRuntime()) {
-          const file = await openLocalFilePath({ filters: ZIP_FILE_FILTER })
+          const file = await openLocalFilePath({ filters: PAGE_IMPORT_FILE_FILTER })
 
           if (!file) {
             return store.getState().currentPageId
@@ -820,14 +837,15 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
             await store.getState().bootstrap()
             finishArchiveTask(uiCopy.export.importComplete)
             return result.rootPageId
-          } catch {
-            failArchiveTask(uiCopy.export.importError)
-            window.alert(uiCopy.export.importError)
+          } catch (error) {
+            const message = archiveErrorMessage(error, 'page')
+            failArchiveTask(message)
+            window.alert(message)
             return store.getState().currentPageId
           }
         }
 
-        const file = await openBinaryFile({ filters: ZIP_FILE_FILTER })
+        const file = await openBinaryFile({ filters: PAGE_IMPORT_FILE_FILTER })
 
         if (!file) {
           return store.getState().currentPageId
@@ -846,9 +864,10 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
           await store.getState().bootstrap()
           finishArchiveTask(uiCopy.export.importComplete)
           return result.rootPageId
-        } catch {
-          failArchiveTask(uiCopy.export.importError)
-          window.alert(uiCopy.export.importError)
+        } catch (error) {
+          const message = archiveErrorMessage(error, 'page')
+          failArchiveTask(message)
+          window.alert(message)
           return store.getState().currentPageId
         }
       }}
@@ -2736,17 +2755,6 @@ function MindmapRoute({
 
 
 
-function createWorkspaceBackupSnapshot(state: AppState): WorkspaceSnapshot {
-  return {
-    boards: structuredClone(state.boards),
-    dataTables: structuredClone(state.dataTables),
-    mindmaps: structuredClone(state.mindmaps),
-    syncedBlockGroups: structuredClone(state.syncedBlockGroups),
-    pages: structuredClone(state.pages),
-    pageProperties: structuredClone(state.pageProperties),
-    settings: structuredClone(state.settings),
-  }
-}
 
 export default App
 

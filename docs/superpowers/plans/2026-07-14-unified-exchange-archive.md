@@ -355,6 +355,7 @@ expect(window.alert).toHaveBeenCalledWith(
 ~~~
 
 Add a legacy-json-v1 successful restore assertion that checks the compatibility success message.
+Add an export ordering assertion: set a delayed flushPendingSaves on the store, start 全部导出, assert exportWorkspaceArchiveToPath has not run, resolve the flush, then assert it runs. This preserves the existing state-snapshot guarantee after the export moves from React state to Rust storage.
 
 - [ ] **Step 2: Prove the UI test is red**
 
@@ -376,7 +377,7 @@ const PAGE_IMPORT_FILE_FILTER = [{ name: '知栖页面包', extensions: ['zhiqi'
 const WORKSPACE_IMPORT_FILE_FILTER = [{ name: '知栖工作区备份', extensions: ['zhiqi', 'json'] }]
 ~~~
 
-Page export becomes <page title>.zhiqi. Workspace export calls exportWorkspaceArchiveToPath on desktop or exportWorkspaceArchive plus saveBinaryFile in the browser fallback. Workspace restore calls the new client path or binary method, retains confirmation and flushPendingSaves, then bootstraps the store. Remove createWorkspaceBackupSnapshot only after no UI caller remains; do not alter WorkspaceRepository persistence.
+Page export becomes <page title>.zhiqi. Before either workspace export path, call and await flushPendingSaves so the Rust snapshot includes the latest editor state. Workspace export then calls exportWorkspaceArchiveToPath on desktop or exportWorkspaceArchive plus saveBinaryFile in the browser fallback. Workspace restore calls the new client path or binary method, retains confirmation and flushPendingSaves, then bootstraps the store. Remove createWorkspaceBackupSnapshot only after no UI caller remains; do not alter WorkspaceRepository persistence.
 
 - [ ] **Step 4: Add a centralized error mapper and source-format success messages**
 
@@ -465,4 +466,3 @@ git commit -m "docs: document unified exchange archives"
 - The plan covers the unified v2 container, two protected import semantics, historical zhixi and zhiqi page packages, historical JSON backups, assets, transaction cleanup, frontend messaging, documentation and packaging.
 - It deliberately excludes whiteboard-only JSON, Markdown and other editor-level interchange formats.
 - It adds no dependency and reuses the existing ZIP, stream-copy, transaction, progress and asset rollback capabilities.
-

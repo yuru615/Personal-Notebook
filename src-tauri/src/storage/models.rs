@@ -88,6 +88,34 @@ pub struct PagePackageImportResult {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ExchangeArchiveManifest {
+    pub format: String,
+    pub format_version: u32,
+    pub kind: String,
+    pub created_with: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PagePackagePayload {
+    pub root_page_id: String,
+    pub pages: Vec<PageRecord>,
+    pub boards: Vec<BoardRecord>,
+    pub data_tables: Vec<DataTableRecord>,
+    pub mindmaps: Vec<MindmapRecord>,
+    #[serde(default)]
+    pub synced_block_groups: Vec<SyncedBlockGroupRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceArchivePayload {
+    pub workspace: WorkspaceSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PagePackageManifest {
     pub kind: String,
     pub version: u32,

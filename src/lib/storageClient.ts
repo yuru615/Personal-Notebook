@@ -61,6 +61,8 @@ export type WorkspaceArchiveProgressHandler = (progress: WorkspaceArchiveProgres
 
 export interface WorkspaceStorageClient {
   exportWorkspaceBackup(): Promise<WorkspaceSnapshot | null>
+  exportWorkspaceArchive(): Promise<Uint8Array>
+  importWorkspaceArchive(bytes: Uint8Array): Promise<void>
   replaceWorkspaceBackup(
     snapshot: WorkspaceSnapshot,
     expectedBoardUpdatedAts?: Record<string, string>,
@@ -97,6 +99,16 @@ export function createTauriStorageClient(): WorkspaceStorageClient {
   return {
     exportWorkspaceBackup() {
       return invoke<WorkspaceSnapshot | null>('export_workspace_backup')
+    },
+
+    async exportWorkspaceArchive() {
+      return normalizeByteArray(
+        await invoke<Uint8Array | number[]>('export_workspace_archive'),
+      )
+    },
+
+    importWorkspaceArchive(bytes) {
+      return invoke<void>('import_workspace_archive', { bytes })
     },
 
     replaceWorkspaceBackup(snapshot, expectedBoardUpdatedAts) {
@@ -236,4 +248,12 @@ const defaultStorageClient = createTauriStorageClient()
 
 export function searchWorkspace(query: string, limit?: number) {
   return defaultStorageClient.searchWorkspace(query, limit)
+}
+
+export function exportWorkspaceArchive() {
+  return defaultStorageClient.exportWorkspaceArchive()
+}
+
+export function importWorkspaceArchive(bytes: Uint8Array) {
+  return defaultStorageClient.importWorkspaceArchive(bytes)
 }

@@ -19,7 +19,7 @@ use std::{
 };
 
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::Serialize;
+use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 
 pub use error::{StorageError, StorageResult};
@@ -28,9 +28,10 @@ pub use mcp::{McpWhiteboardUpdate, McpWhiteboardUpdateResult, McpWriteBatch, Mcp
 pub use models::PagePackageImportResult;
 pub use models::{
     AppSettings, AssetMeta, BoardRecord, BootstrapPayload, DataTableRecord, DeleteResult,
-    ImportAssetFileInput, LoadedPage, McpSettings, MindmapRecord, PageMeta, PagePackageManifest,
-    PagePropertyDefinition, PageRecord, SaveResult, SearchResult, SyncedBlockGroupRecord,
-    TrackedAssetWrite, WorkspaceSettings, WorkspaceSnapshot, WriteAssetInput,
+    ExchangeArchiveManifest, ImportAssetFileInput, LoadedPage, McpSettings, MindmapRecord,
+    PageMeta, PagePackageManifest, PagePackagePayload, PagePropertyDefinition, PageRecord,
+    SaveResult, SearchResult, SyncedBlockGroupRecord, TrackedAssetWrite, WorkspaceSettings,
+    WorkspaceArchivePayload, WorkspaceSnapshot, WriteAssetInput,
 };
 
 const DATABASE_FILE_NAME: &str = "zhiqi.db";
@@ -40,10 +41,18 @@ const APP_SETTINGS_ID: &str = "appSettings";
 const PAGE_PROPERTIES_SETTINGS_ID: &str = "page_properties";
 #[allow(dead_code)]
 pub const PAGE_PACKAGE_KIND: &str = "zhiqi.page-package";
+const LEGACY_PAGE_PACKAGE_KIND: &str = "zhixi.page-package";
 #[allow(dead_code)]
 pub const PAGE_PACKAGE_VERSION: u32 = 1;
 #[allow(dead_code)]
 pub const PAGE_PACKAGE_MANIFEST_ENTRY: &str = "page-package.json";
+pub const EXCHANGE_ARCHIVE_FORMAT: &str = "zhiqi.exchange";
+pub const EXCHANGE_ARCHIVE_VERSION: u32 = 2;
+pub const EXCHANGE_MANIFEST_ENTRY: &str = "manifest.json";
+pub const EXCHANGE_PAYLOAD_ENTRY: &str = "payload.json";
+pub const EXCHANGE_ASSET_MANIFEST_ENTRY: &str = "assets/manifest.json";
+const EXCHANGE_PAGE_PACKAGE_KIND: &str = "page-package";
+const EXCHANGE_WORKSPACE_BACKUP_KIND: &str = "workspace-backup";
 pub const WORKSPACE_ARCHIVE_PROGRESS_EVENT: &str = "zhiqi://workspace-archive-progress";
 static IMPORT_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -205,6 +214,157 @@ impl Storage {
             page_properties: self.load_page_properties()?,
             settings,
         })
+    }
+
+    pub fn export_workspace_archive(&self) -> StorageResult<Vec<u8>> {
+        let workspace = self.export_workspace_backup()?;
+        let assets = self.load_workspace_archive_assets(&workspace)?;
+        let payload = WorkspaceArchivePayload { workspace };
+        let manifest = ExchangeArchiveManifest {
+            format: EXCHANGE_ARCHIVE_FORMAT.to_string(),
+            format_version: EXCHANGE_ARCHIVE_VERSION,
+            kind: EXCHANGE_WORKSPACE_BACKUP_KIND.to_string(),
+            created_with: env!("CARGO_PKG_VERSION").to_string(),
+            created_at: now_nanos().to_string(),
+        };
+        let mut archive = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let metadata_options =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        archive
+            .start_file(EXCHANGE_MANIFEST_ENTRY, metadata_options)
+            .map_err(zip_error)?;
+        serde_json::to_writer_pretty(&mut archive, &manifest)?;
+        archive
+            .start_file(EXCHANGE_PAYLOAD_ENTRY, metadata_options)
+            .map_err(zip_error)?;
+        serde_json::to_writer_pretty(&mut archive, &payload)?;
+        archive
+            .start_file(EXCHANGE_ASSET_MANIFEST_ENTRY, metadata_options)
+            .map_err(zip_error)?;
+        serde_json::to_writer_pretty(&mut archive, &assets)?;
+        for asset in &assets {
+            let path = assets::asset_file_path(&self.connection, &self.assets_dir, &asset.id)?;
+            let mut asset_file = fs::File::open(path)?;
+            archive
+                .start_file(
+                    format!("assets/{}", asset.relative_path),
+                    archive_options_for_asset(asset),
+                )
+                .map_err(zip_error)?;
+            io::copy(&mut asset_file, &mut archive)?;
+        }
+        Ok(archive.finish().map_err(zip_error)?.into_inner())
+    }
+
+    pub fn import_workspace_archive(&self, bytes: Vec<u8>) -> StorageResult<()> {
+        let mut archive = match zip::ZipArchive::new(Cursor::new(bytes.clone())) {
+            Ok(archive) => archive,
+            Err(_) => {
+                let snapshot: WorkspaceSnapshot = serde_json::from_slice(&bytes)?;
+                return self.replace_workspace_backup(snapshot);
+            }
+        };
+        let manifest: ExchangeArchiveManifest =
+            read_archive_json(&mut archive, EXCHANGE_MANIFEST_ENTRY)?;
+        if manifest.format != EXCHANGE_ARCHIVE_FORMAT
+            || manifest.format_version != EXCHANGE_ARCHIVE_VERSION
+        {
+            return Err(StorageError::new(
+                "archive_unsupported_version",
+                "unsupported exchange archive version",
+            ));
+        }
+        if manifest.kind != EXCHANGE_WORKSPACE_BACKUP_KIND {
+            return Err(StorageError::new(
+                "archive_wrong_kind",
+                "page package cannot restore a workspace backup",
+            ));
+        }
+        let mut payload: WorkspaceArchivePayload =
+            read_archive_json(&mut archive, EXCHANGE_PAYLOAD_ENTRY)?;
+        let assets: Vec<AssetMeta> =
+            read_archive_json(&mut archive, EXCHANGE_ASSET_MANIFEST_ENTRY)?;
+        self.ensure_workspace_archive_assets_are_complete(&payload.workspace, &assets)?;
+
+        let mut asset_id_map = std::collections::HashMap::new();
+        let mut tracked_assets = Vec::new();
+        let asset_result = (|| {
+            for asset in &assets {
+                let path = format!("assets/{}", asset.relative_path);
+                let mut entry = archive.by_name(&path).map_err(|_| {
+                    StorageError::new("archive_missing_asset", format!("archive asset is missing: {path}"))
+                })?;
+                let imported = assets::write_asset_from_reader(
+                    &self.connection,
+                    &self.assets_dir,
+                    asset.name.clone(),
+                    asset.mime_type.clone(),
+                    &mut entry,
+                    &mut |_| {},
+                )?;
+                asset_id_map.insert(asset.id.clone(), imported.meta.id.clone());
+                tracked_assets.push(imported);
+            }
+            Ok(())
+        })();
+        if let Err(error) = asset_result {
+            return Err(self.rollback_tracked_assets(&tracked_assets, error));
+        }
+
+        rewrite_workspace_asset_refs(&mut payload.workspace, &asset_id_map);
+        if let Err(error) = self.replace_workspace_backup(payload.workspace) {
+            return Err(self.rollback_tracked_assets(&tracked_assets, error));
+        }
+        Ok(())
+    }
+
+    fn load_workspace_archive_assets(
+        &self,
+        workspace: &WorkspaceSnapshot,
+    ) -> StorageResult<Vec<AssetMeta>> {
+        let mut asset_ids = collect_asset_ids_from_pages(&workspace.pages);
+        for asset_id in collect_asset_ids_from_synced_groups(&workspace.synced_block_groups) {
+            if !asset_ids.contains(&asset_id) {
+                asset_ids.push(asset_id);
+            }
+        }
+        for asset_id in collect_asset_ids_from_data_tables(&workspace.data_tables) {
+            if !asset_ids.contains(&asset_id) {
+                asset_ids.push(asset_id);
+            }
+        }
+        assets::load_assets_by_ids(&self.connection, &asset_ids)
+    }
+
+    fn ensure_workspace_archive_assets_are_complete(
+        &self,
+        workspace: &WorkspaceSnapshot,
+        assets: &[AssetMeta],
+    ) -> StorageResult<()> {
+        for asset_id in self.load_workspace_archive_asset_ids(workspace) {
+            if !assets.iter().any(|asset| asset.id == asset_id) {
+                return Err(StorageError::new(
+                    "archive_missing_asset",
+                    format!("workspace asset is missing from archive: {asset_id}"),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn load_workspace_archive_asset_ids(&self, workspace: &WorkspaceSnapshot) -> Vec<String> {
+        let mut asset_ids = collect_asset_ids_from_pages(&workspace.pages);
+        for asset_id in collect_asset_ids_from_synced_groups(&workspace.synced_block_groups) {
+            if !asset_ids.contains(&asset_id) {
+                asset_ids.push(asset_id);
+            }
+        }
+        for asset_id in collect_asset_ids_from_data_tables(&workspace.data_tables) {
+            if !asset_ids.contains(&asset_id) {
+                asset_ids.push(asset_id);
+            }
+        }
+        asset_ids
     }
 
     pub fn load_workspace_backup(&self) -> StorageResult<Option<WorkspaceSnapshot>> {
@@ -772,7 +932,31 @@ impl Storage {
         W: Write + Seek,
         F: FnMut(WorkspaceArchiveProgress),
     {
-        let assets = manifest.assets.clone();
+        let PagePackageManifest {
+            root_page_id,
+            pages,
+            boards,
+            data_tables,
+            mindmaps,
+            synced_block_groups,
+            assets,
+            ..
+        } = manifest;
+        let payload = PagePackagePayload {
+            root_page_id,
+            pages,
+            boards,
+            data_tables,
+            mindmaps,
+            synced_block_groups,
+        };
+        let exchange_manifest = ExchangeArchiveManifest {
+            format: EXCHANGE_ARCHIVE_FORMAT.to_string(),
+            format_version: EXCHANGE_ARCHIVE_VERSION,
+            kind: EXCHANGE_PAGE_PACKAGE_KIND.to_string(),
+            created_with: env!("CARGO_PKG_VERSION").to_string(),
+            created_at: now_nanos().to_string(),
+        };
         let total_assets = assets.len() as u64;
         let bytes_total = total_asset_bytes(&assets);
         let mut bytes_processed = 0;
@@ -793,9 +977,14 @@ impl Storage {
         );
 
         archive
-            .start_file(PAGE_PACKAGE_MANIFEST_ENTRY, metadata_options)
+            .start_file(EXCHANGE_MANIFEST_ENTRY, metadata_options)
             .map_err(zip_error)?;
-        serde_json::to_writer_pretty(&mut archive, &manifest)?;
+        serde_json::to_writer_pretty(&mut archive, &exchange_manifest)?;
+
+        archive
+            .start_file(EXCHANGE_PAYLOAD_ENTRY, metadata_options)
+            .map_err(zip_error)?;
+        serde_json::to_writer_pretty(&mut archive, &payload)?;
 
         report_archive_progress(
             task_id,
@@ -810,7 +999,7 @@ impl Storage {
         );
 
         archive
-            .start_file("assets/manifest.json", metadata_options)
+            .start_file(EXCHANGE_ASSET_MANIFEST_ENTRY, metadata_options)
             .map_err(zip_error)?;
         serde_json::to_writer_pretty(&mut archive, &assets)?;
 
@@ -902,15 +1091,48 @@ impl Storage {
             0,
             None,
         );
-        let manifest: PagePackageManifest = {
-            let mut manifest_entry = archive
-                .by_name(PAGE_PACKAGE_MANIFEST_ENTRY)
-                .map_err(|_| StorageError::invalid_payload("not a zhiqi page package"))?;
-            serde_json::from_reader(&mut manifest_entry)?
+        let manifest = if archive.by_name(EXCHANGE_MANIFEST_ENTRY).is_ok() {
+            let exchange_manifest: ExchangeArchiveManifest =
+                read_archive_json(&mut archive, EXCHANGE_MANIFEST_ENTRY)?;
+            if exchange_manifest.format != EXCHANGE_ARCHIVE_FORMAT
+                || exchange_manifest.format_version != EXCHANGE_ARCHIVE_VERSION
+            {
+                return Err(StorageError::new(
+                    "archive_unsupported_version",
+                    "unsupported exchange archive version",
+                ));
+            }
+            if exchange_manifest.kind != EXCHANGE_PAGE_PACKAGE_KIND {
+                return Err(StorageError::new(
+                    "archive_wrong_kind",
+                    "workspace backup cannot be imported as a page package",
+                ));
+            }
+            let payload: PagePackagePayload =
+                read_archive_json(&mut archive, EXCHANGE_PAYLOAD_ENTRY)?;
+            let assets: Vec<AssetMeta> =
+                read_archive_json(&mut archive, EXCHANGE_ASSET_MANIFEST_ENTRY)?;
+            PagePackageManifest {
+                kind: PAGE_PACKAGE_KIND.to_string(),
+                version: PAGE_PACKAGE_VERSION,
+                root_page_id: payload.root_page_id,
+                pages: payload.pages,
+                boards: payload.boards,
+                data_tables: payload.data_tables,
+                mindmaps: payload.mindmaps,
+                synced_block_groups: payload.synced_block_groups,
+                assets,
+            }
+        } else {
+            let manifest: PagePackageManifest =
+                read_archive_json(&mut archive, PAGE_PACKAGE_MANIFEST_ENTRY)?;
+            let is_supported_kind =
+                manifest.kind == PAGE_PACKAGE_KIND || manifest.kind == LEGACY_PAGE_PACKAGE_KIND;
+            if !is_supported_kind || manifest.version != PAGE_PACKAGE_VERSION {
+                return Err(StorageError::invalid_payload("unsupported page package"));
+            }
+            manifest
         };
-        if manifest.kind != PAGE_PACKAGE_KIND || manifest.version != PAGE_PACKAGE_VERSION {
-            return Err(StorageError::invalid_payload("unsupported page package"));
-        }
         if !manifest
             .pages
             .iter()
@@ -2503,6 +2725,42 @@ fn rewrite_data_table_asset_refs(
     }
 }
 
+fn rewrite_workspace_asset_refs(
+    workspace: &mut WorkspaceSnapshot,
+    asset_id_map: &std::collections::HashMap<String, String>,
+) {
+    for page in &mut workspace.pages {
+        rewrite_block_asset_refs(&mut page.blocks, asset_id_map);
+    }
+    for group in &mut workspace.synced_block_groups {
+        rewrite_block_asset_refs(&mut group.blocks, asset_id_map);
+    }
+    for data_table in &mut workspace.data_tables {
+        rewrite_data_table_asset_refs(&mut data_table.snapshot, asset_id_map);
+    }
+}
+
+fn rewrite_block_asset_refs(
+    blocks: &mut [Value],
+    asset_id_map: &std::collections::HashMap<String, String>,
+) {
+    for block in blocks {
+        let Some(object) = block.as_object_mut() else {
+            continue;
+        };
+        let Some(asset_id) = object
+            .get("assetId")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        if let Some(next_id) = asset_id_map.get(&asset_id) {
+            object.insert("assetId".to_string(), Value::String(next_id.clone()));
+        }
+    }
+}
+
 fn rewrite_data_table_block_ids(snapshot: &mut Value, counter: &mut u64) {
     let Some(blocks) = snapshot.get("blocks").and_then(Value::as_object) else {
         return;
@@ -2779,6 +3037,20 @@ fn zip_error(error: zip::result::ZipError) -> StorageError {
         zip::result::ZipError::FileNotFound => StorageError::not_found("archive entry not found"),
         other => StorageError::invalid_payload(other.to_string()),
     }
+}
+
+fn read_archive_json<R, T>(
+    archive: &mut zip::ZipArchive<R>,
+    entry_name: &str,
+) -> StorageResult<T>
+where
+    R: Read + Seek,
+    T: DeserializeOwned,
+{
+    let mut entry = archive
+        .by_name(entry_name)
+        .map_err(|_| StorageError::invalid_payload(format!("archive entry is missing: {entry_name}")))?;
+    serde_json::from_reader(&mut entry).map_err(Into::into)
 }
 
 fn option_bool_to_i64(value: Option<bool>) -> Option<i64> {
@@ -3415,13 +3687,8 @@ mod tests {
         let archive = storage
             .export_page_package("page_sync")
             .expect("export page package");
-        let mut archive = zip::ZipArchive::new(Cursor::new(archive)).expect("read archive");
-        let manifest: Value = {
-            let mut entry = archive
-                .by_name(PAGE_PACKAGE_MANIFEST_ENTRY)
-                .expect("page package manifest");
-            serde_json::from_reader(&mut entry).expect("parse manifest")
-        };
+        let manifest = serde_json::to_value(read_exported_page_package_manifest(archive))
+            .expect("serialize manifest");
 
         assert_eq!(
             manifest
@@ -3583,18 +3850,47 @@ mod tests {
         }));
     }
 
+    fn read_exported_page_package_manifest_from_archive<R>(
+        source_archive: &mut zip::ZipArchive<R>,
+    ) -> PagePackageManifest
+    where
+        R: Read + Seek,
+    {
+        let mut payload: Value = {
+            let mut payload_entry = source_archive
+                .by_name(EXCHANGE_PAYLOAD_ENTRY)
+                .expect("page package payload");
+            serde_json::from_reader(&mut payload_entry).expect("parse payload")
+        };
+        let assets: Value = {
+            let mut asset_manifest_entry = source_archive
+                .by_name(EXCHANGE_ASSET_MANIFEST_ENTRY)
+                .expect("asset manifest");
+            serde_json::from_reader(&mut asset_manifest_entry).expect("parse asset manifest")
+        };
+        let payload_object = payload.as_object_mut().expect("payload object");
+        payload_object.insert("kind".to_string(), Value::String(PAGE_PACKAGE_KIND.to_string()));
+        payload_object.insert(
+            "version".to_string(),
+            Value::Number(PAGE_PACKAGE_VERSION.into()),
+        );
+        payload_object.insert("assets".to_string(), assets);
+        serde_json::from_value(payload).expect("parse page package manifest")
+    }
+
+    fn read_exported_page_package_manifest(archive: Vec<u8>) -> PagePackageManifest {
+        let mut source_archive =
+            zip::ZipArchive::new(Cursor::new(archive)).expect("read source archive");
+        read_exported_page_package_manifest_from_archive(&mut source_archive)
+    }
+
     fn rewrite_page_package_manifest(
         archive: Vec<u8>,
         rewrite: impl FnOnce(&mut PagePackageManifest),
     ) -> Vec<u8> {
         let mut source_archive =
             zip::ZipArchive::new(Cursor::new(archive)).expect("read source archive");
-        let mut manifest: PagePackageManifest = {
-            let mut manifest_entry = source_archive
-                .by_name(PAGE_PACKAGE_MANIFEST_ENTRY)
-                .expect("page package manifest");
-            serde_json::from_reader(&mut manifest_entry).expect("parse manifest")
-        };
+        let mut manifest = read_exported_page_package_manifest_from_archive(&mut source_archive);
         let mut asset_entries = Vec::new();
         for asset in &manifest.assets {
             let path = format!("assets/{}", asset.relative_path);
@@ -3687,6 +3983,61 @@ mod tests {
         let exported = storage.export_workspace_backup().expect("export snapshot");
         assert_eq!(exported.page_properties, snapshot.page_properties);
         assert_eq!(exported.pages[0].properties, snapshot.pages[0].properties);
+    }
+
+    #[test]
+    fn workspace_archive_restores_media_and_rejects_page_packages() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        let asset = source
+            .write_asset(WriteAssetInput {
+                name: "diagram.png".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes: b"diagram bytes".to_vec(),
+            })
+            .expect("write source asset");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages[0].blocks.push(json!({
+            "id": "block_diagram",
+            "type": "image",
+            "assetId": asset.id,
+            "name": "diagram.png",
+            "mimeType": "image/png"
+        }));
+        source
+            .replace_workspace_backup(snapshot)
+            .expect("seed source workspace");
+
+        let archive = source
+            .export_workspace_archive()
+            .expect("export workspace archive");
+        let target = Storage::open_in_memory_for_tests().expect("target opens");
+        target
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed target workspace");
+        target
+            .import_workspace_archive(archive)
+            .expect("restore workspace archive");
+        let imported = target.export_workspace_backup().expect("export restored workspace");
+        let imported_asset_id = imported.pages[0]
+            .blocks
+            .iter()
+            .find(|block| block.get("id").and_then(Value::as_str) == Some("block_diagram"))
+            .and_then(|block| block.get("assetId").and_then(Value::as_str))
+            .expect("restored image asset id");
+        assert_eq!(
+            target.read_asset(imported_asset_id).expect("read restored asset"),
+            b"diagram bytes"
+        );
+
+        let before = target.export_workspace_backup().expect("snapshot before wrong route");
+        let page_archive = source
+            .export_page_package("page_1")
+            .expect("export page package");
+        let error = target
+            .import_workspace_archive(page_archive)
+            .expect_err("page package rejected by workspace restore");
+        assert_eq!(error.code, "archive_wrong_kind");
+        assert_eq!(target.export_workspace_backup().expect("snapshot after wrong route"), before);
     }
 
     #[test]
@@ -5323,14 +5674,8 @@ mod tests {
         let archive = source
             .export_page_package("page_1")
             .expect("export page package");
-        let cursor = Cursor::new(archive);
-        let mut archive = zip::ZipArchive::new(cursor).expect("read archive");
-        let manifest: PagePackageManifest = {
-            let mut manifest_entry = archive
-                .by_name(PAGE_PACKAGE_MANIFEST_ENTRY)
-                .expect("page package manifest");
-            serde_json::from_reader(&mut manifest_entry).expect("parse manifest")
-        };
+        let manifest = read_exported_page_package_manifest(archive.clone());
+        let mut archive = zip::ZipArchive::new(Cursor::new(archive)).expect("read archive");
 
         assert_eq!(manifest.kind, PAGE_PACKAGE_KIND);
         assert_eq!(manifest.version, PAGE_PACKAGE_VERSION);
@@ -5401,13 +5746,7 @@ mod tests {
         let archive = source
             .export_page_package("page_nested")
             .expect("export nested package");
-        let mut archive = zip::ZipArchive::new(Cursor::new(archive)).expect("read archive");
-        let manifest: PagePackageManifest = {
-            let mut manifest_entry = archive
-                .by_name(PAGE_PACKAGE_MANIFEST_ENTRY)
-                .expect("page package manifest");
-            serde_json::from_reader(&mut manifest_entry).expect("parse manifest")
-        };
+        let manifest = read_exported_page_package_manifest(archive);
         let root = manifest
             .pages
             .iter()
@@ -5542,14 +5881,8 @@ mod tests {
         let archive = source
             .export_page_package("page_1")
             .expect("export page package");
-        let cursor = Cursor::new(archive);
-        let mut archive = zip::ZipArchive::new(cursor).expect("read archive");
-        let manifest: PagePackageManifest = {
-            let mut manifest_entry = archive
-                .by_name(PAGE_PACKAGE_MANIFEST_ENTRY)
-                .expect("page package manifest");
-            serde_json::from_reader(&mut manifest_entry).expect("parse manifest")
-        };
+        let manifest = read_exported_page_package_manifest(archive.clone());
+        let mut archive = zip::ZipArchive::new(Cursor::new(archive)).expect("read archive");
 
         assert_eq!(
             manifest
@@ -6729,6 +7062,64 @@ mod tests {
     }
 
     #[test]
+    fn page_package_import_accepts_legacy_zhixi_manifest_kind() {
+        let source = Storage::open_in_memory_for_tests().expect("source opens");
+        source
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed source");
+        let archive = source
+            .export_page_package("page_1")
+            .expect("export package");
+        let legacy_archive = rewrite_page_package_manifest(archive, |manifest| {
+            manifest.kind = "zhixi.page-package".to_string();
+        });
+
+        let target = Storage::open_in_memory_for_tests().expect("target opens");
+        target
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed target");
+
+        let result = target
+            .import_page_package(legacy_archive)
+            .expect("legacy page package imports");
+        let imported = target.export_workspace_backup().expect("export target");
+
+        assert!(imported
+            .pages
+            .iter()
+            .any(|page| page.id == result.root_page_id));
+    }
+
+    #[test]
+    fn page_package_exports_exchange_v2_layout() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        storage
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed workspace");
+
+        let archive = storage
+            .export_page_package("page_1")
+            .expect("export page package");
+        let mut archive = zip::ZipArchive::new(Cursor::new(archive)).expect("read archive");
+        let manifest: Value = {
+            let mut entry = archive
+                .by_name("manifest.json")
+                .expect("exchange manifest exists");
+            serde_json::from_reader(&mut entry).expect("parse exchange manifest")
+        };
+
+        assert_eq!(manifest.get("format").and_then(Value::as_str), Some("zhiqi.exchange"));
+        assert_eq!(manifest.get("formatVersion").and_then(Value::as_u64), Some(2));
+        assert_eq!(
+            manifest.get("kind").and_then(Value::as_str),
+            Some("page-package")
+        );
+        assert!(archive.by_name("payload.json").is_ok());
+        assert!(archive.by_name("assets/manifest.json").is_ok());
+        assert!(archive.by_name(PAGE_PACKAGE_MANIFEST_ENTRY).is_err());
+    }
+
+    #[test]
     fn page_package_import_rejects_invalid_manifest() {
         let mut bytes = Cursor::new(Vec::new());
         {
@@ -6800,13 +7191,7 @@ mod tests {
         let archive = source
             .export_page_package("page_1")
             .expect("export package");
-        let mut archive = zip::ZipArchive::new(Cursor::new(archive)).expect("read archive");
-        let manifest: PagePackageManifest = {
-            let mut manifest_entry = archive
-                .by_name(PAGE_PACKAGE_MANIFEST_ENTRY)
-                .expect("page package manifest");
-            serde_json::from_reader(&mut manifest_entry).expect("parse manifest")
-        };
+        let manifest = read_exported_page_package_manifest(archive);
         let mut bytes = Cursor::new(Vec::new());
         {
             let mut broken_archive = zip::ZipWriter::new(&mut bytes);

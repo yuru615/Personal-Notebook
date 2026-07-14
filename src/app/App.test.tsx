@@ -47,7 +47,7 @@ const fileAccess = vi.hoisted(() => ({
     name: '工作区备份.zip',
     path: '/tmp/工作区备份.zip',
   })),
-  pickSaveFilePath: vi.fn(async () => '/tmp/产品规划.zip'),
+  pickSaveFilePath: vi.fn(async () => '/tmp/产品规划.zhiqi'),
   saveBinaryFile: vi.fn(async () => undefined),
   saveTextFile: vi.fn(async () => undefined),
 }))
@@ -56,6 +56,10 @@ const pagePackageStorage = vi.hoisted(() => ({
   exportPagePackage: vi.fn(async () => new Uint8Array([80, 75, 3, 4])),
   importPagePackageFromPath: vi.fn(async () => ({ rootPageId: 'page_imported' })),
   importPagePackage: vi.fn(async () => ({ rootPageId: 'page_imported' })),
+}))
+const workspaceArchiveStorage = vi.hoisted(() => ({
+  exportWorkspaceArchive: vi.fn(async () => new Uint8Array([80, 75, 3, 4])),
+  importWorkspaceArchive: vi.fn(async () => undefined),
 }))
 const tauriEvents = vi.hoisted(() => ({
   listen: vi.fn(async () => () => undefined),
@@ -93,6 +97,15 @@ vi.mock('../lib/assets', async (importOriginal) => {
     exportPagePackage: pagePackageStorage.exportPagePackage,
     importPagePackageFromPath: pagePackageStorage.importPagePackageFromPath,
     importPagePackage: pagePackageStorage.importPagePackage,
+  }
+})
+
+vi.mock('../lib/storageClient', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/storageClient')>()
+  return {
+    ...actual,
+    exportWorkspaceArchive: workspaceArchiveStorage.exportWorkspaceArchive,
+    importWorkspaceArchive: workspaceArchiveStorage.importWorkspaceArchive,
   }
 })
 
@@ -212,13 +225,15 @@ describe('App', () => {
       path: '/tmp/工作区备份.zip',
     })
     fileAccess.pickSaveFilePath.mockClear()
-    fileAccess.pickSaveFilePath.mockResolvedValue('/tmp/产品规划.zip')
+    fileAccess.pickSaveFilePath.mockResolvedValue('/tmp/产品规划.zhiqi')
     fileAccess.saveBinaryFile.mockClear()
     fileAccess.saveTextFile.mockClear()
     pagePackageStorage.exportPagePackageToPath.mockClear()
     pagePackageStorage.exportPagePackage.mockClear()
     pagePackageStorage.importPagePackageFromPath.mockClear()
     pagePackageStorage.importPagePackage.mockClear()
+    workspaceArchiveStorage.exportWorkspaceArchive.mockClear()
+    workspaceArchiveStorage.importWorkspaceArchive.mockClear()
     pagePackageStorage.importPagePackageFromPath.mockResolvedValue({ rootPageId: 'page_imported' })
     pagePackageStorage.importPagePackage.mockResolvedValue({ rootPageId: 'page_imported' })
     scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
@@ -1695,7 +1710,7 @@ describe('App', () => {
     await waitFor(() => {
       expect(fileAccess.saveBinaryFile).toHaveBeenCalledWith(
         expect.objectContaining({
-          defaultPath: '产品规划.zip',
+          defaultPath: '产品规划.zhiqi',
         }),
       )
     })
@@ -1748,7 +1763,7 @@ describe('App', () => {
     })
     expect(fileAccess.saveBinaryFile).toHaveBeenCalledWith(
       expect.objectContaining({
-        defaultPath: '产品规划.zip',
+          defaultPath: '产品规划.zhiqi',
       }),
     )
   })
@@ -1792,13 +1807,13 @@ describe('App', () => {
 
     await waitFor(() => {
       expect(fileAccess.pickSaveFilePath).toHaveBeenCalledWith({
-        defaultPath: '产品规划.zip',
-        filters: [{ name: 'ZIP', extensions: ['zip'] }],
+        defaultPath: '产品规划.zhiqi',
+        filters: [{ name: '知栖归档', extensions: ['zhiqi'] }],
       })
     })
     expect(pagePackageStorage.exportPagePackageToPath).toHaveBeenCalledWith(
       pageId,
-      '/tmp/产品规划.zip',
+      '/tmp/产品规划.zhiqi',
       expect.any(Function),
     )
     expect(pagePackageStorage.exportPagePackage).not.toHaveBeenCalled()
@@ -1871,7 +1886,7 @@ describe('App', () => {
     })
   })
 
-  it('exports the whole workspace from the top page menu', async () => {
+  it('exports the whole workspace as a portable zhiqi archive from the top page menu', async () => {
     const user = userEvent.setup()
     const pageId = 'page_workspace_export'
     const snapshot: WorkspaceSnapshot = {
@@ -1905,24 +1920,15 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: '全部导出' }))
 
     await waitFor(() => {
-      expect(fileAccess.saveTextFile).toHaveBeenCalledWith(
+      expect(workspaceArchiveStorage.exportWorkspaceArchive).toHaveBeenCalledTimes(1)
+      expect(fileAccess.saveBinaryFile).toHaveBeenCalledWith(
         expect.objectContaining({
-          defaultPath: '知栖工作区备份.json',
-          filters: [{ name: 'JSON', extensions: ['json'] }],
+          defaultPath: '知栖工作区备份.zhiqi',
+          filters: [{ name: '知栖归档', extensions: ['zhiqi'] }],
         }),
       )
     })
-
-    const exportPayload = fileAccess.saveTextFile.mock.calls[0]?.[0]
-    expect(exportPayload).toBeDefined()
-    const exportedSnapshot = JSON.parse(String(exportPayload.contents))
-    expect(exportedSnapshot.pages).toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: pageId, title: '工作区首页' })]),
-    )
-    expect(exportedSnapshot.pages).toEqual(
-      expect.arrayContaining([expect.objectContaining({ title: '收件箱' })]),
-    )
-    expect(exportedSnapshot.settings.inboxPageId).toBeTruthy()
+    expect(fileAccess.saveTextFile).not.toHaveBeenCalled()
   })
 
   it('imports a page package as a new top-level page and navigates to it', async () => {
@@ -1968,7 +1974,7 @@ describe('App', () => {
 
     await waitFor(() => {
       expect(fileAccess.openLocalFilePath).toHaveBeenCalledWith({
-        filters: [{ name: 'ZIP', extensions: ['zip'] }],
+        filters: [{ name: '知栖页面包', extensions: ['zhiqi', 'zip'] }],
       })
     })
     expect(confirm).toHaveBeenCalledWith('导入会新增为一个顶层页面，确认继续吗？')
@@ -2020,7 +2026,7 @@ describe('App', () => {
     expect(screen.getByText('第一段正文')).toBeInTheDocument()
   })
 
-  it('imports a workspace backup from the page menu and refreshes the workspace', async () => {
+  it('imports a portable workspace archive from the page menu after confirmation', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const user = userEvent.setup()
     const pageId = 'page_before_restore'
@@ -2055,12 +2061,14 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: '导入完整备份' }))
 
     await waitFor(() => {
-      expect(fileAccess.openTextFile).toHaveBeenCalledWith({
-        filters: [{ name: 'JSON', extensions: ['json'] }],
+      expect(fileAccess.openBinaryFile).toHaveBeenCalledWith({
+        filters: [{ name: '知栖工作区备份', extensions: ['zhiqi', 'json'] }],
       })
     })
     expect(confirm).toHaveBeenCalled()
-    expect(await screen.findByDisplayValue('恢复后的首页')).toBeInTheDocument()
+    expect(workspaceArchiveStorage.importWorkspaceArchive).toHaveBeenCalledWith(
+      new Uint8Array([80, 75, 3, 4]),
+    )
 
     confirm.mockRestore()
   })
