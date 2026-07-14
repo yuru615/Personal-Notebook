@@ -37,6 +37,23 @@ pub fn replace_workspace_backup(
 }
 
 #[tauri::command]
+pub async fn export_workspace_archive(
+    state: State<'_, StorageState>,
+) -> StorageResult<Vec<u8>> {
+    with_storage_blocking(state.inner().clone(), move |storage| storage.export_workspace_archive())
+        .await
+}
+
+#[tauri::command]
+pub async fn import_workspace_archive(
+    state: State<'_, StorageState>,
+    bytes: Vec<u8>,
+) -> StorageResult<()> {
+    with_storage_blocking(state.inner().clone(), move |storage| storage.import_workspace_archive(bytes))
+        .await
+}
+
+#[tauri::command]
 pub fn load_app_settings(state: State<'_, StorageState>) -> StorageResult<Option<AppSettings>> {
     state.with_storage(|storage| storage.load_app_settings())
 }

@@ -56,6 +56,8 @@ pub fn run() {
             storage::commands::bootstrap_workspace,
             storage::commands::export_workspace_backup,
             storage::commands::replace_workspace_backup,
+            storage::commands::export_workspace_archive,
+            storage::commands::import_workspace_archive,
             storage::commands::load_app_settings,
             storage::commands::save_app_settings,
             storage::commands::enable_local_mcp,

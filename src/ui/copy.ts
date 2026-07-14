@@ -128,7 +128,12 @@ export const uiCopy = {
     exportError: '导出失败，请稍后重试。',
     workspaceImportConfirm: '导入完整备份会覆盖当前工作区内容，建议先导出备份，确认继续吗？',
     workspaceImportError: '导入失败，请检查工作区备份格式。',
+    workspaceImportWrongKind: '这是页面包，请使用“导入页面包”。',
     importConfirm: '导入会新增为一个顶层页面，确认继续吗？',
     importError: '导入失败，请检查页面包格式。',
+    pageImportWrongKind: '这是工作区备份，请使用“导入完整备份”。',
+    unsupportedArchiveVersion: '该归档来自更高版本的知栖，当前版本暂不支持。',
+    archiveMissingAsset: '归档缺少关联文件，未导入任何内容。',
+    archiveCorrupt: '归档文件已损坏或不是知栖归档。',
   },
 } as const

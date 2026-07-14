@@ -261,6 +261,24 @@ describe('createTauriStorageClient', () => {
     })
   })
 
+  it('exports and imports portable workspace archives through typed Tauri commands', async () => {
+    const { createTauriStorageClient } = await import('./storageClient')
+    const archive = new Uint8Array([80, 75, 3, 4])
+    eventApi.invoke
+      .mockResolvedValueOnce([80, 75, 3, 4])
+      .mockResolvedValueOnce(undefined)
+
+    const client = createTauriStorageClient()
+
+    await expect(client.exportWorkspaceArchive()).resolves.toEqual(archive)
+    await client.importWorkspaceArchive(archive)
+
+    expect(eventApi.invoke).toHaveBeenNthCalledWith(1, 'export_workspace_archive')
+    expect(eventApi.invoke).toHaveBeenNthCalledWith(2, 'import_workspace_archive', {
+      bytes: archive,
+    })
+  })
+
   it('subscribes to archive progress for page-package path commands', async () => {
     const { createTauriStorageClient, WORKSPACE_ARCHIVE_PROGRESS_EVENT } = await import('./storageClient')
     const onProgress = vi.fn()
