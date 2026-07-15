@@ -9,7 +9,7 @@ import type { WorkspaceStorageClient } from '../lib/storageClient'
 import type { WorkspaceRepository } from '../lib/workspaceRepository'
 import { createMemoryRepository } from '../test/memoryRepository'
 import { createWorkspaceStore } from '../store/createWorkspaceStore'
-import { App } from './App'
+import { WorkspaceApp } from './App'
 
 const desktopLifecycle = vi.hoisted(() => ({
   registerDesktopPendingSaveFlush: vi.fn(async () => () => undefined),
@@ -248,7 +248,7 @@ describe('App', () => {
 
     render(
       <StrictMode>
-        <App repository={repository} />
+        <WorkspaceApp repository={repository} />
       </StrictMode>,
     )
 
@@ -289,7 +289,7 @@ describe('App', () => {
 
     const store = createWorkspaceStore(repository)
     const refreshMcpWorkspace = vi.spyOn(store.getState(), 'refreshMcpWorkspace')
-    render(<App store={store} initialEntries={['/pages/page_mcp_refresh']} />)
+    render(<WorkspaceApp store={store} initialEntries={['/pages/page_mcp_refresh']} />)
 
     await screen.findByText('Before MCP')
     snapshot.pages[0]?.blocks.push({ id: 'block_from_mcp', type: 'paragraph', text: 'Saved by MCP' })
@@ -340,7 +340,7 @@ describe('App', () => {
     const flushPendingSaves = vi.fn(store.getState().flushPendingSaves)
     store.setState({ flushPendingSaves })
 
-    render(<App store={store} initialEntries={['/pages/page_flush']} />)
+    render(<WorkspaceApp store={store} initialEntries={['/pages/page_flush']} />)
 
     await screen.findByDisplayValue('Flush page')
 
@@ -372,7 +372,7 @@ describe('App', () => {
     const flushPendingSaves = vi.fn(store.getState().flushPendingSaves)
     store.setState({ flushPendingSaves })
 
-    render(<App store={store} initialEntries={['/pages/page_desktop_flush']} />)
+    render(<WorkspaceApp store={store} initialEntries={['/pages/page_desktop_flush']} />)
 
     await screen.findByDisplayValue('Desktop flush page')
 
@@ -406,7 +406,7 @@ describe('App', () => {
       settings: { lastOpenedPageId: 'page_root' },
     }
 
-    render(<App repository={createMemoryRepository(snapshot)} initialEntries={['/pages/page_root']} />)
+    render(<WorkspaceApp repository={createMemoryRepository(snapshot)} initialEntries={['/pages/page_root']} />)
 
     await screen.findByDisplayValue('Home')
     await waitFor(() => {
@@ -441,7 +441,7 @@ describe('App', () => {
     }
 
     render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={['/pages/page_settings_home']}
       />,
@@ -465,7 +465,7 @@ describe('App', () => {
       appSettings.repository,
     )
 
-    render(<App store={store} initialEntries={['/settings/experimental']} />)
+    render(<WorkspaceApp store={store} initialEntries={['/settings/experimental']} />)
 
     const toggle = await screen.findByRole('checkbox', { name: /启用本机 MCP 接入/ })
     await user.click(toggle)
@@ -497,7 +497,7 @@ describe('App', () => {
       appSettings.repository,
     )
 
-    render(<App store={store} initialEntries={['/settings/experimental']} />)
+    render(<WorkspaceApp store={store} initialEntries={['/settings/experimental']} />)
 
     const toggle = await screen.findByRole('checkbox', { name: /启用本机 MCP 接入/ })
     await user.click(toggle)
@@ -539,7 +539,7 @@ describe('App', () => {
       appSettings.repository,
     )
 
-    render(<App store={store} initialEntries={['/settings/experimental']} />)
+    render(<WorkspaceApp store={store} initialEntries={['/settings/experimental']} />)
 
     const toggle = await screen.findByRole('checkbox', { name: /启用本机 MCP 接入/ })
     await user.click(toggle)
@@ -578,7 +578,7 @@ describe('App', () => {
     }
 
     const { container } = render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={['/settings/general']}
       />,
@@ -612,7 +612,7 @@ describe('App', () => {
       settings: { lastOpenedPageId: 'page_root' },
     }
 
-    render(<App repository={createMemoryRepository(snapshot)} initialEntries={['/pages/page_root']} />)
+    render(<WorkspaceApp repository={createMemoryRepository(snapshot)} initialEntries={['/pages/page_root']} />)
 
     await screen.findByDisplayValue('Home')
     await waitFor(() => {
@@ -656,7 +656,7 @@ describe('App', () => {
       settings: { lastOpenedPageId: 'page_home' },
     }
 
-    render(<App repository={createMemoryRepository(snapshot)} initialEntries={['/pages/page_home']} />)
+    render(<WorkspaceApp repository={createMemoryRepository(snapshot)} initialEntries={['/pages/page_home']} />)
 
     await screen.findByDisplayValue('Home')
     await waitFor(() => {
@@ -712,7 +712,7 @@ describe('App', () => {
       settings: { lastOpenedPageId: 'page_search_notes' },
     }
 
-    render(<App repository={createMemoryRepository(snapshot)} initialEntries={['/pages/page_search_notes']} />)
+    render(<WorkspaceApp repository={createMemoryRepository(snapshot)} initialEntries={['/pages/page_search_notes']} />)
 
     await screen.findByDisplayValue('Search Notes')
 
@@ -749,7 +749,7 @@ describe('App', () => {
       settings: { lastOpenedPageId: 'page_search_notes' },
     }
 
-    render(<App repository={createMemoryRepository(snapshot)} initialEntries={['/pages/page_search_notes']} />)
+    render(<WorkspaceApp repository={createMemoryRepository(snapshot)} initialEntries={['/pages/page_search_notes']} />)
 
     await screen.findByDisplayValue('Search Notes')
 
@@ -803,7 +803,7 @@ describe('App', () => {
     }
 
     render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={['/pages/page_search_preferences']}
       />,
@@ -863,7 +863,7 @@ describe('App', () => {
       }
 
       render(
-        <App
+        <WorkspaceApp
           repository={createMemoryRepository(snapshot)}
           initialEntries={['/pages/page_current']}
         />,
@@ -940,7 +940,7 @@ describe('App', () => {
         settings: { lastOpenedPageId: 'page_target' },
       }
 
-      render(<App repository={createMemoryRepository(snapshot)} initialEntries={['/pages/page_target']} />)
+      render(<WorkspaceApp repository={createMemoryRepository(snapshot)} initialEntries={['/pages/page_target']} />)
 
       await user.click(await screen.findByRole('button', { name: /See Product Plan/ }))
 
@@ -993,7 +993,7 @@ describe('App', () => {
     }
 
     render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={['/pages/page_property_search']}
       />,
@@ -1054,7 +1054,7 @@ describe('App', () => {
     }
 
     const { container } = render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={[`/pages/${pageId}`]}
       />,
@@ -1105,7 +1105,7 @@ describe('App', () => {
     }
 
     const { container } = render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={[`/pages/${pageId}`]}
       />,
@@ -1150,7 +1150,7 @@ describe('App', () => {
     }
 
     const { container } = render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={[`/pages/${pageId}`]}
       />,
@@ -1197,7 +1197,7 @@ describe('App', () => {
     }
 
     const { container } = render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={[`/pages/${pageId}`]}
       />,
@@ -1243,7 +1243,7 @@ describe('App', () => {
     }
 
     const { container } = render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={[`/pages/${pageId}`]}
       />,
@@ -1305,7 +1305,7 @@ describe('App', () => {
     }
 
     render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={[`/pages/${pageId}`]}
       />,
@@ -1351,7 +1351,7 @@ describe('App', () => {
     }
 
     render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={[`/pages/${pageId}`]}
       />,
@@ -1400,7 +1400,7 @@ describe('App', () => {
     }
 
     render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={[`/pages/${pageId}`]}
       />,
@@ -1452,7 +1452,7 @@ describe('App', () => {
     }
 
     render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={[`/pages/${pageId}`]}
       />,
@@ -1495,7 +1495,7 @@ describe('App', () => {
     }
 
     render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={['/pages/page_child']}
       />,
@@ -1532,7 +1532,7 @@ describe('App', () => {
     }
 
     const { container } = render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={[`/pages/${pageId}`]}
       />,
@@ -1568,7 +1568,7 @@ describe('App', () => {
     }
 
     const { container } = render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={[`/pages/${pageId}`]}
       />,
@@ -1614,7 +1614,7 @@ describe('App', () => {
     const store = createWorkspaceStore(createMemoryRepository(snapshot))
     store.setState({ deletePage })
 
-    render(<App store={store} initialEntries={[`/pages/${pageId}`]} />)
+    render(<WorkspaceApp store={store} initialEntries={[`/pages/${pageId}`]} />)
 
     await screen.findByDisplayValue('Delete me')
     await user.click(screen.getByRole('button', { name: '页面菜单' }))
@@ -1664,7 +1664,7 @@ describe('App', () => {
     }
 
     render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={[`/pages/${pageId}`]}
       />,
@@ -1715,7 +1715,7 @@ describe('App', () => {
     }
 
     render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={['/pages/page_child']}
       />,
@@ -1762,7 +1762,7 @@ describe('App', () => {
     }
 
     render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={[`/pages/${pageId}`]}
       />,
@@ -1832,7 +1832,7 @@ describe('App', () => {
     )
 
     render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={[`/pages/${pageId}`]}
       />,
@@ -1876,7 +1876,7 @@ describe('App', () => {
     }
 
     render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={[`/pages/${pageId}`]}
       />,
@@ -1938,7 +1938,7 @@ describe('App', () => {
     })
 
     render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={[`/pages/${pageId}`]}
       />,
@@ -1989,7 +1989,7 @@ describe('App', () => {
       settings: { lastOpenedPageId: pageId },
     }
 
-    render(<App repository={createMemoryRepository(snapshot)} initialEntries={[`/pages/${pageId}`]} />)
+    render(<WorkspaceApp repository={createMemoryRepository(snapshot)} initialEntries={[`/pages/${pageId}`]} />)
 
     await screen.findByDisplayValue('当前页面')
     await user.click(screen.getByRole('button', { name: '页面菜单' }))
@@ -2026,7 +2026,7 @@ describe('App', () => {
     }
 
     render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={[`/pages/${pageId}`]}
       />,
@@ -2083,7 +2083,7 @@ describe('App', () => {
     })
     store.setState({ flushPendingSaves })
 
-    render(<App store={store} initialEntries={[`/pages/${pageId}`]} />)
+    render(<WorkspaceApp store={store} initialEntries={[`/pages/${pageId}`]} />)
 
     await screen.findByDisplayValue('待恢复页面')
     await user.click(screen.getByRole('button', { name: '页面菜单' }))
@@ -2138,7 +2138,7 @@ describe('App', () => {
     }
 
     const { container } = render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={[`/pages/${pageId}/data-tables/${databaseId}`]}
       />,
@@ -2182,7 +2182,7 @@ describe('App', () => {
     }
 
     const { container } = render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={[`/pages/${pageId}/mindmaps/${mindmapId}`]}
       />,
@@ -2230,7 +2230,7 @@ describe('App', () => {
     }
 
     render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={[`/pages/${pageId}/boards/${boardId}`]}
       />,
@@ -2279,7 +2279,7 @@ describe('App', () => {
     }
 
     const { container } = render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={[`/pages/${pageId}`]}
       />,
@@ -2355,7 +2355,7 @@ describe('App', () => {
     }
 
     render(
-      <App
+      <WorkspaceApp
         repository={createMemoryRepository(snapshot)}
         initialEntries={[`/pages/${pageId}`]}
       />,

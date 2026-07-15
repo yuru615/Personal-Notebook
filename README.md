@@ -1,6 +1,6 @@
 # 🌿 知栖
 
-知栖是一个本地优先的个人知识库桌面应用，使用 Tauri 2、React 和 SQLite 构建。它提供类 Notion 的层级页面、块编辑器、白板、数据表格、思维导图、搜索以及导入导出能力；数据默认保存在本机，不依赖后端服务。
+知栖是一个本地优先的个人知识库桌面应用，使用 Tauri 2、React 和 SQLite 构建。它提供类 Notion 的层级页面、块编辑器、白板、数据表格、思维导图、搜索以及导入导出能力；知识库数据保存在本机，应用入口需要知栖账号登录。
 
 ## ✨ 功能总览
 
@@ -75,7 +75,7 @@
 
 ```bash
 npm install
-npm run tauri:dev
+ZHIQI_API_BASE_URL=http://117.72.91.46 npm run tauri:dev
 ```
 
 `npm run tauri:dev` 会启动 Vite 开发服务器并打开桌面窗口。只调试前端时可以运行：
@@ -85,6 +85,21 @@ npm run dev
 ```
 
 首次启动会创建默认工作区。桌面端数据保存在 Tauri 应用数据目录中的 `zhiqi.db`；应用管理的文件资产保存在同目录下的 `zhiqi-assets/`。
+
+## 🔐 账号登录
+
+- 仅支持纯数字 QQ 邮箱注册，注册后需要通过邮件页面完成验证。
+- 用户会话固定 24 小时。启动和窗口恢复时会在线校验；网络或服务临时不可用时，未过期的本机凭据可离线进入。
+- 会话 Token 由 Rust 保存到 macOS Keychain 或 Windows Credential Manager，不写入知识库数据库、localStorage 或 React 状态。
+- 未登录、账号停用或会话过期时不会初始化工作区，也不会启动本机 MCP；退出登录不会删除本地内容。
+
+账号服务 origin 在编译时通过 `ZHIQI_API_BASE_URL` 注入。Debug 构建允许 HTTP 联调；Release 构建必须显式设置 HTTPS 地址，否则构建会失败：
+
+```bash
+ZHIQI_API_BASE_URL=https://account.example.com npm run tauri:build:mac
+```
+
+单独运行 `npm run dev` 只用于前端静态调试，不提供真实账号或工作区访问；完整联调使用 `npm run tauri:dev`。
 
 ## 🤖 本机 AI / MCP 接入
 

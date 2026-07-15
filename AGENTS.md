@@ -8,6 +8,8 @@
 
 核心数据保存在本机 SQLite 数据库 `zhiqi.db` 中，不依赖后端服务。文件资产由应用管理在 `zhiqi-assets/`。导入、导出、删除和清理类改动必须保护 JSON 备份契约和用户本地数据。
 
+桌面应用入口需要通过 `zhiqi-server` 完成 QQ 邮箱账号登录。远程会话凭据由 Rust 账号边界保存在系统凭据管理器中；React、本地知识库 SQLite 和浏览器 localStorage 不得持久化 Bearer Token。未认证时不得初始化工作区或启动本机 MCP。
+
 主要功能：
 
 - 页面系统：层级页面树、页面标题、图标、封面、面包屑、页面目录、最近打开页面和页面显示设置。
@@ -119,6 +121,7 @@ npx vitest run -t "restores window"
 - Tauri 配置集中在 `src-tauri/tauri.conf.json`。其中 `beforeDevCommand`/`beforeBuildCommand` 连接 Vite 构建，`devUrl` 是 `http://localhost:5173`，`frontendDist` 指向 `../dist`。
 - Windows 打包覆盖配置在 `src-tauri/tauri.windows.conf.json`，包含 NSIS/MSI、WebView2 bootstrapper、WiX upgrade code、安装语言和 currentUser 安装模式。
 - Rust 入口在 `src-tauri/src/lib.rs`，注册 dialog/fs 插件和自定义 storage commands，声明 `open_external_url` 命令，创建系统托盘，并把主窗口关闭行为改为隐藏到托盘。
+- 远程账号请求集中在 `src-tauri/src/account.rs`；发布构建必须通过 `ZHIQI_API_BASE_URL` 注入 HTTPS origin。React 只通过 `src/lib/accountClient.ts` 的类型化命令访问账号状态。
 - Tauri 权限集中在 `src-tauri/capabilities/default.json`。新增或收紧前端可调用能力时，同步检查 capability、插件注册、前端调用和打包。
 - 外部链接统一走 `src/lib/externalLinks.ts`：桌面端调用 Rust `open_external_url`，只允许 `http://`、`https://`、`mailto:`；浏览器环境回退到 `window.open`。
 - 文件打开/保存统一走 `src/lib/fileAccess.ts`：桌面端用 Tauri dialog/fs 插件，浏览器环境回退到 `<input type="file">` 和 Blob 下载。业务组件不要直接调用 Tauri dialog/fs API。

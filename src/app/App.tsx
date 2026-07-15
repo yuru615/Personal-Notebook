@@ -95,6 +95,7 @@ import {
 import { type WorkspaceArchiveProgress } from '../lib/storageClient'
 import { createWorkspaceStore, type McpWorkspaceUpdate } from '../store/createWorkspaceStore'
 import { uiCopy } from '../ui/copy'
+import { useOptionalAccount } from './accountContext'
 import { sanitizeFileNameSegment } from '../utils/fileName'
 import { createId } from '../utils/id'
 import { deletePageBranch } from '../utils/pageTree'
@@ -162,7 +163,7 @@ function formatArchiveItemCount(progress: WorkspaceArchiveProgress) {
   return `${progress.current}/${progress.total}`
 }
 
-interface AppProps {
+export interface WorkspaceAppProps {
   repository?: WorkspaceRepository
   store?: WorkspaceStore
   initialEntries?: string[]
@@ -200,8 +201,9 @@ function createAppStore(repository?: WorkspaceRepository) {
   return defaultWorkspaceStore
 }
 
-export function App({ repository, store: injectedStore, initialEntries }: AppProps = {}) {
+export function WorkspaceApp({ repository, store: injectedStore, initialEntries }: WorkspaceAppProps = {}) {
   const [store] = useState(() => injectedStore ?? createAppStore(repository))
+  const account = useOptionalAccount()
   const workspaceImportRepository = useMemo(
     () => repository ?? createStorageWorkspaceRepository(),
     [repository],
@@ -218,6 +220,12 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
   const archiveTaskClearTimerRef = useRef<number | null>(null)
   const localMcpOperationVersionRef = useRef(0)
   const setCurrentPage = store.getState().setCurrentPage
+
+  useEffect(() => {
+    if (!account) return
+    account.registerBeforeLock(() => store.getState().flushPendingSaves())
+    return () => account.registerBeforeLock(null)
+  }, [account, store])
 
   useEffect(() => {
     localMcpOperationVersionRef.current += 1
@@ -2748,7 +2756,7 @@ function createWorkspaceBackupSnapshot(state: AppState): WorkspaceSnapshot {
   }
 }
 
-export default App
+export default WorkspaceApp
 
 function sanitizeFileName(value: string) {
   return sanitizeFileNameSegment(value, uiCopy.page.untitled)

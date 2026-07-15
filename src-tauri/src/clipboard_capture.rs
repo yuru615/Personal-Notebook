@@ -178,7 +178,7 @@ impl ClipboardCaptureState {
             .unwrap_or(false)
     }
 
-    fn set_enabled(&self, enabled: bool) {
+    pub(crate) fn set_enabled(&self, enabled: bool) {
         if let Ok(mut state) = self.inner.lock() {
             state.enabled = enabled;
             if !enabled {

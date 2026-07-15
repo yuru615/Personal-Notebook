@@ -6,6 +6,7 @@ use tauri::{
 };
 
 mod clipboard_capture;
+mod account;
 mod mcp;
 mod storage;
 
@@ -45,6 +46,15 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
+            account::account_register,
+            account::account_resend_verification,
+            account::account_forgot_password,
+            account::account_login,
+            account::account_restore,
+            account::account_validate,
+            account::account_activate_services,
+            account::account_logout,
+            account::account_clear_session,
             open_external_url,
             open_asset_file,
             clipboard_capture::read_clipboard_candidate,
@@ -87,18 +97,8 @@ pub fn run() {
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir()?;
             app.manage(storage::StorageState::open(app_data_dir)?);
-            let mcp_state = mcp::McpServerState::new(app.handle().clone());
-            let mcp_settings = app
-                .state::<storage::StorageState>()
-                .with_storage(|storage| storage.load_app_settings())?
-                .and_then(|settings| settings.mcp);
-            let storage = app.state::<storage::StorageState>().inner().clone();
-            app.manage(mcp_state.clone());
-            tauri::async_runtime::spawn(async move {
-                if let Err(error) = mcp_state.apply(mcp_settings.as_ref(), storage).await {
-                    eprintln!("failed to restore local MCP server: {error}");
-                }
-            });
+            app.manage(mcp::McpServerState::new(app.handle().clone()));
+            app.manage(account::AccountState::new().map_err(|error| error.message)?);
             let clipboard_capture_state = clipboard_capture::ClipboardCaptureState::default();
             app.manage(clipboard_capture_state.clone());
             clipboard_capture::start_clipboard_capture_monitor(app.handle().clone(), clipboard_capture_state);

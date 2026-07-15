@@ -48,6 +48,10 @@ export function useDesktopClipboardCapture({
     }
 
     void setDesktopClipboardCaptureEnabled(isActive).catch(() => undefined)
+
+    return () => {
+      void setDesktopClipboardCaptureEnabled(false).catch(() => undefined)
+    }
   }, [isActive])
 
   useEffect(() => {
