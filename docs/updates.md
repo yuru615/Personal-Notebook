@@ -20,7 +20,8 @@
 
 验证情况：
 
-- 待完成 macOS `npm run tauri:dev` 启动验证。
+- 已通过 macOS `npm run tauri:dev` 完整启动验证：Vite、Rust 编译和 `target/debug/zhiqi` 均正常启动。
+- 已验证 Tauri 窗口正常渲染登录页，并可从登录页切换到注册表单再返回；浏览器控制台无相关错误。
 
 ## 2026-07-15 强制账号登录门禁
 
