@@ -1,9 +1,10 @@
 import { createContext, useContext } from 'react'
-import type { AccountSession } from '../lib/accountClient'
+import type { AccountErrorShape, AccountSession } from '../lib/accountClient'
 
 export interface AccountContextValue {
   session: AccountSession
   logout: () => Promise<void>
+  lock: (error?: AccountErrorShape) => Promise<void>
   registerBeforeLock: (handler: (() => Promise<void>) | null) => void
 }
 

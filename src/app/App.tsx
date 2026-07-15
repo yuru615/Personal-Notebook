@@ -14,6 +14,7 @@ import {
   useParams,
 } from 'react-router-dom'
 import { BlockEditor } from '../components/editor/BlockEditor'
+import { AnnouncementsPage } from '../components/announcements/AnnouncementsPage'
 import { PageHeader, PageHeaderToolbar } from '../components/editor/PageHeader'
 import { PagePropertiesPanel } from '../components/editor/PagePropertiesPanel'
 import { PageRelationsPanel } from '../components/editor/PageRelationsPanel'
@@ -1389,6 +1390,7 @@ function AppRoutes({
               />
             }
           />
+          <Route path="/announcements" element={<AnnouncementsPage />} />
           <Route
             path="/pages/:pageId"
             element={

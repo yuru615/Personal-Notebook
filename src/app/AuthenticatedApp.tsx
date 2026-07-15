@@ -167,8 +167,8 @@ export function AuthenticatedApp({ accountClient, workspaceProps }: Authenticate
   }, [client])
 
   const accountContextValue = useMemo(
-    () => (session ? { session, logout, registerBeforeLock } : null),
-    [logout, registerBeforeLock, session],
+    () => (session ? { session, logout, lock: clearAndLock, registerBeforeLock } : null),
+    [clearAndLock, logout, registerBeforeLock, session],
   )
 
   if (!client) {

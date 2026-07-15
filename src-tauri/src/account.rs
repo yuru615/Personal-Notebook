@@ -50,7 +50,11 @@ pub struct AccountError {
 }
 
 impl AccountError {
-    fn new(code: impl Into<String>, message: impl Into<String>, status: Option<u16>) -> Self {
+    pub(crate) fn new(
+        code: impl Into<String>,
+        message: impl Into<String>,
+        status: Option<u16>,
+    ) -> Self {
         Self {
             code: code.into(),
             message: message.into(),
@@ -285,6 +289,21 @@ impl AccountState {
 
     async fn session(&self, token: &str) -> Result<SessionResponse, AccountError> {
         self.request::<SessionResponse, ()>(Method::GET, "/api/v1/auth/session", None, Some(token))
+            .await
+    }
+
+    pub(crate) async fn authenticated_get<T: DeserializeOwned>(
+        &self,
+        path: &str,
+    ) -> Result<T, AccountError> {
+        let Some(stored) = self.sessions.load()? else {
+            return Err(AccountError::session_expired());
+        };
+        if session_is_expired(&stored.expires_at, OffsetDateTime::now_utc())? {
+            self.sessions.clear()?;
+            return Err(AccountError::session_expired());
+        }
+        self.request::<T, ()>(Method::GET, path, None, Some(&stored.token))
             .await
     }
 

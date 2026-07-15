@@ -612,10 +612,15 @@ export function SidebarTree({
           </button>
           <button
             type="button"
-            className="sidebar-tool-button"
+            className={
+              location.pathname.startsWith('/announcements')
+                ? 'sidebar-tool-button sidebar-tool-button-active'
+                : 'sidebar-tool-button'
+            }
             aria-label={uiCopy.sidebar.notifications}
             data-tooltip={uiCopy.sidebar.notifications}
-            disabled
+            aria-pressed={location.pathname.startsWith('/announcements')}
+            onClick={() => navigate('/announcements')}
           >
             <Bell size={15} strokeWidth={1.9} />
           </button>
@@ -650,6 +655,18 @@ export function SidebarTree({
         </button>
         <button type="button" className="sidebar-link" onClick={onCreatePage}>
           {uiCopy.sidebar.newPage}
+        </button>
+        <button
+          type="button"
+          className={
+            location.pathname.startsWith('/announcements')
+              ? 'sidebar-link sidebar-link-active'
+              : 'sidebar-link'
+          }
+          onClick={() => navigate('/announcements')}
+        >
+          <Bell size={15} strokeWidth={1.9} aria-hidden="true" />
+          {uiCopy.sidebar.notifications}
         </button>
         {renderUtilityMenu('sidebar-link sidebar-link-icon-button')}
       </div>

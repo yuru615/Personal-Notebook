@@ -5,8 +5,9 @@ use tauri::{
     Emitter, Manager, WindowEvent,
 };
 
-mod clipboard_capture;
 mod account;
+mod announcements;
+mod clipboard_capture;
 mod mcp;
 mod storage;
 
@@ -55,6 +56,8 @@ pub fn run() {
             account::account_activate_services,
             account::account_logout,
             account::account_clear_session,
+            announcements::list_announcements,
+            announcements::get_announcement,
             open_external_url,
             open_asset_file,
             clipboard_capture::read_clipboard_candidate,
