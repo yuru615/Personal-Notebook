@@ -112,9 +112,9 @@ npx vitest run -t "restores window"
 
 ## 构建缓存位置
 
-- Rust/Cargo 构建缓存只能放在 `E:` 盘，默认使用 `E:\BuildCache\cargo-target\zhixi`。
-- 禁止把 `CARGO_TARGET_DIR` 指向 `TEMP`、`TMP` 或任何 `C:` 盘路径；不要使用 `$env:TEMP\zhixi-*` 作为临时构建目录。
-- 需要隔离并行任务时，在 `E:\BuildCache\cargo-target\zhixi\` 下创建任务子目录，并在任务结束后清理不再使用的子目录。
+- Rust/Cargo 默认使用当前平台的标准项目构建目录 `src-tauri/target`，仓库配置不得绑定某台机器的盘符或绝对路径。
+- CI 或并行任务需要隔离缓存时，可通过 `CARGO_TARGET_DIR` 临时指定当前平台上的可用目录，并在任务结束后清理不再使用的目录。
+- 路径必须使用当前操作系统支持的格式；不要把 Windows 盘符路径用于 macOS/Linux，也不要把 Unix 路径硬编码给 Windows。
 
 ## 桌面端边界
 

@@ -4,6 +4,24 @@
 
 ## 维护规则
 
+## 2026-07-15 Tauri 跨平台启动路径修复
+
+提交：未提交
+
+简要描述：
+
+修复 macOS 执行 `npm run tauri:dev` 时因仓库绑定 Windows E 盘 Cargo 缓存路径导致无法启动的问题。
+
+详细描述：
+
+- 删除仓库中绑定单台 Windows 机器 `E:` 盘的 `.cargo/config.toml`，所有平台恢复使用 Cargo 标准项目构建目录 `src-tauri/target`。
+- CI 或并行任务仍可通过 `CARGO_TARGET_DIR` 临时指定当前平台支持的缓存目录，但不再把机器专属绝对路径提交到仓库。
+- macOS 不会再在仓库中误创建 `E:` 目录，也不会再把 Windows 盘符冒号写入 `DYLD_FALLBACK_LIBRARY_PATH`。
+
+验证情况：
+
+- 待完成 macOS `npm run tauri:dev` 启动验证。
+
 ## 2026-07-15 强制账号登录门禁
 
 提交：未提交
