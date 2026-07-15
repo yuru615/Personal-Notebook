@@ -23,7 +23,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 pub use error::{StorageError, StorageResult};
-pub use mcp::{McpWriteBatch, McpWriteResult};
+pub use mcp::McpWriteBatch;
 #[allow(unused_imports)]
 pub use models::PagePackageImportResult;
 pub use models::{
@@ -302,6 +302,7 @@ impl Storage {
         })
     }
 
+    #[cfg(test)]
     pub fn append_mcp_page_blocks(
         &self,
         page_id: &str,
