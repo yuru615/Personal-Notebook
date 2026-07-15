@@ -1,4 +1,5 @@
 mod assets;
+mod auto_backup;
 pub mod commands;
 mod error;
 mod mcp;
@@ -24,6 +25,8 @@ use serde_json::Value;
 
 pub use error::{StorageError, StorageResult};
 pub use mcp::{McpWhiteboardUpdate, McpWhiteboardUpdateResult, McpWriteBatch, McpWriteResult};
+#[allow(unused_imports)]
+pub use auto_backup::AutoBackupRecord;
 #[allow(unused_imports)]
 pub use models::PagePackageImportResult;
 pub use models::{
@@ -121,6 +124,7 @@ impl StorageState {
 pub struct Storage {
     connection: Connection,
     assets_dir: PathBuf,
+    auto_backup_dir: PathBuf,
 }
 
 impl Storage {
@@ -131,6 +135,7 @@ impl Storage {
         let storage = Self {
             connection,
             assets_dir: data_dir.join(ASSETS_DIR_NAME),
+            auto_backup_dir: data_dir.join(auto_backup::AUTO_BACKUP_DIR_NAME),
         };
         schema::initialize_schema(&storage.connection)?;
         if storage.search_documents_need_rebuild()? {
@@ -145,6 +150,7 @@ impl Storage {
         let storage = Self {
             connection,
             assets_dir: unique_test_assets_dir(),
+            auto_backup_dir: unique_test_data_dir("auto-backups").join(auto_backup::AUTO_BACKUP_DIR_NAME),
         };
         schema::initialize_schema(&storage.connection)?;
         Ok(storage)
@@ -3121,6 +3127,8 @@ fn unique_test_data_dir(label: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use serde_json::json;
 
     use super::*;
@@ -4074,6 +4082,152 @@ mod tests {
             .expect_err("page package rejected by workspace restore");
         assert_eq!(error.code, "archive_wrong_kind");
         assert_eq!(target.export_workspace_backup().expect("snapshot after wrong route"), before);
+    }
+
+    #[test]
+    fn auto_backup_writes_complete_archives_and_keeps_the_newest_fourteen() {
+        let data_dir = unique_test_data_dir("auto-backup-archives");
+        let storage = Storage::open(&data_dir).expect("storage opens");
+        let asset = storage
+            .write_asset(WriteAssetInput {
+                name: "diagram.png".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes: b"diagram bytes".to_vec(),
+            })
+            .expect("write source asset");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages[0].blocks.push(json!({
+            "id": "block_diagram",
+            "type": "image",
+            "assetId": asset.id,
+            "name": "diagram.png",
+            "mimeType": "image/png"
+        }));
+        storage
+            .replace_workspace_backup(snapshot)
+            .expect("seed workspace");
+
+        for index in 0..15 {
+            storage
+                .create_auto_backup_at(
+                    UNIX_EPOCH + Duration::from_secs(1_700_000_000 + index),
+                    14,
+                )
+                .expect("backup succeeds");
+        }
+
+        let backups = storage.list_auto_backups().expect("backups list");
+        assert_eq!(backups.len(), 14);
+        assert!(backups
+            .iter()
+            .all(|backup| backup.file_name.ends_with(".zhiqi")));
+
+        for backup in backups {
+            let archive = std::fs::read(storage.auto_backup_dir.join(backup.file_name))
+                .expect("read automatic backup archive");
+            let target = Storage::open_in_memory_for_tests().expect("target opens");
+            target
+                .replace_workspace_backup(sample_snapshot())
+                .expect("seed target workspace");
+            target
+                .import_workspace_archive(archive)
+                .expect("restore automatic backup archive");
+            let imported = target
+                .export_workspace_backup()
+                .expect("export restored workspace");
+            let imported_asset_id = imported.pages[0]
+                .blocks
+                .iter()
+                .find(|block| block.get("id").and_then(Value::as_str) == Some("block_diagram"))
+                .and_then(|block| block.get("assetId").and_then(Value::as_str))
+                .expect("restored image asset id");
+            assert_eq!(
+                target.read_asset(imported_asset_id).expect("read restored asset"),
+                b"diagram bytes"
+            );
+        }
+
+        drop(storage);
+        std::fs::remove_dir_all(data_dir).expect("remove test data directory");
+    }
+
+    #[test]
+    fn failed_auto_backup_keeps_previously_published_archives() {
+        let data_dir = unique_test_data_dir("auto-backup-failure");
+        let storage = Storage::open(&data_dir).expect("storage opens");
+        let asset = storage
+            .write_asset(WriteAssetInput {
+                name: "diagram.png".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes: b"diagram bytes".to_vec(),
+            })
+            .expect("write source asset");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages[0].blocks.push(json!({
+            "id": "block_diagram",
+            "type": "image",
+            "assetId": asset.id,
+            "name": "diagram.png",
+            "mimeType": "image/png"
+        }));
+        storage
+            .replace_workspace_backup(snapshot)
+            .expect("seed workspace");
+        for index in 0..2 {
+            storage
+                .create_auto_backup_at(
+                    UNIX_EPOCH + Duration::from_secs(1_700_000_000 + index),
+                    2,
+                )
+                .expect("publish initial backup");
+        }
+        let previous = storage.list_auto_backups().expect("list published backups");
+
+        std::fs::remove_file(
+            assets::asset_file_path(&storage.connection, &storage.assets_dir, &asset.id)
+                .expect("locate source asset"),
+        )
+        .expect("remove source asset to make archive export fail");
+        assert!(storage
+            .create_auto_backup_at(UNIX_EPOCH + Duration::from_secs(1_700_000_002), 1)
+            .is_err());
+
+        assert_eq!(storage.list_auto_backups().expect("list after failure"), previous);
+        assert!(previous.iter().all(|backup| storage
+            .auto_backup_dir
+            .join(&backup.file_name)
+            .is_file()));
+
+        drop(storage);
+        std::fs::remove_dir_all(data_dir).expect("remove test data directory");
+    }
+
+    #[test]
+    fn auto_backup_cleanup_ignores_temporary_and_unmanaged_files() {
+        let data_dir = unique_test_data_dir("auto-backup-cleanup");
+        let storage = Storage::open(&data_dir).expect("storage opens");
+        storage
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed workspace");
+        storage
+            .create_auto_backup_at(UNIX_EPOCH + Duration::from_secs(1_700_000_000), 2)
+            .expect("publish initial backup");
+
+        let temporary = storage.auto_backup_dir.join(".auto-writing.tmp");
+        let unmanaged = storage.auto_backup_dir.join("manual-backup.zhiqi");
+        std::fs::write(&temporary, b"unfinished").expect("write temporary file");
+        std::fs::write(&unmanaged, b"manual backup").expect("write unmanaged backup");
+
+        storage
+            .create_auto_backup_at(UNIX_EPOCH + Duration::from_secs(1_700_000_001), 1)
+            .expect("publish retained backup");
+
+        assert_eq!(storage.list_auto_backups().expect("list retained backups").len(), 1);
+        assert!(temporary.is_file());
+        assert!(unmanaged.is_file());
+
+        drop(storage);
+        std::fs::remove_dir_all(data_dir).expect("remove test data directory");
     }
 
     #[test]
@@ -5064,6 +5218,10 @@ mod tests {
     fn failed_competing_asset_write_keeps_file_published_by_other_connection() {
         let assets_dir =
             unique_test_data_dir("tracked-asset-failed-competition").join(ASSETS_DIR_NAME);
+        let auto_backup_dir = assets_dir
+            .parent()
+            .expect("test assets directory has parent")
+            .join(auto_backup::AUTO_BACKUP_DIR_NAME);
         let first_connection = Connection::open_in_memory().expect("first connection opens");
         schema::initialize_schema(&first_connection).expect("first schema initializes");
         let second_connection = Connection::open_in_memory().expect("second connection opens");
@@ -5081,10 +5239,12 @@ mod tests {
         let first_storage = Storage {
             connection: first_connection,
             assets_dir: assets_dir.clone(),
+            auto_backup_dir: auto_backup_dir.clone(),
         };
         let second_storage = Storage {
             connection: second_connection,
             assets_dir: assets_dir.clone(),
+            auto_backup_dir,
         };
         let start = Arc::new(std::sync::Barrier::new(3));
         let (published_tx, published_rx) = std::sync::mpsc::channel();
@@ -5197,6 +5357,10 @@ mod tests {
     fn independent_databases_sharing_assets_dir_do_not_replace_winner_file() {
         let assets_dir =
             unique_test_data_dir("tracked-asset-independent-databases").join(ASSETS_DIR_NAME);
+        let auto_backup_dir = assets_dir
+            .parent()
+            .expect("test assets directory has parent")
+            .join(auto_backup::AUTO_BACKUP_DIR_NAME);
         let winner_connection = Connection::open_in_memory().expect("winner connection opens");
         schema::initialize_schema(&winner_connection).expect("winner schema initializes");
         let loser_connection = Connection::open_in_memory().expect("loser connection opens");
@@ -5204,10 +5368,12 @@ mod tests {
         let winner = Storage {
             connection: winner_connection,
             assets_dir: assets_dir.clone(),
+            auto_backup_dir: auto_backup_dir.clone(),
         };
         let loser = Storage {
             connection: loser_connection,
             assets_dir: assets_dir.clone(),
+            auto_backup_dir,
         };
         let bytes = b"shared independent database asset".to_vec();
 
