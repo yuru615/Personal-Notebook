@@ -26,7 +26,9 @@ use serde_json::Value;
 pub use error::{StorageError, StorageResult};
 pub use mcp::{McpWhiteboardUpdate, McpWhiteboardUpdateResult, McpWriteBatch, McpWriteResult};
 #[allow(unused_imports)]
-pub use auto_backup::AutoBackupRecord;
+pub use auto_backup::{
+    AutoBackupRecord, AutoBackupRecoveryStatus, AutoBackupRestoreResult, AutoBackupRunResult,
+};
 #[allow(unused_imports)]
 pub use models::PagePackageImportResult;
 pub use models::{
@@ -125,6 +127,7 @@ pub struct Storage {
     connection: Connection,
     assets_dir: PathBuf,
     auto_backup_dir: PathBuf,
+    auto_backup_runtime: Mutex<auto_backup::AutoBackupRuntime>,
     #[cfg(test)]
     auto_backup_file_sequence: AtomicU64,
 }
@@ -138,6 +141,10 @@ impl Storage {
             connection,
             assets_dir: data_dir.join(ASSETS_DIR_NAME),
             auto_backup_dir: data_dir.join(auto_backup::AUTO_BACKUP_DIR_NAME),
+            auto_backup_runtime: Mutex::new(auto_backup::AutoBackupRuntime::new(
+                0,
+                SystemTime::now(),
+            )),
             #[cfg(test)]
             auto_backup_file_sequence: AtomicU64::new(0),
         };
@@ -145,6 +152,7 @@ impl Storage {
         if storage.search_documents_need_rebuild()? {
             storage.rebuild_search_documents()?;
         }
+        storage.mark_auto_backup_workspace_as_backed_up(SystemTime::now())?;
         Ok(storage)
     }
 
@@ -155,10 +163,15 @@ impl Storage {
             connection,
             assets_dir: unique_test_assets_dir(),
             auto_backup_dir: unique_test_data_dir("auto-backups").join(auto_backup::AUTO_BACKUP_DIR_NAME),
+            auto_backup_runtime: Mutex::new(auto_backup::AutoBackupRuntime::new(
+                0,
+                SystemTime::now(),
+            )),
             #[cfg(test)]
             auto_backup_file_sequence: AtomicU64::new(0),
         };
         schema::initialize_schema(&storage.connection)?;
+        storage.mark_auto_backup_workspace_as_backed_up(SystemTime::now())?;
         Ok(storage)
     }
 
@@ -404,6 +417,7 @@ impl Storage {
                 )?;
             }
             let app_settings = self.load_app_settings()?;
+            let auto_backup_runtime_state = self.load_auto_backup_runtime_state()?;
             let mcp_audit_log = {
                 let mut statement = self.connection.prepare(
                     "SELECT id, created_at, client_name, tool_name, page_id, created_ids_json
@@ -444,6 +458,9 @@ impl Storage {
 
             if let Some(app_settings) = &app_settings {
                 self.save_app_settings(app_settings)?;
+            }
+            if let Some(auto_backup_runtime_state) = &auto_backup_runtime_state {
+                self.save_auto_backup_runtime_state(auto_backup_runtime_state)?;
             }
             for (id, created_at, client_name, tool_name, page_id, created_ids_json) in mcp_audit_log
             {
@@ -1502,12 +1519,13 @@ impl Storage {
     }
 
     pub fn save_app_settings(&self, settings: &AppSettings) -> StorageResult<()> {
+        let before = self.connection.total_changes();
         self.connection.execute(
             "INSERT INTO zhiqi_settings (id, record_json) VALUES (?1, ?2)
-              ON CONFLICT(id) DO UPDATE SET record_json = excluded.record_json",
+             ON CONFLICT(id) DO UPDATE SET record_json = excluded.record_json",
             params![APP_SETTINGS_ID, serde_json::to_string(settings)?],
         )?;
-        Ok(())
+        self.ignore_non_workspace_database_changes_since(before)
     }
 
     fn save_page_properties(&self, definitions: &[PagePropertyDefinition]) -> StorageResult<()> {
@@ -4374,6 +4392,305 @@ mod tests {
     }
 
     #[test]
+    fn startup_after_an_unfinished_session_offers_the_latest_valid_auto_backup() {
+        let data_dir = unique_test_data_dir("auto-backup-unfinished-session");
+        let storage = Storage::open(&data_dir).expect("storage opens");
+        storage
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed workspace");
+        storage
+            .create_auto_backup_at(UNIX_EPOCH + Duration::from_secs(1_700_000_000), 14)
+            .expect("create automatic backup");
+        storage
+            .begin_auto_backup_session()
+            .expect("first session begins");
+        drop(storage);
+        let storage = Storage::open(&data_dir).expect("next storage opens");
+
+        let recovery = storage
+            .begin_auto_backup_session()
+            .expect("next session begins");
+
+        assert!(recovery.should_offer_restore);
+        assert!(recovery.latest_backup.is_some());
+
+        drop(storage);
+        std::fs::remove_dir_all(data_dir).expect("remove test data directory");
+    }
+
+    #[test]
+    fn startup_after_a_clean_session_does_not_offer_auto_backup_restore() {
+        let data_dir = unique_test_data_dir("auto-backup-clean-session");
+        let storage = Storage::open(&data_dir).expect("storage opens");
+        storage
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed workspace");
+        storage
+            .create_auto_backup_at(UNIX_EPOCH + Duration::from_secs(1_700_000_000), 14)
+            .expect("create automatic backup");
+        storage
+            .begin_auto_backup_session()
+            .expect("session begins");
+        storage
+            .mark_auto_backup_session_clean()
+            .expect("session is marked clean");
+        drop(storage);
+        let storage = Storage::open(&data_dir).expect("next storage opens");
+
+        let recovery = storage
+            .begin_auto_backup_session()
+            .expect("next session begins");
+
+        assert!(!recovery.should_offer_restore);
+        assert!(recovery.latest_backup.is_some());
+
+        drop(storage);
+        std::fs::remove_dir_all(data_dir).expect("remove test data directory");
+    }
+
+    #[test]
+    fn workspace_replacement_preserves_an_unfinished_auto_backup_session() {
+        let data_dir = unique_test_data_dir("auto-backup-runtime-preserved");
+        let storage = Storage::open(&data_dir).expect("storage opens");
+        let snapshot = sample_snapshot();
+        storage
+            .replace_workspace_backup(snapshot.clone())
+            .expect("seed workspace");
+        storage
+            .create_auto_backup_at(UNIX_EPOCH + Duration::from_secs(1_700_000_000), 14)
+            .expect("create automatic backup");
+        storage
+            .begin_auto_backup_session()
+            .expect("session begins");
+        storage
+            .replace_workspace_backup(snapshot)
+            .expect("replace workspace");
+
+        let recovery = storage
+            .begin_auto_backup_session()
+            .expect("next session begins");
+
+        assert!(recovery.should_offer_restore);
+
+        drop(storage);
+        std::fs::remove_dir_all(data_dir).expect("remove test data directory");
+    }
+
+    #[test]
+    fn auto_backup_skips_the_first_run_without_workspace_changes() {
+        let data_dir = unique_test_data_dir("auto-backup-no-change");
+        let storage = Storage::open(&data_dir).expect("storage opens");
+
+        let result = storage
+            .run_auto_backup_at(UNIX_EPOCH + Duration::from_secs(1_700_000_000))
+            .expect("automatic backup check succeeds");
+
+        assert!(!result.created);
+        assert_eq!(result.skipped_reason.as_deref(), Some("no_workspace_changes"));
+        assert!(storage
+            .list_auto_backups()
+            .expect("list backups")
+            .is_empty());
+
+        drop(storage);
+        std::fs::remove_dir_all(data_dir).expect("remove test data directory");
+    }
+
+    #[test]
+    fn disabled_auto_backup_never_creates_an_archive() {
+        let data_dir = unique_test_data_dir("auto-backup-disabled");
+        let storage = Storage::open(&data_dir).expect("storage opens");
+        let mut settings = AppSettings::default();
+        settings.auto_backup.enabled = false;
+        storage
+            .save_app_settings(&settings)
+            .expect("disable automatic backup");
+        storage
+            .replace_workspace_backup(sample_snapshot())
+            .expect("change workspace");
+
+        let result = storage.run_auto_backup().expect("automatic backup check succeeds");
+
+        assert!(!result.created);
+        assert_eq!(result.skipped_reason.as_deref(), Some("disabled"));
+        assert!(storage
+            .list_auto_backups()
+            .expect("list backups")
+            .is_empty());
+
+        drop(storage);
+        std::fs::remove_dir_all(data_dir).expect("remove test data directory");
+    }
+
+    #[test]
+    fn auto_backup_creates_an_archive_after_workspace_changes_and_the_interval() {
+        let data_dir = unique_test_data_dir("auto-backup-scheduled");
+        let storage = Storage::open(&data_dir).expect("storage opens");
+        let last_backup_at = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        storage.set_auto_backup_last_run_at_for_tests(last_backup_at);
+        storage
+            .replace_workspace_backup(sample_snapshot())
+            .expect("change workspace");
+
+        let early = storage
+            .run_auto_backup_at(last_backup_at + Duration::from_secs(14 * 60))
+            .expect("early automatic backup check succeeds");
+        assert!(!early.created);
+        assert_eq!(early.skipped_reason.as_deref(), Some("interval_not_elapsed"));
+
+        let result = storage
+            .run_auto_backup_at(last_backup_at + Duration::from_secs(15 * 60))
+            .expect("automatic backup is created at the interval");
+
+        assert!(result.created);
+        assert!(result.latest_backup.is_some());
+        assert_eq!(storage.list_auto_backups().expect("list backups").len(), 1);
+
+        drop(storage);
+        std::fs::remove_dir_all(data_dir).expect("remove test data directory");
+    }
+
+    #[test]
+    fn saving_only_app_settings_does_not_create_an_automatic_backup() {
+        let data_dir = unique_test_data_dir("auto-backup-app-settings");
+        let storage = Storage::open(&data_dir).expect("storage opens");
+        storage.set_auto_backup_last_run_at_for_tests(
+            UNIX_EPOCH + Duration::from_secs(1_700_000_000),
+        );
+        storage
+            .save_app_settings(&AppSettings::default())
+            .expect("save application settings");
+
+        let result = storage
+            .run_auto_backup_at(UNIX_EPOCH + Duration::from_secs(1_700_000_000 + 15 * 60))
+            .expect("automatic backup check succeeds");
+
+        assert!(!result.created);
+        assert_eq!(result.skipped_reason.as_deref(), Some("no_workspace_changes"));
+        assert!(storage
+            .list_auto_backups()
+            .expect("list backups")
+            .is_empty());
+
+        drop(storage);
+        std::fs::remove_dir_all(data_dir).expect("remove test data directory");
+    }
+
+    #[test]
+    fn restoring_the_latest_auto_backup_rebuilds_the_workspace() {
+        let data_dir = unique_test_data_dir("auto-backup-restore");
+        let storage = Storage::open(&data_dir).expect("storage opens");
+        let original = sample_snapshot();
+        storage
+            .replace_workspace_backup(original.clone())
+            .expect("seed original workspace");
+        storage
+            .create_auto_backup_at(UNIX_EPOCH + Duration::from_secs(1_700_000_000), 14)
+            .expect("create automatic backup");
+        let mut changed = original.clone();
+        changed.pages[0].title = "Changed after backup".to_string();
+        storage
+            .replace_workspace_backup(changed)
+            .expect("change workspace after backup");
+
+        let result = storage
+            .restore_latest_auto_backup()
+            .expect("restore latest automatic backup");
+
+        assert!(result.restored);
+        assert!(result.protection_backup_warning.is_none());
+        assert_eq!(
+            storage
+                .export_workspace_backup()
+                .expect("export restored workspace"),
+            original
+        );
+
+        drop(storage);
+        std::fs::remove_dir_all(data_dir).expect("remove test data directory");
+    }
+
+    #[test]
+    fn a_damaged_latest_auto_backup_does_not_replace_the_current_workspace() {
+        let data_dir = unique_test_data_dir("auto-backup-damaged-restore");
+        let storage = Storage::open(&data_dir).expect("storage opens");
+        let original = sample_snapshot();
+        storage
+            .replace_workspace_backup(original.clone())
+            .expect("seed workspace");
+        let backup = storage
+            .create_auto_backup_at(UNIX_EPOCH + Duration::from_secs(1_700_000_000), 14)
+            .expect("create automatic backup");
+        std::fs::write(storage.auto_backup_dir.join(backup.file_name), b"damaged archive")
+            .expect("damage backup archive");
+        let before = storage
+            .export_workspace_backup()
+            .expect("export original workspace");
+
+        assert!(storage.restore_latest_auto_backup().is_err());
+        assert_eq!(
+            storage
+                .export_workspace_backup()
+                .expect("export workspace after failed restore"),
+            before
+        );
+
+        drop(storage);
+        std::fs::remove_dir_all(data_dir).expect("remove test data directory");
+    }
+
+    #[test]
+    fn a_failed_protection_backup_returns_a_warning_without_replacing_the_workspace() {
+        let data_dir = unique_test_data_dir("auto-backup-protection-warning");
+        let storage = Storage::open(&data_dir).expect("storage opens");
+        let asset = storage
+            .write_asset(WriteAssetInput {
+                name: "diagram.png".to_string(),
+                mime_type: "image/png".to_string(),
+                bytes: b"diagram bytes".to_vec(),
+            })
+            .expect("write asset");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages[0].blocks.push(json!({
+            "id": "block_diagram",
+            "type": "image",
+            "assetId": asset.id,
+            "name": "diagram.png",
+            "mimeType": "image/png"
+        }));
+        storage
+            .replace_workspace_backup(snapshot.clone())
+            .expect("seed workspace");
+        storage
+            .create_auto_backup_at(UNIX_EPOCH + Duration::from_secs(1_700_000_000), 14)
+            .expect("create automatic backup");
+        std::fs::remove_file(
+            assets::asset_file_path(&storage.connection, &storage.assets_dir, &asset.id)
+                .expect("locate asset"),
+        )
+        .expect("remove asset to make protection backup fail");
+        let before = storage
+            .export_workspace_backup()
+            .expect("export current workspace");
+
+        let result = storage
+            .restore_latest_auto_backup()
+            .expect("protection failure is reported without restoring");
+
+        assert!(!result.restored);
+        assert!(result.protection_backup_warning.is_some());
+        assert_eq!(
+            storage
+                .export_workspace_backup()
+                .expect("export workspace after protection failure"),
+            before
+        );
+
+        drop(storage);
+        std::fs::remove_dir_all(data_dir).expect("remove test data directory");
+    }
+
+    #[test]
     fn loading_page_reads_one_page_content_and_tracks_refs() {
         let storage = Storage::open_in_memory_for_tests().expect("storage opens");
         storage
@@ -5383,6 +5700,10 @@ mod tests {
             connection: first_connection,
             assets_dir: assets_dir.clone(),
             auto_backup_dir: auto_backup_dir.clone(),
+            auto_backup_runtime: Mutex::new(auto_backup::AutoBackupRuntime::new(
+                0,
+                SystemTime::now(),
+            )),
             #[cfg(test)]
             auto_backup_file_sequence: AtomicU64::new(0),
         };
@@ -5390,6 +5711,10 @@ mod tests {
             connection: second_connection,
             assets_dir: assets_dir.clone(),
             auto_backup_dir,
+            auto_backup_runtime: Mutex::new(auto_backup::AutoBackupRuntime::new(
+                0,
+                SystemTime::now(),
+            )),
             #[cfg(test)]
             auto_backup_file_sequence: AtomicU64::new(0),
         };
@@ -5516,6 +5841,10 @@ mod tests {
             connection: winner_connection,
             assets_dir: assets_dir.clone(),
             auto_backup_dir: auto_backup_dir.clone(),
+            auto_backup_runtime: Mutex::new(auto_backup::AutoBackupRuntime::new(
+                0,
+                SystemTime::now(),
+            )),
             #[cfg(test)]
             auto_backup_file_sequence: AtomicU64::new(0),
         };
@@ -5523,6 +5852,10 @@ mod tests {
             connection: loser_connection,
             assets_dir: assets_dir.clone(),
             auto_backup_dir,
+            auto_backup_runtime: Mutex::new(auto_backup::AutoBackupRuntime::new(
+                0,
+                SystemTime::now(),
+            )),
             #[cfg(test)]
             auto_backup_file_sequence: AtomicU64::new(0),
         };

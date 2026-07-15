@@ -4,7 +4,8 @@ use tauri::{async_runtime, AppHandle, Emitter, State};
 use crate::mcp::McpServerState;
 
 use super::{
-    AppSettings, AssetMeta, BoardRecord, BootstrapPayload, DataTableRecord, DeleteResult,
+    AppSettings, AssetMeta, AutoBackupRecoveryStatus, AutoBackupRestoreResult, AutoBackupRunResult,
+    BoardRecord, BootstrapPayload, DataTableRecord, DeleteResult,
     ImportAssetFileInput, LoadedPage, McpSettings, MindmapRecord, PagePackageImportResult,
     PageRecord, SaveResult, SearchResult, Storage, StorageError, StorageResult, StorageState,
     WorkspaceArchiveProgress, WorkspaceSnapshot, WriteAssetInput, WORKSPACE_ARCHIVE_PROGRESS_EVENT,
@@ -51,6 +52,33 @@ pub async fn import_workspace_archive(
 ) -> StorageResult<()> {
     with_storage_blocking(state.inner().clone(), move |storage| storage.import_workspace_archive(bytes))
         .await
+}
+
+#[tauri::command]
+pub async fn begin_auto_backup_session(
+    state: State<'_, StorageState>,
+) -> StorageResult<AutoBackupRecoveryStatus> {
+    with_storage_blocking(state.inner().clone(), move |storage| {
+        storage.begin_auto_backup_session()
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn run_auto_backup(
+    state: State<'_, StorageState>,
+) -> StorageResult<AutoBackupRunResult> {
+    with_storage_blocking(state.inner().clone(), move |storage| storage.run_auto_backup()).await
+}
+
+#[tauri::command]
+pub async fn restore_latest_auto_backup(
+    state: State<'_, StorageState>,
+) -> StorageResult<AutoBackupRestoreResult> {
+    with_storage_blocking(state.inner().clone(), move |storage| {
+        storage.restore_latest_auto_backup()
+    })
+    .await
 }
 
 #[tauri::command]

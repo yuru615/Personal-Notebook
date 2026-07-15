@@ -79,6 +79,9 @@ pub fn run() {
             storage::commands::replace_workspace_backup,
             storage::commands::export_workspace_archive,
             storage::commands::import_workspace_archive,
+            storage::commands::begin_auto_backup_session,
+            storage::commands::run_auto_backup,
+            storage::commands::restore_latest_auto_backup,
             storage::commands::load_app_settings,
             storage::commands::save_app_settings,
             storage::commands::enable_local_mcp,
@@ -166,8 +169,15 @@ fn open_asset_file(
 }
 
 #[tauri::command]
-fn quit_app_after_pending_saves(app: tauri::AppHandle) {
+fn quit_app_after_pending_saves(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, storage::StorageState>,
+) -> Result<(), String> {
+    state
+        .with_storage(|storage| storage.mark_auto_backup_session_clean())
+        .map_err(|error| error.to_string())?;
     app.exit(0);
+    Ok(())
 }
 
 fn is_allowed_external_url(url: &str) -> bool {
