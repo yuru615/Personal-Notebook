@@ -73,20 +73,11 @@ pub struct AppSettings {
     pub mcp: Option<McpSettings>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AutoBackupSettings {
-    #[serde(default = "default_auto_backup_enabled")]
     pub enabled: bool,
-    #[serde(
-        default = "default_auto_backup_interval_minutes",
-        deserialize_with = "deserialize_auto_backup_interval_minutes"
-    )]
     pub interval_minutes: u16,
-    #[serde(
-        default = "default_auto_backup_retention_count",
-        deserialize_with = "deserialize_auto_backup_retention_count"
-    )]
     pub retention_count: u8,
 }
 
@@ -116,26 +107,32 @@ fn default_auto_backup_retention_count() -> u8 {
     14
 }
 
-fn deserialize_auto_backup_interval_minutes<'de, D>(deserializer: D) -> Result<u16, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let interval_minutes = u16::deserialize(deserializer)?;
-    Ok(match interval_minutes {
-        15 | 30 | 60 => interval_minutes,
-        _ => default_auto_backup_interval_minutes(),
-    })
-}
+impl<'de> Deserialize<'de> for AutoBackupSettings {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        let Some(auto_backup) = value.as_object() else {
+            return Ok(Self::default());
+        };
+        let enabled = auto_backup.get("enabled").and_then(Value::as_bool);
+        let interval_minutes = auto_backup.get("intervalMinutes").and_then(Value::as_u64);
+        let retention_count = auto_backup.get("retentionCount").and_then(Value::as_u64);
 
-fn deserialize_auto_backup_retention_count<'de, D>(deserializer: D) -> Result<u8, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let retention_count = u8::deserialize(deserializer)?;
-    Ok(match retention_count {
-        7 | 14 | 30 => retention_count,
-        _ => default_auto_backup_retention_count(),
-    })
+        match (enabled, interval_minutes, retention_count) {
+            (
+                Some(enabled),
+                Some(interval_minutes @ (15 | 30 | 60)),
+                Some(retention_count @ (7 | 14 | 30)),
+            ) => Ok(Self {
+                enabled,
+                interval_minutes: interval_minutes as u16,
+                retention_count: retention_count as u8,
+            }),
+            _ => Ok(Self::default()),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -181,10 +178,51 @@ mod tests {
         assert_eq!(
             serialized.pointer("/autoBackup"),
             Some(&json!({
-                "enabled": false,
+                "enabled": true,
                 "intervalMinutes": 15,
                 "retentionCount": 14,
             }))
+        );
+    }
+
+    #[test]
+    fn malformed_auto_backup_values_do_not_discard_other_app_settings() {
+        let settings: AppSettings = serde_json::from_value(json!({
+            "closeAction": "quit",
+            "accentTheme": "violet",
+            "autoBackup": {
+                "enabled": false,
+                "intervalMinutes": "15",
+                "retentionCount": null,
+            },
+            "mcp": {
+                "enabled": true,
+                "port": 38472,
+                "token": "test-token",
+            }
+        }))
+        .expect("malformed auto backup settings should deserialize");
+        let serialized = serde_json::to_value(settings).expect("app settings serialize");
+
+        assert_eq!(
+            serialized.pointer("/autoBackup"),
+            Some(&json!({
+                "enabled": true,
+                "intervalMinutes": 15,
+                "retentionCount": 14,
+            }))
+        );
+        assert_eq!(
+            serialized.pointer("/closeAction").and_then(Value::as_str),
+            Some("quit")
+        );
+        assert_eq!(
+            serialized.pointer("/accentTheme").and_then(Value::as_str),
+            Some("violet")
+        );
+        assert_eq!(
+            serialized.pointer("/mcp/token").and_then(Value::as_str),
+            Some("test-token")
         );
     }
 }
