@@ -116,22 +116,24 @@ impl<'de> Deserialize<'de> for AutoBackupSettings {
         let Some(auto_backup) = value.as_object() else {
             return Ok(Self::default());
         };
-        let enabled = auto_backup.get("enabled").and_then(Value::as_bool);
-        let interval_minutes = auto_backup.get("intervalMinutes").and_then(Value::as_u64);
-        let retention_count = auto_backup.get("retentionCount").and_then(Value::as_u64);
+        let enabled = auto_backup
+            .get("enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or_else(default_auto_backup_enabled);
+        let interval_minutes = match auto_backup.get("intervalMinutes").and_then(Value::as_u64) {
+            Some(value @ (15 | 30 | 60)) => value as u16,
+            _ => default_auto_backup_interval_minutes(),
+        };
+        let retention_count = match auto_backup.get("retentionCount").and_then(Value::as_u64) {
+            Some(value @ (7 | 14 | 30)) => value as u8,
+            _ => default_auto_backup_retention_count(),
+        };
 
-        match (enabled, interval_minutes, retention_count) {
-            (
-                Some(enabled),
-                Some(interval_minutes @ (15 | 30 | 60)),
-                Some(retention_count @ (7 | 14 | 30)),
-            ) => Ok(Self {
-                enabled,
-                interval_minutes: interval_minutes as u16,
-                retention_count: retention_count as u8,
-            }),
-            _ => Ok(Self::default()),
-        }
+        Ok(Self {
+            enabled,
+            interval_minutes,
+            retention_count,
+        })
     }
 }
 
@@ -178,7 +180,7 @@ mod tests {
         assert_eq!(
             serialized.pointer("/autoBackup"),
             Some(&json!({
-                "enabled": true,
+                "enabled": false,
                 "intervalMinutes": 15,
                 "retentionCount": 14,
             }))
@@ -207,7 +209,7 @@ mod tests {
         assert_eq!(
             serialized.pointer("/autoBackup"),
             Some(&json!({
-                "enabled": true,
+                "enabled": false,
                 "intervalMinutes": 15,
                 "retentionCount": 14,
             }))
@@ -224,6 +226,26 @@ mod tests {
             serialized.pointer("/mcp/token").and_then(Value::as_str),
             Some("test-token")
         );
+    }
+
+    #[test]
+    fn null_or_non_object_auto_backup_values_use_complete_defaults() {
+        for auto_backup in [Value::Null, json!([])] {
+            let settings: AppSettings = serde_json::from_value(json!({
+                "autoBackup": auto_backup,
+            }))
+            .expect("non-object auto backup settings should deserialize");
+            let serialized = serde_json::to_value(settings).expect("app settings serialize");
+
+            assert_eq!(
+                serialized.pointer("/autoBackup"),
+                Some(&json!({
+                    "enabled": true,
+                    "intervalMinutes": 15,
+                    "retentionCount": 14,
+                }))
+            );
+        }
     }
 }
 
