@@ -173,11 +173,16 @@ fn quit_app_after_pending_saves(
     app: tauri::AppHandle,
     state: tauri::State<'_, storage::StorageState>,
 ) -> Result<(), String> {
-    state
-        .with_storage(|storage| storage.mark_auto_backup_session_clean())
+    mark_auto_backup_session_clean_before_app_exit(state.inner())
         .map_err(|error| error.to_string())?;
     app.exit(0);
     Ok(())
+}
+
+fn mark_auto_backup_session_clean_before_app_exit(
+    state: &storage::StorageState,
+) -> storage::StorageResult<()> {
+    state.with_storage(|storage| storage.mark_auto_backup_session_clean())
 }
 
 fn is_allowed_external_url(url: &str) -> bool {
@@ -273,6 +278,10 @@ fn request_app_quit_after_frontend_flush<R: tauri::Runtime>(app: &tauri::AppHand
         }
     }
 
+    let storage = app.state::<storage::StorageState>();
+    if let Err(error) = mark_auto_backup_session_clean_before_app_exit(storage.inner()) {
+        eprintln!("failed to mark automatic backup session clean before tray exit: {error}");
+    }
     app.exit(0);
 }
 
@@ -360,8 +369,41 @@ fn tray_event_should_show_window(event: &TrayIconEvent) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, UNIX_EPOCH};
+
     use super::*;
     use tauri::tray::MouseButtonState;
+
+    #[test]
+    fn tray_quit_fallback_marks_the_auto_backup_session_clean_before_exit() {
+        let state = storage::StorageState::open_in_memory_for_tests().expect("storage opens");
+        state
+            .with_storage(|storage| {
+                storage.replace_workspace_backup(storage::WorkspaceSnapshot {
+                    boards: Vec::new(),
+                    data_tables: Vec::new(),
+                    mindmaps: Vec::new(),
+                    synced_block_groups: Vec::new(),
+                    pages: Vec::new(),
+                    page_properties: Vec::new(),
+                    settings: storage::WorkspaceSettings::default(),
+                })?;
+                storage.create_auto_backup_at(
+                    UNIX_EPOCH + Duration::from_secs(1_700_000_000),
+                    14,
+                )?;
+                storage.begin_auto_backup_session()?;
+                Ok(())
+            })
+            .expect("start unfinished session");
+
+        mark_auto_backup_session_clean_before_app_exit(&state).expect("mark session clean");
+
+        let recovery = state
+            .with_storage(|storage| storage.begin_auto_backup_session())
+            .expect("next session begins");
+        assert!(!recovery.should_offer_restore);
+    }
 
     #[test]
     fn allows_common_external_url_schemes() {

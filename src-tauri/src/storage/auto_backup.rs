@@ -194,24 +194,20 @@ impl Storage {
     }
 
     pub fn restore_latest_auto_backup(&self) -> StorageResult<AutoBackupRestoreResult> {
+        let protection_backup_warning = self
+            .create_protection_backup_at(SystemTime::now())
+            .err()
+            .map(|error| format!("当前工作区的保护备份创建失败，已继续恢复：{error}"));
+
         let Some((_, archive)) = self.latest_valid_auto_backup()? else {
             return Err(StorageError::not_found("no readable automatic backup is available"));
         };
-
-        if let Err(error) = self.create_protection_backup_at(SystemTime::now()) {
-            return Ok(AutoBackupRestoreResult {
-                restored: false,
-                protection_backup_warning: Some(format!(
-                    "当前工作区的保护备份创建失败，未执行恢复：{error}"
-                )),
-            });
-        }
 
         self.import_workspace_archive(archive)?;
         self.mark_auto_backup_workspace_as_backed_up(SystemTime::now())?;
         Ok(AutoBackupRestoreResult {
             restored: true,
-            protection_backup_warning: None,
+            protection_backup_warning,
         })
     }
 

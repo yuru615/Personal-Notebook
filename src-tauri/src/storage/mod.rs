@@ -4640,7 +4640,97 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_protection_backup_returns_a_warning_without_replacing_the_workspace() {
+    fn a_restore_import_failure_after_archive_validation_keeps_the_current_workspace() {
+        let data_dir = unique_test_data_dir("auto-backup-import-failure");
+        let storage = Storage::open(&data_dir).expect("storage opens");
+        let backup_workspace = sample_snapshot();
+        storage
+            .replace_workspace_backup(backup_workspace.clone())
+            .expect("seed backup workspace");
+        let backup = storage
+            .create_auto_backup_at(UNIX_EPOCH + Duration::from_secs(1_700_000_000), 14)
+            .expect("create automatic backup");
+        let mut current_workspace = backup_workspace.clone();
+        current_workspace.pages[0].title = "Current workspace".to_string();
+        storage
+            .replace_workspace_backup(current_workspace)
+            .expect("change workspace after backup");
+
+        let mut source = zip::ZipArchive::new(Cursor::new(
+            std::fs::read(storage.auto_backup_dir.join(&backup.file_name))
+                .expect("read automatic backup"),
+        ))
+        .expect("read automatic backup archive");
+        let manifest: Value = {
+            let mut entry = source
+                .by_name(EXCHANGE_MANIFEST_ENTRY)
+                .expect("archive manifest");
+            serde_json::from_reader(&mut entry).expect("parse archive manifest")
+        };
+        let mut payload: Value = {
+            let mut entry = source
+                .by_name(EXCHANGE_PAYLOAD_ENTRY)
+                .expect("archive payload");
+            serde_json::from_reader(&mut entry).expect("parse archive payload")
+        };
+        let assets: Value = {
+            let mut entry = source
+                .by_name(EXCHANGE_ASSET_MANIFEST_ENTRY)
+                .expect("archive asset manifest");
+            serde_json::from_reader(&mut entry).expect("parse archive asset manifest")
+        };
+        let pages = payload
+            .pointer_mut("/workspace/pages")
+            .and_then(Value::as_array_mut)
+            .expect("workspace pages");
+        pages[0]["parentId"] = Value::String("missing-parent".to_string());
+
+        let mut rewritten = Cursor::new(Vec::new());
+        {
+            let mut archive = zip::ZipWriter::new(&mut rewritten);
+            let options = zip::write::FileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            archive
+                .start_file(EXCHANGE_MANIFEST_ENTRY, options)
+                .expect("start manifest");
+            serde_json::to_writer(&mut archive, &manifest).expect("write manifest");
+            archive
+                .start_file(EXCHANGE_PAYLOAD_ENTRY, options)
+                .expect("start payload");
+            serde_json::to_writer(&mut archive, &payload).expect("write payload");
+            archive
+                .start_file(EXCHANGE_ASSET_MANIFEST_ENTRY, options)
+                .expect("start asset manifest");
+            serde_json::to_writer(&mut archive, &assets).expect("write asset manifest");
+            archive.finish().expect("finish rewritten archive");
+        }
+        std::fs::write(
+            storage.auto_backup_dir.join(&backup.file_name),
+            rewritten.into_inner(),
+        )
+        .expect("write validated but unimportable automatic backup");
+        let before = storage
+            .export_workspace_backup()
+            .expect("export current workspace");
+
+        let error = storage
+            .restore_latest_auto_backup()
+            .expect_err("invalid parent fails while importing the validated archive");
+
+        assert_eq!(error.code, "database_error");
+        assert_eq!(
+            storage
+                .export_workspace_backup()
+                .expect("export workspace after failed restore"),
+            before
+        );
+
+        drop(storage);
+        std::fs::remove_dir_all(data_dir).expect("remove test data directory");
+    }
+
+    #[test]
+    fn a_failed_protection_backup_warns_and_still_restores_the_latest_auto_backup() {
         let data_dir = unique_test_data_dir("auto-backup-protection-warning");
         let storage = Storage::open(&data_dir).expect("storage opens");
         let asset = storage
@@ -4664,26 +4754,28 @@ mod tests {
         storage
             .create_auto_backup_at(UNIX_EPOCH + Duration::from_secs(1_700_000_000), 14)
             .expect("create automatic backup");
+        let mut current_workspace = snapshot.clone();
+        current_workspace.pages[0].title = "Changed after backup".to_string();
+        storage
+            .replace_workspace_backup(current_workspace)
+            .expect("change workspace after backup");
         std::fs::remove_file(
             assets::asset_file_path(&storage.connection, &storage.assets_dir, &asset.id)
                 .expect("locate asset"),
         )
         .expect("remove asset to make protection backup fail");
-        let before = storage
-            .export_workspace_backup()
-            .expect("export current workspace");
 
         let result = storage
             .restore_latest_auto_backup()
-            .expect("protection failure is reported without restoring");
+            .expect("protection failure is reported while restoring");
 
-        assert!(!result.restored);
+        assert!(result.restored);
         assert!(result.protection_backup_warning.is_some());
         assert_eq!(
             storage
                 .export_workspace_backup()
-                .expect("export workspace after protection failure"),
-            before
+                .expect("export restored workspace"),
+            snapshot
         );
 
         drop(storage);
