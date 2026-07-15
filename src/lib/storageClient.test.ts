@@ -119,6 +119,70 @@ describe('createTauriStorageClient', () => {
     })
   })
 
+  it('runs automatic backup lifecycle commands through typed Tauri commands', async () => {
+    const { createTauriStorageClient } = await import('./storageClient')
+    eventApi.invoke
+      .mockResolvedValueOnce({
+        shouldOfferRestore: true,
+        latestBackup: {
+          fileName: 'auto-20260716-120000.zhiqi',
+          createdAt: '2026-07-16T12:00:00.000Z',
+        },
+        recoveryCheckWarning: 'latest backup was partially unreadable',
+      })
+      .mockResolvedValueOnce({
+        created: true,
+        latestBackup: {
+          fileName: 'auto-20260716-121500.zhiqi',
+          createdAt: '2026-07-16T12:15:00.000Z',
+        },
+      })
+      .mockResolvedValueOnce({
+        restored: true,
+        protectionBackupWarning: 'current workspace protection backup failed',
+      })
+
+    const client = createTauriStorageClient()
+
+    await expect(client.beginAutoBackupSession()).resolves.toMatchObject({
+      shouldOfferRestore: true,
+      latestBackup: { fileName: 'auto-20260716-120000.zhiqi' },
+      recoveryCheckWarning: 'latest backup was partially unreadable',
+    })
+    await expect(client.runAutoBackup()).resolves.toMatchObject({
+      created: true,
+      latestBackup: { fileName: 'auto-20260716-121500.zhiqi' },
+    })
+    await expect(client.restoreLatestAutoBackup()).resolves.toMatchObject({
+      restored: true,
+      protectionBackupWarning: 'current workspace protection backup failed',
+    })
+
+    expect(eventApi.invoke).toHaveBeenNthCalledWith(1, 'begin_auto_backup_session')
+    expect(eventApi.invoke).toHaveBeenNthCalledWith(2, 'run_auto_backup')
+    expect(eventApi.invoke).toHaveBeenNthCalledWith(3, 'restore_latest_auto_backup')
+  })
+
+  it('safely skips automatic backup actions outside the desktop app', async () => {
+    const {
+      beginAutoBackupSession,
+      restoreLatestAutoBackup,
+      runAutoBackup,
+    } = await import('./storageClient')
+
+    await expect(beginAutoBackupSession()).resolves.toEqual({ shouldOfferRestore: false })
+    await expect(runAutoBackup()).resolves.toEqual({
+      created: false,
+      skippedReason: 'desktop_only',
+    })
+    await expect(restoreLatestAutoBackup()).resolves.toEqual({
+      restored: false,
+      protectionBackupWarning: 'Automatic backup recovery requires the desktop app',
+    })
+
+    expect(eventApi.invoke).not.toHaveBeenCalled()
+  })
+
   it('enables and disables the local MCP server through dedicated Tauri commands', async () => {
     const { createTauriStorageClient } = await import('./storageClient')
     const settings = {

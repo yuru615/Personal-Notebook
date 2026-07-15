@@ -32,6 +32,7 @@ import {
 import type {
   AppCloseAction,
   AppSettings,
+  AutoBackupSettings,
   BlockRecord,
   BlockSelectionStartMode,
   BlockType,
@@ -117,6 +118,7 @@ export interface WorkspaceState {
   setCurrentPage: (pageId: PageId) => Promise<void>
   setAppCloseAction: (closeAction: AppCloseAction) => Promise<void>
   setAppAccentTheme: (theme: AppAccentTheme) => Promise<void>
+  setAutoBackupSettings: (autoBackup: AutoBackupSettings) => Promise<void>
   enableLocalMcp: () => Promise<McpSettings>
   disableLocalMcp: () => Promise<void>
   regenerateLocalMcpToken: () => Promise<McpSettings>
@@ -256,6 +258,11 @@ function createEmptyState(): WorkspaceState {
     appSettings: {
       closeAction: 'hide_to_tray',
       accentTheme: 'blue_gray',
+      autoBackup: {
+        enabled: true,
+        intervalMinutes: 15,
+        retentionCount: 14,
+      },
     },
     currentPageId: null,
     saveStatus: 'idle',
@@ -276,6 +283,9 @@ function createEmptyState(): WorkspaceState {
       throw new Error('not implemented')
     },
     setAppAccentTheme: async () => {
+      throw new Error('not implemented')
+    },
+    setAutoBackupSettings: async () => {
       throw new Error('not implemented')
     },
     enableLocalMcp: async () => {
@@ -475,7 +485,22 @@ function normalizeAppSettings(settings: AppSettings | null | undefined): AppSett
   return {
     closeAction: settings?.closeAction === 'quit' ? 'quit' : 'hide_to_tray',
     accentTheme: normalizeAppAccentTheme(settings?.accentTheme),
+    autoBackup: normalizeAutoBackupSettings(settings?.autoBackup),
     ...(mcp ? { mcp } : {}),
+  }
+}
+
+function normalizeAutoBackupSettings(settings: AppSettings['autoBackup']): AutoBackupSettings {
+  return {
+    enabled: typeof settings?.enabled === 'boolean' ? settings.enabled : true,
+    intervalMinutes:
+      settings?.intervalMinutes === 30 || settings?.intervalMinutes === 60
+        ? settings.intervalMinutes
+        : 15,
+    retentionCount:
+      settings?.retentionCount === 7 || settings?.retentionCount === 30
+        ? settings.retentionCount
+        : 14,
   }
 }
 
@@ -1938,6 +1963,12 @@ export function createWorkspaceStore(
         return
       }
 
+      set({ appSettings: nextAppSettings })
+      await appSettingsRepository.save(nextAppSettings)
+    },
+
+    setAutoBackupSettings: async (autoBackup) => {
+      const nextAppSettings = normalizeAppSettings({ ...get().appSettings, autoBackup })
       set({ appSettings: nextAppSettings })
       await appSettingsRepository.save(nextAppSettings)
     },

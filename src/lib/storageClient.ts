@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { SearchResult } from '../domain/search'
+import { isDesktopRuntime } from './fileAccess'
 import type {
   AppSettings,
   BoardRecord,
@@ -36,6 +37,28 @@ export interface PagePackageImportResult {
   rootPageId: string
 }
 
+export interface AutoBackupRecord {
+  fileName: string
+  createdAt: string
+}
+
+export interface AutoBackupRecoveryStatus {
+  shouldOfferRestore: boolean
+  latestBackup?: AutoBackupRecord
+  recoveryCheckWarning?: string
+}
+
+export interface AutoBackupRunResult {
+  created: boolean
+  latestBackup?: AutoBackupRecord
+  skippedReason?: string
+}
+
+export interface AutoBackupRestoreResult {
+  restored: boolean
+  protectionBackupWarning?: string
+}
+
 export const WORKSPACE_ARCHIVE_PROGRESS_EVENT = 'zhiqi://workspace-archive-progress'
 
 export type WorkspaceArchiveOperation = 'export' | 'import'
@@ -69,6 +92,9 @@ export interface WorkspaceStorageClient {
   ): Promise<void>
   loadAppSettings(): Promise<AppSettings | null>
   saveAppSettings(settings: AppSettings): Promise<void>
+  beginAutoBackupSession(): Promise<AutoBackupRecoveryStatus>
+  runAutoBackup(): Promise<AutoBackupRunResult>
+  restoreLatestAutoBackup(): Promise<AutoBackupRestoreResult>
   enableLocalMcp(): Promise<McpSettings>
   disableLocalMcp(): Promise<void>
   regenerateLocalMcpToken(): Promise<McpSettings>
@@ -126,6 +152,18 @@ export function createTauriStorageClient(): WorkspaceStorageClient {
 
     saveAppSettings(settings) {
       return invoke<void>('save_app_settings', { settings })
+    },
+
+    beginAutoBackupSession() {
+      return invoke<AutoBackupRecoveryStatus>('begin_auto_backup_session')
+    },
+
+    runAutoBackup() {
+      return invoke<AutoBackupRunResult>('run_auto_backup')
+    },
+
+    restoreLatestAutoBackup() {
+      return invoke<AutoBackupRestoreResult>('restore_latest_auto_backup')
     },
 
     enableLocalMcp() {
@@ -256,4 +294,31 @@ export function exportWorkspaceArchive() {
 
 export function importWorkspaceArchive(bytes: Uint8Array) {
   return defaultStorageClient.importWorkspaceArchive(bytes)
+}
+
+export function beginAutoBackupSession(): Promise<AutoBackupRecoveryStatus> {
+  if (!isDesktopRuntime()) {
+    return Promise.resolve({ shouldOfferRestore: false })
+  }
+
+  return defaultStorageClient.beginAutoBackupSession()
+}
+
+export function runAutoBackup(): Promise<AutoBackupRunResult> {
+  if (!isDesktopRuntime()) {
+    return Promise.resolve({ created: false, skippedReason: 'desktop_only' })
+  }
+
+  return defaultStorageClient.runAutoBackup()
+}
+
+export function restoreLatestAutoBackup(): Promise<AutoBackupRestoreResult> {
+  if (!isDesktopRuntime()) {
+    return Promise.resolve({
+      restored: false,
+      protectionBackupWarning: 'Automatic backup recovery requires the desktop app',
+    })
+  }
+
+  return defaultStorageClient.restoreLatestAutoBackup()
 }

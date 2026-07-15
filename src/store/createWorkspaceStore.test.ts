@@ -490,8 +490,55 @@ describe('createWorkspaceStore data tables', () => {
     expect(appSettings.getSettings()).toEqual({
       closeAction: 'quit',
       accentTheme: 'blue_gray',
+      autoBackup: {
+        enabled: true,
+        intervalMinutes: 15,
+        retentionCount: 14,
+      },
     })
     expect(appSettings.getSaveCalls()).toBe(1)
+  })
+
+  it('persists automatic backup settings without changing the workspace or other app settings', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const appSettings = createMemoryAppSettingsRepository({
+      closeAction: 'quit',
+      accentTheme: 'violet',
+      mcp: {
+        enabled: true,
+        port: 38472,
+        token: 'test-token',
+      },
+    })
+    const store = createWorkspaceStore(counted.repository, appSettings.repository)
+    await store.getState().bootstrap()
+    const workspaceSavesBefore = counted.getSaveCalls()
+    const workspace = structuredClone(counted.getSnapshot())
+
+    await store.getState().setAutoBackupSettings({
+      enabled: false,
+      intervalMinutes: 30,
+      retentionCount: 7,
+    })
+
+    expect(store.getState().appSettings).toEqual({
+      closeAction: 'quit',
+      accentTheme: 'violet',
+      autoBackup: {
+        enabled: false,
+        intervalMinutes: 30,
+        retentionCount: 7,
+      },
+      mcp: {
+        enabled: true,
+        port: 38472,
+        token: 'test-token',
+      },
+    })
+    expect(appSettings.getSettings()).toEqual(store.getState().appSettings)
+    expect(appSettings.getSaveCalls()).toBe(1)
+    expect(counted.getSaveCalls()).toBe(workspaceSavesBefore)
+    expect(counted.getSnapshot()).toEqual(workspace)
   })
 
   it('keeps persisted local MCP settings after bootstrap', async () => {
