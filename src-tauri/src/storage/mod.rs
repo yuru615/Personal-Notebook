@@ -125,6 +125,8 @@ pub struct Storage {
     connection: Connection,
     assets_dir: PathBuf,
     auto_backup_dir: PathBuf,
+    #[cfg(test)]
+    auto_backup_file_sequence: AtomicU64,
 }
 
 impl Storage {
@@ -136,6 +138,8 @@ impl Storage {
             connection,
             assets_dir: data_dir.join(ASSETS_DIR_NAME),
             auto_backup_dir: data_dir.join(auto_backup::AUTO_BACKUP_DIR_NAME),
+            #[cfg(test)]
+            auto_backup_file_sequence: AtomicU64::new(0),
         };
         schema::initialize_schema(&storage.connection)?;
         if storage.search_documents_need_rebuild()? {
@@ -151,6 +155,8 @@ impl Storage {
             connection,
             assets_dir: unique_test_assets_dir(),
             auto_backup_dir: unique_test_data_dir("auto-backups").join(auto_backup::AUTO_BACKUP_DIR_NAME),
+            #[cfg(test)]
+            auto_backup_file_sequence: AtomicU64::new(0),
         };
         schema::initialize_schema(&storage.connection)?;
         Ok(storage)
@@ -4241,6 +4247,57 @@ mod tests {
     }
 
     #[test]
+    fn automatic_backup_conflict_keeps_every_existing_archive_without_trimming() {
+        fn auto_backup_file_name(now: SystemTime, sequence: u64) -> String {
+            let timestamp_nanos = now
+                .duration_since(UNIX_EPOCH)
+                .expect("test time after Unix epoch")
+                .as_nanos();
+            format!("auto-{timestamp_nanos:039}-{sequence:020}.zhiqi")
+        }
+
+        let data_dir = unique_test_data_dir("auto-backup-conflict");
+        let storage = Storage::open(&data_dir).expect("storage opens");
+        storage
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed workspace");
+        storage.set_auto_backup_file_sequence_for_tests(0);
+        std::fs::create_dir_all(&storage.auto_backup_dir).expect("create automatic backup directory");
+        let now = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let conflict = auto_backup_file_name(now, 0);
+        let older = [
+            auto_backup_file_name(UNIX_EPOCH + Duration::from_secs(1_699_999_999), 0),
+            auto_backup_file_name(UNIX_EPOCH + Duration::from_secs(1_699_999_998), 0),
+        ];
+        std::fs::write(storage.auto_backup_dir.join(&conflict), b"existing target")
+            .expect("write conflicting archive");
+        for file_name in &older {
+            std::fs::write(storage.auto_backup_dir.join(file_name), b"older archive")
+                .expect("write older archive");
+        }
+        let previous = storage.list_auto_backups().expect("list existing archives");
+
+        let error = storage
+            .create_auto_backup_at(now, 1)
+            .expect_err("conflicting automatic backup is rejected");
+
+        assert_eq!(error.code, "conflict");
+        assert_eq!(
+            std::fs::read(storage.auto_backup_dir.join(&conflict))
+                .expect("read conflicting archive"),
+            b"existing target"
+        );
+        assert_eq!(storage.list_auto_backups().expect("list after conflict"), previous);
+        assert!(!storage
+            .auto_backup_dir
+            .join(format!(".{conflict}.tmp-1"))
+            .exists());
+
+        drop(storage);
+        std::fs::remove_dir_all(data_dir).expect("remove test data directory");
+    }
+
+    #[test]
     fn auto_backup_start_removes_only_abandoned_auto_backup_temporary_files() {
         let data_dir = unique_test_data_dir("auto-backup-temp-cleanup");
         let storage = Storage::open(&data_dir).expect("storage opens");
@@ -5310,11 +5367,15 @@ mod tests {
             connection: first_connection,
             assets_dir: assets_dir.clone(),
             auto_backup_dir: auto_backup_dir.clone(),
+            #[cfg(test)]
+            auto_backup_file_sequence: AtomicU64::new(0),
         };
         let second_storage = Storage {
             connection: second_connection,
             assets_dir: assets_dir.clone(),
             auto_backup_dir,
+            #[cfg(test)]
+            auto_backup_file_sequence: AtomicU64::new(0),
         };
         let start = Arc::new(std::sync::Barrier::new(3));
         let (published_tx, published_rx) = std::sync::mpsc::channel();
@@ -5439,11 +5500,15 @@ mod tests {
             connection: winner_connection,
             assets_dir: assets_dir.clone(),
             auto_backup_dir: auto_backup_dir.clone(),
+            #[cfg(test)]
+            auto_backup_file_sequence: AtomicU64::new(0),
         };
         let loser = Storage {
             connection: loser_connection,
             assets_dir: assets_dir.clone(),
             auto_backup_dir,
+            #[cfg(test)]
+            auto_backup_file_sequence: AtomicU64::new(0),
         };
         let bytes = b"shared independent database asset".to_vec();
 

@@ -2,9 +2,12 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::Path,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::Ordering,
     time::{SystemTime, UNIX_EPOCH},
 };
+
+#[cfg(not(test))]
+use std::sync::atomic::AtomicU64;
 
 use serde::Serialize;
 
@@ -14,6 +17,7 @@ pub const AUTO_BACKUP_DIR_NAME: &str = "zhiqi-auto-backups";
 
 const AUTO_BACKUP_FILE_PREFIX: &str = "auto-";
 const AUTO_BACKUP_FILE_EXTENSION: &str = "zhiqi";
+#[cfg(not(test))]
 static AUTO_BACKUP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -29,7 +33,7 @@ impl Storage {
         now: SystemTime,
         retention_count: usize,
     ) -> StorageResult<AutoBackupRecord> {
-        let record = auto_backup_record(now)?;
+        let record = self.auto_backup_record(now)?;
         fs::create_dir_all(&self.auto_backup_dir)?;
         clean_up_abandoned_temporary_archives(&self.auto_backup_dir)?;
         let archive = self.export_workspace_archive()?;
@@ -38,7 +42,7 @@ impl Storage {
         let temporary_path = self.auto_backup_dir.join(format!(
             ".{}.tmp-{}",
             record.file_name,
-            AUTO_BACKUP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+            self.next_auto_backup_file_sequence()
         ));
         write_temporary_archive(&temporary_path, &archive)?;
         publish_temporary_archive(&temporary_path, &final_path)?;
@@ -76,16 +80,38 @@ impl Storage {
         }
         Ok(())
     }
+
+    fn auto_backup_record(&self, now: SystemTime) -> StorageResult<AutoBackupRecord> {
+        auto_backup_record(now, self.next_auto_backup_file_sequence())
+    }
+
+    fn next_auto_backup_file_sequence(&self) -> u64 {
+        #[cfg(test)]
+        {
+            return self
+                .auto_backup_file_sequence
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        #[cfg(not(test))]
+        {
+            AUTO_BACKUP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        }
+    }
+
+    #[cfg(test)]
+    pub fn set_auto_backup_file_sequence_for_tests(&self, sequence: u64) {
+        self.auto_backup_file_sequence
+            .store(sequence, Ordering::Relaxed);
+    }
 }
 
-fn auto_backup_record(now: SystemTime) -> StorageResult<AutoBackupRecord> {
+fn auto_backup_record(now: SystemTime, sequence: u64) -> StorageResult<AutoBackupRecord> {
     let timestamp_nanos = now
         .duration_since(UNIX_EPOCH)
         .map_err(|_| {
             StorageError::invalid_payload("automatic backup timestamp is before Unix epoch")
         })?
         .as_nanos();
-    let sequence = AUTO_BACKUP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     Ok(AutoBackupRecord {
         file_name: format!(
             "{AUTO_BACKUP_FILE_PREFIX}{timestamp_nanos:039}-{sequence:020}.{AUTO_BACKUP_FILE_EXTENSION}"
