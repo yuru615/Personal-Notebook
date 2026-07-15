@@ -232,6 +232,8 @@ export type BlockSelectionStartMode = 'safe_zone_only' | 'content_allowed'
 export type ExternalLinkOpenMode = 'modifier' | 'direct'
 export type AppCloseAction = 'hide_to_tray' | 'quit'
 export type SearchExcerptLength = 'short' | 'medium' | 'long'
+export type AutoBackupIntervalMinutes = 15 | 30 | 60
+export type AutoBackupRetentionCount = 7 | 14 | 30
 
 export interface PageDisplayDefaults {
   isFullWidth: boolean
@@ -250,7 +252,14 @@ export interface SearchPreferences {
 export interface AppSettings {
   closeAction?: AppCloseAction
   accentTheme?: AppAccentTheme
+  autoBackup?: AutoBackupSettings
   mcp?: McpSettings
+}
+
+export interface AutoBackupSettings {
+  enabled: boolean
+  intervalMinutes: AutoBackupIntervalMinutes
+  retentionCount: AutoBackupRetentionCount
 }
 
 export interface McpSettings {

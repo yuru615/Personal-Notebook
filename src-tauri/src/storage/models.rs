@@ -67,8 +67,126 @@ pub struct AppSettings {
     pub close_action: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accent_theme: Option<String>,
+    #[serde(default = "default_auto_backup_settings")]
+    pub auto_backup: AutoBackupSettings,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp: Option<McpSettings>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoBackupSettings {
+    #[serde(default = "default_auto_backup_enabled")]
+    pub enabled: bool,
+    #[serde(
+        default = "default_auto_backup_interval_minutes",
+        deserialize_with = "deserialize_auto_backup_interval_minutes"
+    )]
+    pub interval_minutes: u16,
+    #[serde(
+        default = "default_auto_backup_retention_count",
+        deserialize_with = "deserialize_auto_backup_retention_count"
+    )]
+    pub retention_count: u8,
+}
+
+impl Default for AutoBackupSettings {
+    fn default() -> Self {
+        default_auto_backup_settings()
+    }
+}
+
+fn default_auto_backup_settings() -> AutoBackupSettings {
+    AutoBackupSettings {
+        enabled: default_auto_backup_enabled(),
+        interval_minutes: default_auto_backup_interval_minutes(),
+        retention_count: default_auto_backup_retention_count(),
+    }
+}
+
+fn default_auto_backup_enabled() -> bool {
+    true
+}
+
+fn default_auto_backup_interval_minutes() -> u16 {
+    15
+}
+
+fn default_auto_backup_retention_count() -> u8 {
+    14
+}
+
+fn deserialize_auto_backup_interval_minutes<'de, D>(deserializer: D) -> Result<u16, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let interval_minutes = u16::deserialize(deserializer)?;
+    Ok(match interval_minutes {
+        15 | 30 | 60 => interval_minutes,
+        _ => default_auto_backup_interval_minutes(),
+    })
+}
+
+fn deserialize_auto_backup_retention_count<'de, D>(deserializer: D) -> Result<u8, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let retention_count = u8::deserialize(deserializer)?;
+    Ok(match retention_count {
+        7 | 14 | 30 => retention_count,
+        _ => default_auto_backup_retention_count(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{json, Value};
+
+    use super::AppSettings;
+
+    #[test]
+    fn legacy_app_settings_receive_default_auto_backup_settings() {
+        let settings: AppSettings = serde_json::from_value(json!({
+            "closeAction": "hide_to_tray"
+        }))
+        .expect("legacy app settings deserialize");
+        let serialized = serde_json::to_value(settings).expect("app settings serialize");
+
+        assert_eq!(
+            serialized.pointer("/autoBackup"),
+            Some(&json!({
+                "enabled": true,
+                "intervalMinutes": 15,
+                "retentionCount": 14,
+            }))
+        );
+        assert_eq!(
+            serialized.pointer("/closeAction").and_then(Value::as_str),
+            Some("hide_to_tray")
+        );
+    }
+
+    #[test]
+    fn invalid_auto_backup_intervals_and_retention_counts_fall_back_to_defaults() {
+        let settings: AppSettings = serde_json::from_value(json!({
+            "autoBackup": {
+                "enabled": false,
+                "intervalMinutes": 20,
+                "retentionCount": 10,
+            }
+        }))
+        .expect("app settings deserialize");
+        let serialized = serde_json::to_value(settings).expect("app settings serialize");
+
+        assert_eq!(
+            serialized.pointer("/autoBackup"),
+            Some(&json!({
+                "enabled": false,
+                "intervalMinutes": 15,
+                "retentionCount": 14,
+            }))
+        );
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

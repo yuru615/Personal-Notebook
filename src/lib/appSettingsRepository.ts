@@ -1,9 +1,14 @@
-import type { AppSettings, McpSettings } from '../domain/types'
+import type { AppSettings, AutoBackupSettings, McpSettings } from '../domain/types'
 import { normalizeAppAccentTheme } from '../domain/theme'
 import { isDesktopRuntime } from './fileAccess'
 import { createTauriStorageClient, type WorkspaceStorageClient } from './storageClient'
 
 const BROWSER_APP_SETTINGS_STORAGE_KEY = 'zhiqi.app.settings.v1'
+const DEFAULT_AUTO_BACKUP_SETTINGS: AutoBackupSettings = {
+  enabled: true,
+  intervalMinutes: 15,
+  retentionCount: 14,
+}
 
 export interface AppSettingsRepository {
   load(): Promise<AppSettings | null>
@@ -22,7 +27,22 @@ function normalizeAppSettings(settings: AppSettings | null | undefined): AppSett
   return {
     closeAction: settings?.closeAction === 'quit' ? 'quit' : 'hide_to_tray',
     accentTheme: normalizeAppAccentTheme(settings?.accentTheme),
+    autoBackup: normalizeAutoBackupSettings(settings?.autoBackup),
     ...(normalizeMcpSettings(settings?.mcp) ? { mcp: normalizeMcpSettings(settings?.mcp) } : {}),
+  }
+}
+
+function normalizeAutoBackupSettings(settings: AppSettings['autoBackup']): AutoBackupSettings {
+  return {
+    enabled: typeof settings?.enabled === 'boolean'
+      ? settings.enabled
+      : DEFAULT_AUTO_BACKUP_SETTINGS.enabled,
+    intervalMinutes: settings?.intervalMinutes === 30 || settings?.intervalMinutes === 60
+      ? settings.intervalMinutes
+      : DEFAULT_AUTO_BACKUP_SETTINGS.intervalMinutes,
+    retentionCount: settings?.retentionCount === 7 || settings?.retentionCount === 30
+      ? settings.retentionCount
+      : DEFAULT_AUTO_BACKUP_SETTINGS.retentionCount,
   }
 }
 

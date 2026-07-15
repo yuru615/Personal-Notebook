@@ -3569,6 +3569,7 @@ mod tests {
         let settings = AppSettings {
             close_action: Some("hide_to_tray".to_string()),
             accent_theme: Some("violet".to_string()),
+            auto_backup: models::AutoBackupSettings::default(),
             mcp: Some(models::McpSettings {
                 enabled: true,
                 port: 38_472,
@@ -3599,6 +3600,7 @@ mod tests {
         let settings = AppSettings {
             close_action: Some("hide_to_tray".to_string()),
             accent_theme: Some("violet".to_string()),
+            auto_backup: models::AutoBackupSettings::default(),
             mcp: Some(models::McpSettings {
                 enabled: true,
                 port: 38_472,

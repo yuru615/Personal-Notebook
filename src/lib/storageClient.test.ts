@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { WorkspaceSnapshot } from '../domain/types'
+import type { AppSettings, WorkspaceSnapshot } from '../domain/types'
 
 type TauriEventHandler = (event: { payload: unknown }) => void
 
@@ -90,6 +90,32 @@ describe('createTauriStorageClient', () => {
     expect(eventApi.invoke).toHaveBeenNthCalledWith(1, 'load_app_settings')
     expect(eventApi.invoke).toHaveBeenNthCalledWith(2, 'save_app_settings', {
       settings: appSettings,
+    })
+  })
+
+  it('passes automatic backup settings to the desktop save command unchanged', async () => {
+    const { createTauriStorageClient } = await import('./storageClient')
+    const appSettings: AppSettings = {
+      closeAction: 'hide_to_tray',
+      accentTheme: 'blue_gray',
+      autoBackup: {
+        enabled: true,
+        intervalMinutes: 15,
+        retentionCount: 14,
+      },
+    }
+    eventApi.invoke.mockResolvedValueOnce(undefined)
+
+    await createTauriStorageClient().saveAppSettings(appSettings)
+
+    expect(eventApi.invoke).toHaveBeenLastCalledWith('save_app_settings', {
+      settings: expect.objectContaining({
+        autoBackup: {
+          enabled: true,
+          intervalMinutes: 15,
+          retentionCount: 14,
+        },
+      }),
     })
   })
 
