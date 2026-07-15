@@ -200,8 +200,9 @@ fn is_temporary_auto_backup_file_name(file_name: &str) -> bool {
     let Some((archive_file_name, sequence)) = stem.rsplit_once(".tmp-") else {
         return false;
     };
-    !sequence.is_empty()
+    sequence.len() == 20
         && sequence.bytes().all(|byte| byte.is_ascii_digit())
+        && sequence.parse::<u64>().is_ok()
         && parse_auto_backup_record(archive_file_name).is_some()
 }
 

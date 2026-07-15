@@ -4311,9 +4311,22 @@ mod tests {
         let abandoned = storage.auto_backup_dir.join(
             ".auto-000000000000000000001700000000000000000-00000000000000000000.zhiqi.tmp-00000000000000000001",
         );
+        let short_sequence = storage.auto_backup_dir.join(
+            ".auto-000000000000000000001700000000000000000-00000000000000000000.zhiqi.tmp-123",
+        );
+        let long_sequence = storage.auto_backup_dir.join(
+            ".auto-000000000000000000001700000000000000000-00000000000000000000.zhiqi.tmp-123456789012345678901",
+        );
+        let non_numeric_sequence = storage.auto_backup_dir.join(
+            ".auto-000000000000000000001700000000000000000-00000000000000000000.zhiqi.tmp-not-a-number",
+        );
         let manual = storage.auto_backup_dir.join("manual.tmp");
         let unrelated = storage.auto_backup_dir.join(".auto-manual.zhiqi.tmp-1");
         std::fs::write(&abandoned, b"abandoned automatic backup").expect("write abandoned backup");
+        std::fs::write(&short_sequence, b"short sequence").expect("write short sequence");
+        std::fs::write(&long_sequence, b"long sequence").expect("write long sequence");
+        std::fs::write(&non_numeric_sequence, b"non-numeric sequence")
+            .expect("write non-numeric sequence");
         std::fs::write(&manual, b"manual temporary file").expect("write manual file");
         std::fs::write(&unrelated, b"unrelated temporary file").expect("write unrelated file");
 
@@ -4322,6 +4335,9 @@ mod tests {
             .expect("publish next backup");
 
         assert!(!abandoned.exists());
+        assert!(short_sequence.is_file());
+        assert!(long_sequence.is_file());
+        assert!(non_numeric_sequence.is_file());
         assert!(manual.is_file());
         assert!(unrelated.is_file());
 
