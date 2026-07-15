@@ -4241,6 +4241,38 @@ mod tests {
     }
 
     #[test]
+    fn auto_backup_start_removes_only_abandoned_auto_backup_temporary_files() {
+        let data_dir = unique_test_data_dir("auto-backup-temp-cleanup");
+        let storage = Storage::open(&data_dir).expect("storage opens");
+        storage
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed workspace");
+        storage
+            .create_auto_backup_at(UNIX_EPOCH + Duration::from_secs(1_700_000_000), 2)
+            .expect("publish initial backup");
+
+        let abandoned = storage.auto_backup_dir.join(
+            ".auto-000000000000000000001700000000000000000-00000000000000000000.zhiqi.tmp-00000000000000000001",
+        );
+        let manual = storage.auto_backup_dir.join("manual.tmp");
+        let unrelated = storage.auto_backup_dir.join(".auto-manual.zhiqi.tmp-1");
+        std::fs::write(&abandoned, b"abandoned automatic backup").expect("write abandoned backup");
+        std::fs::write(&manual, b"manual temporary file").expect("write manual file");
+        std::fs::write(&unrelated, b"unrelated temporary file").expect("write unrelated file");
+
+        storage
+            .create_auto_backup_at(UNIX_EPOCH + Duration::from_secs(1_700_000_001), 2)
+            .expect("publish next backup");
+
+        assert!(!abandoned.exists());
+        assert!(manual.is_file());
+        assert!(unrelated.is_file());
+
+        drop(storage);
+        std::fs::remove_dir_all(data_dir).expect("remove test data directory");
+    }
+
+    #[test]
     fn auto_backup_cleanup_ignores_temporary_and_unmanaged_files() {
         let data_dir = unique_test_data_dir("auto-backup-cleanup");
         let storage = Storage::open(&data_dir).expect("storage opens");

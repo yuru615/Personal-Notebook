@@ -29,9 +29,10 @@ impl Storage {
         now: SystemTime,
         retention_count: usize,
     ) -> StorageResult<AutoBackupRecord> {
-        let archive = self.export_workspace_archive()?;
         let record = auto_backup_record(now)?;
         fs::create_dir_all(&self.auto_backup_dir)?;
+        clean_up_abandoned_temporary_archives(&self.auto_backup_dir)?;
+        let archive = self.export_workspace_archive()?;
 
         let final_path = self.auto_backup_dir.join(&record.file_name);
         let temporary_path = self.auto_backup_dir.join(format!(
@@ -40,12 +41,7 @@ impl Storage {
             AUTO_BACKUP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));
         write_temporary_archive(&temporary_path, &archive)?;
-        if let Err(error) = fs::rename(&temporary_path, &final_path) {
-            return Err(clean_up_temporary_archive(
-                StorageError::io(error),
-                &temporary_path,
-            ));
-        }
+        publish_temporary_archive(&temporary_path, &final_path)?;
 
         self.trim_auto_backups(retention_count.max(1))?;
         Ok(record)
@@ -128,6 +124,61 @@ fn write_temporary_archive(path: &Path, archive: &[u8]) -> StorageResult<()> {
     }
 }
 
+fn publish_temporary_archive(temporary_path: &Path, final_path: &Path) -> StorageResult<()> {
+    if let Err(error) = fs::hard_link(temporary_path, final_path) {
+        let error = if error.kind() == std::io::ErrorKind::AlreadyExists {
+            StorageError::new(
+                "conflict",
+                format!(
+                    "automatic backup target already exists: {}",
+                    final_path.display()
+                ),
+            )
+        } else {
+            StorageError::io(error)
+        };
+        return Err(clean_up_temporary_archive(error, temporary_path));
+    }
+    if let Err(error) = fs::remove_file(temporary_path) {
+        return Err(StorageError::new(
+            "io_error",
+            format!(
+                "automatic backup published at {} but its temporary file could not be removed: {error}",
+                final_path.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn clean_up_abandoned_temporary_archives(directory: &Path) -> StorageResult<()> {
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let Some(file_name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if is_temporary_auto_backup_file_name(&file_name) {
+            fs::remove_file(entry.path())?;
+        }
+    }
+    Ok(())
+}
+
+fn is_temporary_auto_backup_file_name(file_name: &str) -> bool {
+    let Some(stem) = file_name.strip_prefix('.') else {
+        return false;
+    };
+    let Some((archive_file_name, sequence)) = stem.rsplit_once(".tmp-") else {
+        return false;
+    };
+    !sequence.is_empty()
+        && sequence.bytes().all(|byte| byte.is_ascii_digit())
+        && parse_auto_backup_record(archive_file_name).is_some()
+}
+
 fn clean_up_temporary_archive(mut error: StorageError, path: &Path) -> StorageError {
     if let Err(cleanup_error) = fs::remove_file(path) {
         if cleanup_error.kind() != std::io::ErrorKind::NotFound {
@@ -138,4 +189,39 @@ fn clean_up_temporary_archive(mut error: StorageError, path: &Path) -> StorageEr
         }
     }
     error
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn publishing_a_conflicting_backup_never_replaces_the_existing_archive() {
+        let directory = std::env::temp_dir().join(format!(
+            "zhiqi-auto-backup-publish-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("current time after Unix epoch")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).expect("create test directory");
+        let temporary_path = directory.join(".new-backup.tmp");
+        let final_path = directory
+            .join("auto-000000000000000000001700000000000000000-00000000000000000000.zhiqi");
+        fs::write(&temporary_path, b"new archive").expect("write temporary archive");
+        fs::write(&final_path, b"existing archive").expect("write existing archive");
+
+        let error = publish_temporary_archive(&temporary_path, &final_path)
+            .expect_err("existing archive must not be replaced");
+
+        assert_eq!(error.code, "conflict");
+        assert_eq!(
+            fs::read(&final_path).expect("read existing archive"),
+            b"existing archive"
+        );
+        assert!(!temporary_path.exists());
+
+        fs::remove_dir_all(directory).expect("remove test directory");
+    }
 }
