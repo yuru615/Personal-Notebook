@@ -1021,6 +1021,20 @@ export function BlockEditor({
     }
   }
 
+  async function insertParagraphFromTrailingRow() {
+    const currentBlockId = await onInsert?.('paragraph')
+
+    if (!currentBlockId) {
+      return
+    }
+
+    const nextBlockId = await onInsert?.('paragraph')
+
+    if (nextBlockId) {
+      requestBlockFocus(nextBlockId, 'rich_text')
+    }
+  }
+
   async function mergeBlockWithPrevious(blockId: string) {
     const targetBlockId = await onMergeBlockWithPrevious?.(blockId)
 
@@ -2185,6 +2199,9 @@ export function BlockEditor({
           allowedBlockTypes={allowedBlockTypes}
           onInsert={(type) => {
             void handleAppendSlashCommand(type)
+          }}
+          onSubmitEmpty={() => {
+            void insertParagraphFromTrailingRow()
           }}
           onInsertParagraph={(text) => {
             onInsertParagraph?.(text)

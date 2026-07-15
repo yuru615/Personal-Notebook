@@ -15,6 +15,8 @@ use super::{
     models::{AssetMeta, TrackedAssetWrite, WriteAssetInput},
 };
 
+const ASSET_STREAM_BUFFER_SIZE: usize = 1024 * 1024;
+
 pub fn write_asset(
     connection: &Connection,
     assets_dir: &Path,
@@ -759,7 +761,7 @@ where
     F: FnMut(u64),
 {
     let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 1024];
+    let mut buffer = vec![0_u8; ASSET_STREAM_BUFFER_SIZE];
     let mut byte_size = 0_u64;
 
     loop {
@@ -877,6 +879,19 @@ fn now_millis() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn streams_assets_with_a_heap_allocated_buffer() {
+        let source = include_str!("assets.rs");
+        let expected = [
+            "let mut buffer = ",
+            "vec![0_u8; ",
+            "ASSET_STREAM_BUFFER_SIZE];",
+        ]
+        .concat();
+
+        assert!(source.contains(&expected));
+    }
 
     #[test]
     fn released_temp_ownership_does_not_delete_path_reused_by_another_write() {

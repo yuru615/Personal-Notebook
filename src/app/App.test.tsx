@@ -1,5 +1,5 @@
 import { StrictMode } from 'react'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppSettings, McpSettings, WorkspaceSnapshot } from '../domain/types'
@@ -14,6 +14,10 @@ import { App } from './App'
 const desktopLifecycle = vi.hoisted(() => ({
   registerDesktopPendingSaveFlush: vi.fn(async () => () => undefined),
   registerDesktopTrayActions: vi.fn(async () => () => undefined),
+}))
+const nativeDragDrop = vi.hoisted(() => ({
+  handler: null as ((event: { payload: Record<string, unknown> }) => void) | null,
+  onDragDropEvent: vi.fn(),
 }))
 const fileAccess = vi.hoisted(() => ({
   openTextFile: vi.fn(async () => ({
@@ -47,9 +51,23 @@ const fileAccess = vi.hoisted(() => ({
     name: '工作区备份.zip',
     path: '/tmp/工作区备份.zip',
   })),
+  readLocalBinaryFile: vi.fn(async () => new Uint8Array([80, 75, 3, 4])),
+  readLocalTextFile: vi.fn(async () => '# 导入指南\n\n第一段正文'),
   pickSaveFilePath: vi.fn(async () => '/tmp/产品规划.zhiqi'),
   saveBinaryFile: vi.fn(async () => undefined),
   saveTextFile: vi.fn(async () => undefined),
+}))
+const pathAssetImport = vi.hoisted(() => ({
+  importFileAssetFromPath: vi.fn(async () => ({
+    id: 'asset_native_drop',
+    sha256: 'native-drop',
+    name: '会议记录.docx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    byteSize: 4,
+    relativePath: 'na/native-drop.docx',
+    createdAt: '2026-07-15T00:00:00.000Z',
+  })),
+  readAssetBytesFromUrl: vi.fn(async () => new Uint8Array([80, 75, 3, 4])),
 }))
 const pagePackageStorage = vi.hoisted(() => ({
   exportPagePackageToPath: vi.fn(async () => undefined),
@@ -61,11 +79,23 @@ const workspaceArchiveStorage = vi.hoisted(() => ({
   exportWorkspaceArchive: vi.fn(async () => new Uint8Array([80, 75, 3, 4])),
   importWorkspaceArchive: vi.fn(async () => undefined),
 }))
+const docxImport = vi.hoisted(() => ({
+  parseDocxPage: vi.fn(),
+}))
+const pdfImport = vi.hoisted(() => ({
+  parsePdfPage: vi.fn(),
+}))
 const tauriEvents = vi.hoisted(() => ({
   listen: vi.fn(async () => () => undefined),
 }))
 
 vi.mock('@tauri-apps/api/event', () => tauriEvents)
+
+vi.mock('@tauri-apps/api/webview', () => ({
+  getCurrentWebview: () => ({
+    onDragDropEvent: nativeDragDrop.onDragDropEvent,
+  }),
+}))
 
 vi.mock('../lib/desktopLifecycle', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/desktopLifecycle')>()
@@ -83,6 +113,8 @@ vi.mock('../lib/fileAccess', async (importOriginal) => {
     openTextFile: fileAccess.openTextFile,
     openBinaryFile: fileAccess.openBinaryFile,
     openLocalFilePath: fileAccess.openLocalFilePath,
+    readLocalBinaryFile: fileAccess.readLocalBinaryFile,
+    readLocalTextFile: fileAccess.readLocalTextFile,
     pickSaveFilePath: fileAccess.pickSaveFilePath,
     saveBinaryFile: fileAccess.saveBinaryFile,
     saveTextFile: fileAccess.saveTextFile,
@@ -97,6 +129,8 @@ vi.mock('../lib/assets', async (importOriginal) => {
     exportPagePackage: pagePackageStorage.exportPagePackage,
     importPagePackageFromPath: pagePackageStorage.importPagePackageFromPath,
     importPagePackage: pagePackageStorage.importPagePackage,
+    importFileAssetFromPath: pathAssetImport.importFileAssetFromPath,
+    readAssetBytesFromUrl: pathAssetImport.readAssetBytesFromUrl,
   }
 })
 
@@ -108,6 +142,9 @@ vi.mock('../lib/storageClient', async (importOriginal) => {
     importWorkspaceArchive: workspaceArchiveStorage.importWorkspaceArchive,
   }
 })
+
+vi.mock('../domain/docxImport', () => docxImport)
+vi.mock('../domain/pdfImport', () => pdfImport)
 
 function findTextNode(element: Node): Text {
   if (element.nodeType === Node.TEXT_NODE) {
@@ -187,6 +224,12 @@ describe('App', () => {
   let scrollTo: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
+    nativeDragDrop.handler = null
+    nativeDragDrop.onDragDropEvent.mockReset()
+    nativeDragDrop.onDragDropEvent.mockImplementation(async (handler) => {
+      nativeDragDrop.handler = handler
+      return () => undefined
+    })
     Reflect.deleteProperty(globalThis, '__TAURI_INTERNALS__')
     desktopLifecycle.registerDesktopPendingSaveFlush.mockResolvedValue(() => undefined)
     desktopLifecycle.registerDesktopTrayActions.mockResolvedValue(() => undefined)
@@ -224,6 +267,10 @@ describe('App', () => {
       name: '工作区备份.zip',
       path: '/tmp/工作区备份.zip',
     })
+    fileAccess.readLocalBinaryFile.mockClear()
+    fileAccess.readLocalBinaryFile.mockResolvedValue(new Uint8Array([80, 75, 3, 4]))
+    fileAccess.readLocalTextFile.mockClear()
+    fileAccess.readLocalTextFile.mockResolvedValue('# 导入指南\n\n第一段正文')
     fileAccess.pickSaveFilePath.mockClear()
     fileAccess.pickSaveFilePath.mockResolvedValue('/tmp/产品规划.zhiqi')
     fileAccess.saveBinaryFile.mockClear()
@@ -234,6 +281,27 @@ describe('App', () => {
     pagePackageStorage.importPagePackage.mockClear()
     workspaceArchiveStorage.exportWorkspaceArchive.mockClear()
     workspaceArchiveStorage.importWorkspaceArchive.mockClear()
+    pathAssetImport.importFileAssetFromPath.mockClear()
+    pathAssetImport.importFileAssetFromPath.mockResolvedValue({
+      id: 'asset_native_drop',
+      sha256: 'native-drop',
+      name: '会议记录.docx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      byteSize: 4,
+      relativePath: 'na/native-drop.docx',
+      createdAt: '2026-07-15T00:00:00.000Z',
+    })
+    docxImport.parseDocxPage.mockReset()
+    docxImport.parseDocxPage.mockResolvedValue({
+      title: 'Word 导入页面',
+      blocks: [{ id: 'block_docx_body', type: 'paragraph', text: '从 Word 导入的正文' }],
+      images: [],
+    })
+    pdfImport.parsePdfPage.mockReset()
+    pdfImport.parsePdfPage.mockResolvedValue({
+      title: 'PDF 导入页面',
+      blocks: [{ id: 'block_pdf_body', type: 'paragraph', text: '从 PDF 导入的正文' }],
+    })
     pagePackageStorage.importPagePackageFromPath.mockResolvedValue({ rootPageId: 'page_imported' })
     pagePackageStorage.importPagePackage.mockResolvedValue({ rootPageId: 'page_imported' })
     scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
@@ -2026,6 +2094,49 @@ describe('App', () => {
     expect(screen.getByText('第一段正文')).toBeInTheDocument()
   })
 
+  it('imports Markdown through the compact sidebar content entry', async () => {
+    Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    })
+    const user = userEvent.setup()
+    const pageId = 'page_content_import_source'
+    fileAccess.openLocalFilePath.mockResolvedValueOnce({
+      name: 'guide.md',
+      path: '/tmp/guide.md',
+    })
+    fileAccess.readLocalTextFile.mockResolvedValueOnce('# 导入指南\n\n第一段正文')
+    const snapshot: WorkspaceSnapshot = {
+      boards: [],
+      dataTables: [],
+      mindmaps: [],
+      pages: [
+        {
+          id: pageId,
+          parentId: null,
+          title: '当前页面',
+          icon: null,
+          cover: null,
+          blocks: [],
+          createdAt: '2026-07-14T00:00:00.000Z',
+          updatedAt: '2026-07-14T00:00:00.000Z',
+        },
+      ],
+      settings: { lastOpenedPageId: pageId, sidebarLayout: 'compact' },
+    }
+
+    render(<App repository={createMemoryRepository(snapshot)} initialEntries={[`/pages/${pageId}`]} />)
+
+    await screen.findByDisplayValue('当前页面')
+    await user.click(screen.getByRole('button', { name: '导入内容' }))
+
+    expect(fileAccess.openLocalFilePath).toHaveBeenCalledWith({
+      filters: [{ name: '知栖内容', extensions: ['zhiqi', 'zip', 'md', 'markdown'] }],
+    })
+    expect(await screen.findByDisplayValue('导入指南')).toBeInTheDocument()
+    expect(screen.getByText('第一段正文')).toBeInTheDocument()
+  })
+
   it('imports a portable workspace archive from the page menu after confirmation', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const user = userEvent.setup()
@@ -2393,5 +2504,303 @@ describe('App', () => {
     expect(previewImage).not.toBeNull()
     expect(previewImage?.getAttribute('src')).toContain('data:image/svg+xml')
     expect(card).not.toHaveTextContent('空白导图')
+  })
+
+  it('creates a top-level editable page when DOCX is dropped on the sidebar blank area', async () => {
+    const snapshot = createMcpSettingsSnapshot()
+    const { container } = render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={['/pages/page_mcp_settings']}
+      />,
+    )
+    const file = new File([new Uint8Array([80, 75, 3, 4])], '会议记录.docx', {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    })
+
+    await waitFor(() => expect(container.querySelector('.sidebar-scroll-content')).not.toBeNull())
+    fireEvent.drop(container.querySelector('.sidebar-scroll-content')!, {
+      dataTransfer: { files: [file] },
+    })
+
+    await waitFor(() => expect(docxImport.parseDocxPage).toHaveBeenCalledWith(file.name, expect.any(Uint8Array)))
+    expect(await screen.findByText('Word 导入页面')).toBeInTheDocument()
+  })
+
+  it('creates a child page, a child-page block, and an original DOCX attachment when dropped on the current page', async () => {
+    const snapshot = createMcpSettingsSnapshot()
+    const { container } = render(
+      <App
+        repository={createMemoryRepository(snapshot)}
+        initialEntries={['/pages/page_mcp_settings']}
+      />,
+    )
+    const file = new File([new Uint8Array([80, 75, 3, 4])], '会议记录.docx', {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    })
+
+    await waitFor(() => expect(container.querySelector('.page-with-outline')).not.toBeNull())
+    fireEvent.drop(container.querySelector('.page-with-outline')!, {
+      dataTransfer: { files: [file] },
+    })
+
+    await waitFor(() => expect(docxImport.parseDocxPage).toHaveBeenCalledWith(file.name, expect.any(Uint8Array)))
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Word 导入页面' }))
+
+    expect(await screen.findByText('从 Word 导入的正文')).toBeInTheDocument()
+    expect(screen.getByText('会议记录.docx')).toBeInTheDocument()
+  })
+
+  it('uses the managed asset URL instead of a native binary read for a DOCX path drop', async () => {
+    Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    })
+    const store = createWorkspaceStore(createMemoryRepository(createMcpSettingsSnapshot()))
+    render(<App store={store} initialEntries={['/pages/page_mcp_settings']} />)
+
+    await waitFor(() => expect(nativeDragDrop.onDragDropEvent).toHaveBeenCalledTimes(1))
+    act(() => {
+      nativeDragDrop.handler?.({
+        payload: {
+          type: 'drop',
+          paths: ['C:/drop/会议记录.docx'],
+          position: { x: 800, y: 240 },
+        },
+      })
+    })
+
+    await waitFor(() =>
+      expect(store.getState().pages).toContainEqual(
+        expect.objectContaining({ title: 'Word 导入页面', parentId: 'page_mcp_settings' }),
+      ),
+    )
+    expect(pathAssetImport.importFileAssetFromPath).toHaveBeenCalledWith('C:/drop/会议记录.docx')
+    expect(pathAssetImport.readAssetBytesFromUrl).toHaveBeenCalledWith('asset_native_drop')
+    expect(fileAccess.readLocalBinaryFile).not.toHaveBeenCalled()
+  })
+
+  it('uses the managed asset URL instead of a native binary read for a PDF path drop', async () => {
+    Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    })
+    pathAssetImport.importFileAssetFromPath.mockResolvedValueOnce({
+      id: 'asset_native_pdf',
+      sha256: 'native-pdf',
+      name: '季度复盘.pdf',
+      mimeType: 'application/pdf',
+      byteSize: 4,
+      relativePath: 'na/native-drop.pdf',
+      createdAt: '2026-07-15T00:00:00.000Z',
+    })
+    const store = createWorkspaceStore(createMemoryRepository(createMcpSettingsSnapshot()))
+    render(<App store={store} initialEntries={['/pages/page_mcp_settings']} />)
+
+    await waitFor(() => expect(nativeDragDrop.onDragDropEvent).toHaveBeenCalledTimes(1))
+    act(() => {
+      nativeDragDrop.handler?.({
+        payload: {
+          type: 'drop',
+          paths: ['C:/drop/季度复盘.pdf'],
+          position: { x: 800, y: 240 },
+        },
+      })
+    })
+
+    await waitFor(() =>
+      expect(store.getState().pages).toContainEqual(
+        expect.objectContaining({ title: 'PDF 导入页面', parentId: 'page_mcp_settings' }),
+      ),
+    )
+    expect(pathAssetImport.importFileAssetFromPath).toHaveBeenCalledWith('C:/drop/季度复盘.pdf')
+    expect(pathAssetImport.readAssetBytesFromUrl).toHaveBeenCalledWith('asset_native_pdf')
+    expect(fileAccess.readLocalBinaryFile).not.toHaveBeenCalled()
+  })
+
+  it('leaves desktop HTML file drops to the native path handler instead of importing them twice', async () => {
+    Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    })
+    const { container } = render(
+      <App
+        repository={createMemoryRepository(createMcpSettingsSnapshot())}
+        initialEntries={['/pages/page_mcp_settings']}
+      />,
+    )
+    const file = new File([new Uint8Array([80, 75, 3, 4])], '会议记录.docx', {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    })
+
+    await waitFor(() => expect(container.querySelector('.page-with-outline')).not.toBeNull())
+    fireEvent.drop(container.querySelector('.page-with-outline')!, {
+      dataTransfer: { files: [file] },
+    })
+
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    expect(docxImport.parseDocxPage).not.toHaveBeenCalled()
+  })
+
+  it('creates a top-level editable page when a PDF is dropped on the sidebar blank area', async () => {
+    const { container } = render(
+      <App
+        repository={createMemoryRepository(createMcpSettingsSnapshot())}
+        initialEntries={['/pages/page_mcp_settings']}
+      />,
+    )
+    const file = new File(['PDF content'], '季度复盘.pdf', { type: 'application/pdf' })
+
+    await waitFor(() => expect(container.querySelector('.sidebar-scroll-content')).not.toBeNull())
+    fireEvent.drop(container.querySelector('.sidebar-scroll-content')!, {
+      dataTransfer: { files: [file] },
+    })
+
+    await waitFor(() => expect(pdfImport.parsePdfPage).toHaveBeenCalledWith(file.name, expect.any(Uint8Array)))
+    expect(await screen.findByText('PDF 导入页面')).toBeInTheDocument()
+  })
+
+  it('creates a child page and original attachment when a PDF is dropped on the current page', async () => {
+    const { container } = render(
+      <App
+        repository={createMemoryRepository(createMcpSettingsSnapshot())}
+        initialEntries={['/pages/page_mcp_settings']}
+      />,
+    )
+    const file = new File(['PDF content'], '季度复盘.pdf', { type: 'application/pdf' })
+
+    await waitFor(() => expect(container.querySelector('.page-with-outline')).not.toBeNull())
+    fireEvent.drop(container.querySelector('.page-with-outline')!, {
+      dataTransfer: { files: [file] },
+    })
+
+    await waitFor(() => expect(pdfImport.parsePdfPage).toHaveBeenCalledWith(file.name, expect.any(Uint8Array)))
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'PDF 导入页面' }))
+
+    expect(await screen.findByText('从 PDF 导入的正文')).toBeInTheDocument()
+    expect(screen.getByText('季度复盘.pdf')).toBeInTheDocument()
+  })
+
+  it('keeps a Windows file drag over the current page out of the global inbox handler', async () => {
+    const { container } = render(
+      <App
+        repository={createMemoryRepository(createMcpSettingsSnapshot())}
+        initialEntries={['/pages/page_mcp_settings']}
+      />,
+    )
+    const page = await waitFor(() => {
+      const element = container.querySelector('.page-with-outline')
+      expect(element).not.toBeNull()
+      return element!
+    })
+    const event = createEvent.dragOver(page)
+    Object.defineProperty(event, 'dataTransfer', {
+      value: { types: ['Files'], files: [] },
+    })
+    const globalDragOver = vi.fn()
+    document.body.addEventListener('dragover', globalDragOver)
+
+    expect(Array.from(event.dataTransfer.types)).toEqual(['Files'])
+    fireEvent(page, event)
+    document.body.removeEventListener('dragover', globalDragOver)
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(globalDragOver).not.toHaveBeenCalled()
+  })
+
+  it('creates a child page from a TXT file dropped on the current page', async () => {
+    const store = createWorkspaceStore(createMemoryRepository(createMcpSettingsSnapshot()))
+    const { container } = render(<App store={store} initialEntries={['/pages/page_mcp_settings']} />)
+    const file = new File(['第一段内容'], '会议摘要.txt', { type: 'text/plain' })
+
+    await waitFor(() => expect(container.querySelector('.page-with-outline')).not.toBeNull())
+    fireEvent.drop(container.querySelector('.page-with-outline')!, {
+      dataTransfer: { files: [file] },
+    })
+
+    await waitFor(() =>
+      expect(store.getState().pages).toContainEqual(
+        expect.objectContaining({ title: '会议摘要', parentId: 'page_mcp_settings' }),
+      ),
+    )
+    expect(store.getState().pages.find((page) => page.id === 'page_mcp_settings')?.blocks).toContainEqual(
+      expect.objectContaining({ type: 'child_page' }),
+    )
+  })
+
+  it('appends ordinary attachments to the current page in their drop order', async () => {
+    const store = createWorkspaceStore(createMemoryRepository(createMcpSettingsSnapshot()))
+    const { container } = render(<App store={store} initialEntries={['/pages/page_mcp_settings']} />)
+    const image = new File(['image'], '示意图.png', { type: 'image/png' })
+    const archive = new File(['archive'], '资料.zip', { type: 'application/zip' })
+
+    await waitFor(() => expect(container.querySelector('.page-with-outline')).not.toBeNull())
+    fireEvent.drop(container.querySelector('.page-with-outline')!, {
+      dataTransfer: { files: [image, archive] },
+    })
+
+    await waitFor(() =>
+      expect(store.getState().pages.find((page) => page.id === 'page_mcp_settings')?.blocks).toMatchObject([
+        { type: 'image', name: '示意图.png' },
+        { type: 'file', name: '资料.zip' },
+      ]),
+    )
+  })
+
+  it('treats an ordinary JSON file as an attachment instead of a backup', async () => {
+    const store = createWorkspaceStore(createMemoryRepository(createMcpSettingsSnapshot()))
+    const { container } = render(<App store={store} initialEntries={['/pages/page_mcp_settings']} />)
+    const file = new File([JSON.stringify({ project: '知栖', status: 'draft' })], '项目数据.json', {
+      type: 'application/json',
+    })
+
+    await waitFor(() => expect(container.querySelector('.page-with-outline')).not.toBeNull())
+    fireEvent.drop(container.querySelector('.page-with-outline')!, {
+      dataTransfer: { files: [file] },
+    })
+
+    await waitFor(() =>
+      expect(store.getState().pages.find((page) => page.id === 'page_mcp_settings')?.blocks).toContainEqual(
+        expect.objectContaining({ type: 'file', name: '项目数据.json' }),
+      ),
+    )
+  })
+
+  it('keeps the most recent successful top-level document selected when a later file fails', async () => {
+    pdfImport.parsePdfPage.mockRejectedValueOnce(new Error('损坏的 PDF'))
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => undefined)
+    const { container } = render(
+      <App
+        repository={createMemoryRepository(createMcpSettingsSnapshot())}
+        initialEntries={['/pages/page_mcp_settings']}
+      />,
+    )
+    const docx = new File([new Uint8Array([80, 75, 3, 4])], '会议记录.docx')
+    const brokenPdf = new File(['broken'], '损坏.pdf', { type: 'application/pdf' })
+
+    await waitFor(() => expect(container.querySelector('.sidebar-scroll-content')).not.toBeNull())
+    fireEvent.drop(container.querySelector('.sidebar-scroll-content')!, {
+      dataTransfer: { files: [docx, brokenPdf] },
+    })
+
+    expect(await screen.findByText('从 Word 导入的正文')).toBeInTheDocument()
+    alert.mockRestore()
+  })
+
+  it('keeps .zhiqi archives out of automatic drag-and-drop import', async () => {
+    const store = createWorkspaceStore(createMemoryRepository(createMcpSettingsSnapshot()))
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => undefined)
+    const { container } = render(<App store={store} initialEntries={['/pages/page_mcp_settings']} />)
+    const file = new File(['archive'], '知识库.zhiqi', { type: 'application/zip' })
+
+    await waitFor(() => expect(container.querySelector('.page-with-outline')).not.toBeNull())
+    const pageCountBeforeDrop = store.getState().pages.length
+    fireEvent.drop(container.querySelector('.page-with-outline')!, {
+      dataTransfer: { files: [file] },
+    })
+
+    await waitFor(() => expect(alert).toHaveBeenCalled())
+    expect(store.getState().pages).toHaveLength(pageCountBeforeDrop)
+    alert.mockRestore()
   })
 })

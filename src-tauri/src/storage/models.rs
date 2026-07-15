@@ -157,6 +157,8 @@ pub struct PageRecord {
     pub font_family: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub show_outline: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_properties: Option<bool>,
     pub blocks: Vec<Value>,
     pub created_at: String,
     pub updated_at: String,
@@ -178,6 +180,8 @@ pub struct PageMeta {
     pub font_family: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub show_outline: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_properties: Option<bool>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -200,6 +204,8 @@ pub struct LoadedPage {
     pub font_family: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub show_outline: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_properties: Option<bool>,
     pub blocks: Vec<Value>,
     pub created_at: String,
     pub updated_at: String,
@@ -218,6 +224,7 @@ impl From<PageRecord> for LoadedPage {
             is_small_text: page.is_small_text,
             font_family: page.font_family,
             show_outline: page.show_outline,
+            show_properties: page.show_properties,
             blocks: page.blocks,
             created_at: page.created_at,
             updated_at: page.updated_at,
@@ -237,6 +244,7 @@ impl From<&PageRecord> for PageMeta {
             is_small_text: page.is_small_text,
             font_family: page.font_family.clone(),
             show_outline: page.show_outline,
+            show_properties: page.show_properties,
             created_at: page.created_at.clone(),
             updated_at: page.updated_at.clone(),
         }

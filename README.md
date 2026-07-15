@@ -58,7 +58,7 @@
 - 🗄️ **SQLite 本地持久化**：核心数据保存在本机 `zhiqi.db`，无需后端服务。
 - 📁 **本地资源管理**：文件资产由应用管理在 `zhiqi-assets/`，减少外部路径失效风险。
 - 🪟 **Tauri 原生能力**：支持原生窗口、系统托盘、文件对话框、文件读写和外部链接安全打开。
-- 📦 **跨平台打包**：提供 macOS `.app`/`.dmg` 和 Windows NSIS `.exe`/MSI `.msi` 打包命令。
+- 📦 **跨平台打包**：提供 macOS `.app`/`.dmg` 和 Windows NSIS `.exe` 打包命令。
 
 ## 🧰 技术栈
 
@@ -197,7 +197,7 @@ npm run test:watch
 - 🏗️ `npm run build`：执行 TypeScript 构建检查并生成前端产物。
 - 📦 `npm run tauri:build`：按当前平台打包桌面应用。
 - 🍎 `npm run tauri:build:mac`：在 macOS 上生成 `.app` 和 `.dmg`。
-- 🪟 `npm run tauri:build:windows`：在 Windows 上生成 NSIS `.exe` 和 MSI `.msi`。
+- 🪟 `npm run tauri:build:windows`：在 Windows 上仅生成 NSIS `.exe` 安装包。
 - 🧳 `npm run tauri:build:windows:cross`：通过 `cargo-xwin` 交叉构建 x64 Windows NSIS 安装包。
 
 运行单个测试示例：

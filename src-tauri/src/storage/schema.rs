@@ -2,7 +2,7 @@ use rusqlite::{Connection, OptionalExtension};
 
 use super::error::StorageResult;
 
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 
 pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
     connection.pragma_update(None, "foreign_keys", "ON")?;
@@ -41,6 +41,7 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
           is_small_text INTEGER,
           font_family TEXT,
           show_outline INTEGER,
+          show_properties INTEGER,
           position INTEGER NOT NULL,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
@@ -222,6 +223,10 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
         migrate_to_v5(connection)?;
     }
 
+    if current_version < 6 {
+        migrate_to_v6(connection)?;
+    }
+
     connection.execute(
         "INSERT INTO zhiqi_meta (key, value) VALUES ('schema_version', ?1)
           ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -329,6 +334,10 @@ fn migrate_to_v5(connection: &Connection) -> StorageResult<()> {
         ",
     )?;
     Ok(())
+}
+
+fn migrate_to_v6(connection: &Connection) -> StorageResult<()> {
+    ensure_column(connection, "zhiqi_pages", "show_properties", "INTEGER")
 }
 
 fn ensure_column(

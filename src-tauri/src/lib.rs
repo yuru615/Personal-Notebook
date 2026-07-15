@@ -1,8 +1,20 @@
 use std::process::Command;
+#[cfg(target_os = "windows")]
+use std::sync::OnceLock;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WindowEvent,
+};
+#[cfg(target_os = "windows")]
+use windows::{
+    core::w,
+    Win32::{
+        Foundation::{GetLastError, HANDLE, ERROR_ALREADY_EXISTS, WAIT_OBJECT_0},
+        System::Threading::{
+            CreateEventW, CreateMutexW, SetEvent, WaitForSingleObject, INFINITE,
+        },
+    },
 };
 
 mod clipboard_capture;
@@ -18,6 +30,10 @@ const FRONTEND_QUIT_REQUESTED_EVENT: &str = "zhiqi://quit-requested";
 const FRONTEND_TRAY_NEW_NOTE_EVENT: &str = "zhiqi://tray-new-note";
 const FRONTEND_TRAY_OPEN_INBOX_EVENT: &str = "zhiqi://tray-open-inbox";
 const ALLOWED_EXTERNAL_URL_SCHEMES: [&str; 3] = ["http://", "https://", "mailto:"];
+#[cfg(target_os = "windows")]
+static SINGLE_INSTANCE_MUTEX: OnceLock<usize> = OnceLock::new();
+#[cfg(target_os = "windows")]
+static SINGLE_INSTANCE_ACTIVATION_EVENT: OnceLock<usize> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TrayMenuAction {
@@ -41,6 +57,11 @@ impl TrayMenuAction {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "windows")]
+    if !claim_windows_single_instance() {
+        return;
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -105,6 +126,8 @@ pub fn run() {
             app.manage(clipboard_capture_state.clone());
             clipboard_capture::start_clipboard_capture_monitor(app.handle().clone(), clipboard_capture_state);
             setup_tray(app)?;
+            #[cfg(target_os = "windows")]
+            listen_for_windows_single_instance_activation(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -241,6 +264,64 @@ fn request_app_quit_after_frontend_flush<R: tauri::Runtime>(app: &tauri::AppHand
     }
 
     app.exit(0);
+}
+
+fn handle_second_instance<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    show_main_window(app);
+}
+
+#[cfg(target_os = "windows")]
+fn claim_windows_single_instance() -> bool {
+    let activation_event = unsafe {
+        match CreateEventW(
+            None,
+            false,
+            false,
+            w!("Local\\com.zhiqi.desktop.single-instance.activation"),
+        ) {
+            Ok(event) => event,
+            Err(error) => {
+                eprintln!("failed to create single-instance activation event: {error}");
+                return true;
+            }
+        }
+    };
+    let mutex = unsafe {
+        match CreateMutexW(
+            None,
+            false,
+            w!("Local\\com.zhiqi.desktop.single-instance.mutex"),
+        ) {
+            Ok(mutex) => mutex,
+            Err(error) => {
+                eprintln!("failed to create single-instance mutex: {error}");
+                return true;
+            }
+        }
+    };
+
+    if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+        let _ = unsafe { SetEvent(activation_event) };
+        return false;
+    }
+
+    let _ = SINGLE_INSTANCE_MUTEX.set(mutex.0 as usize);
+    let _ = SINGLE_INSTANCE_ACTIVATION_EVENT.set(activation_event.0 as usize);
+    true
+}
+
+#[cfg(target_os = "windows")]
+fn listen_for_windows_single_instance_activation(app: tauri::AppHandle) {
+    let Some(event) = SINGLE_INSTANCE_ACTIVATION_EVENT.get().copied() else {
+        return;
+    };
+
+    std::thread::spawn(move || {
+        let event = HANDLE(event as _);
+        while unsafe { WaitForSingleObject(event, INFINITE) } == WAIT_OBJECT_0 {
+            handle_second_instance(&app);
+        }
+    });
 }
 
 fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {

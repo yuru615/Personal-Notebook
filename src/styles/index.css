@@ -680,14 +680,40 @@ a {
   inset: 12px;
   z-index: 200;
   display: grid;
-  place-items: center;
-  border: 2px dashed var(--app-accent-border);
-  border-radius: 10px;
+  grid-template-columns: var(--app-sidebar-width) minmax(0, 1fr);
+  pointer-events: none;
+}
+
+.app-file-drop-zone {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 6px;
+  padding: 24px;
+  border: 2px dashed transparent;
+  color: #6b6a66;
+  font-size: 13px;
+  text-align: center;
+}
+
+.app-file-drop-zone strong {
+  color: #37352f;
+  font-size: 15px;
+}
+
+.app-file-drop-zone-sidebar {
+  border-radius: 10px 0 0 10px;
+}
+
+.app-file-drop-zone-content {
+  border-radius: 0 10px 10px 0;
+}
+
+.app-file-drop-overlay-sidebar .app-file-drop-zone-sidebar,
+.app-file-drop-overlay-content .app-file-drop-zone-content {
+  border-color: var(--app-accent-border);
   background: var(--app-accent-marquee);
   color: #37352f;
-  font-size: 14px;
-  font-weight: 600;
-  pointer-events: none;
 }
 
 .file-block-copy strong {
@@ -2845,7 +2871,7 @@ a {
   gap: var(--editor-gutter-gap);
   align-items: start;
   min-height: var(--editor-line-box);
-  margin-left: -18px;
+  margin-left: calc(-18px - var(--editor-gutter-gap));
 }
 
 .block-selection-gutter {

@@ -5,6 +5,8 @@ import {
   openLocalFilePath,
   openTextFile,
   pickSaveFilePath,
+  readLocalBinaryFile,
+  readLocalTextFile,
   saveBinaryFile,
   saveTextFile,
 } from './fileAccess'
@@ -192,6 +194,39 @@ describe('fileAccess', () => {
       path: '/tmp/media/clip.mp4',
     })
     expect(fs.readFile).not.toHaveBeenCalled()
+  })
+
+  it('reads a known local text path through Tauri without opening another dialog', async () => {
+    Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    })
+
+    const dialog = await import('@tauri-apps/plugin-dialog')
+    const fs = await import('@tauri-apps/plugin-fs')
+    vi.mocked(fs.readTextFile).mockResolvedValue('# Guide')
+
+    await expect(readLocalTextFile('/tmp/guide.md')).resolves.toBe('# Guide')
+
+    expect(fs.readTextFile).toHaveBeenCalledWith('/tmp/guide.md')
+    expect(dialog.open).not.toHaveBeenCalled()
+  })
+
+  it('reads a known local binary path through Tauri without opening another dialog', async () => {
+    Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    })
+
+    const dialog = await import('@tauri-apps/plugin-dialog')
+    const fs = await import('@tauri-apps/plugin-fs')
+    const bytes = new Uint8Array([80, 75, 3, 4])
+    vi.mocked(fs.readFile).mockResolvedValue(bytes)
+
+    await expect(readLocalBinaryFile('/tmp/会议记录.docx')).resolves.toEqual(bytes)
+
+    expect(fs.readFile).toHaveBeenCalledWith('/tmp/会议记录.docx')
+    expect(dialog.open).not.toHaveBeenCalled()
   })
 
   it('downloads text files in the browser runtime', async () => {

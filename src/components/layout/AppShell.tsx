@@ -7,8 +7,12 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from 'react'
+import { getCurrentWebview } from '@tauri-apps/api/webview'
 import type { AppAccentTheme } from '../../domain/theme'
+import { isDesktopRuntime } from '../../lib/fileAccess'
 import { uiCopy } from '../../ui/copy'
+
+export type FileDropTarget = 'sidebar' | 'content'
 
 interface AppShellProps {
   sidebar: ReactNode
@@ -19,6 +23,7 @@ interface AppShellProps {
   accentTheme?: AppAccentTheme
   onSidebarWidthChange?: (width: number) => void
   onDropFiles?: (files: File[]) => void | Promise<void>
+  onDropFilePaths?: (paths: string[], target: FileDropTarget) => void | Promise<void>
 }
 
 const DEFAULT_SIDEBAR_WIDTH = 272
@@ -42,12 +47,14 @@ export function AppShell({
   accentTheme = 'blue_gray',
   onSidebarWidthChange,
   onDropFiles,
+  onDropFilePaths,
 }: AppShellProps) {
   const [liveSidebarWidth, setLiveSidebarWidth] = useState(() => clampSidebarWidth(sidebarWidth))
   const dragWidthRef = useRef(liveSidebarWidth)
   const pendingPersistWidthRef = useRef<number | null>(null)
   const [isFileDropActive, setIsFileDropActive] = useState(false)
   const fileDragDepthRef = useRef(0)
+  const [fileDropTarget, setFileDropTarget] = useState<FileDropTarget>('content')
 
   useEffect(() => {
     const nextWidth = clampSidebarWidth(sidebarWidth)
@@ -71,6 +78,56 @@ export function AppShell({
       window.removeEventListener('resize', handleResize)
     }
   }, [hideSidebar])
+
+  useEffect(() => {
+    if (!isDesktopRuntime() || !onDropFilePaths) {
+      return
+    }
+
+    let isActive = true
+    let unlisten: (() => void) | null = null
+    const targetAt = (positionX: number): FileDropTarget =>
+      positionX < liveSidebarWidth * (window.devicePixelRatio || 1) ? 'sidebar' : 'content'
+
+    void getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (!isActive) {
+          return
+        }
+
+        const { payload } = event
+
+        if (payload.type === 'leave') {
+          setIsFileDropActive(false)
+          return
+        }
+
+        const target = targetAt(payload.position.x)
+        setFileDropTarget(target)
+
+        if (payload.type === 'drop') {
+          setIsFileDropActive(false)
+          void Promise.resolve(onDropFilePaths(payload.paths, target)).catch(() => undefined)
+          return
+        }
+
+        setIsFileDropActive(true)
+      })
+      .then((nextUnlisten) => {
+        if (isActive) {
+          unlisten = nextUnlisten
+          return
+        }
+
+        nextUnlisten()
+      })
+      .catch(() => undefined)
+
+    return () => {
+      isActive = false
+      unlisten?.()
+    }
+  }, [liveSidebarWidth, onDropFilePaths])
 
   function handleResizeStart(event: ReactMouseEvent<HTMLButtonElement>) {
     event.preventDefault()
@@ -119,20 +176,24 @@ export function AppShell({
       data-accent-theme={accentTheme}
       style={shellStyle}
       onDragEnter={(event) => {
+        if (isDesktopRuntime()) return
         if (!Array.from(event.dataTransfer.types).includes('Files')) return
         event.preventDefault()
         fileDragDepthRef.current += 1
         setIsFileDropActive(true)
       }}
       onDragOver={(event) => {
+        if (isDesktopRuntime()) return
         if (Array.from(event.dataTransfer.types).includes('Files')) event.preventDefault()
       }}
       onDragLeave={(event) => {
+        if (isDesktopRuntime()) return
         if (!Array.from(event.dataTransfer.types).includes('Files')) return
         fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1)
         if (fileDragDepthRef.current === 0) setIsFileDropActive(false)
       }}
       onDrop={(event) => {
+        if (isDesktopRuntime()) return
         const files = Array.from(event.dataTransfer.files)
         if (files.length === 0) return
         event.preventDefault()
@@ -141,7 +202,18 @@ export function AppShell({
         void onDropFiles?.(files)
       }}
     >
-      {isFileDropActive ? <div className="app-file-drop-overlay">松开以导入到收件箱</div> : null}
+      {isFileDropActive ? (
+        <div className={`app-file-drop-overlay app-file-drop-overlay-${fileDropTarget}`} aria-live="polite">
+          <div className="app-file-drop-zone app-file-drop-zone-sidebar">
+            <strong>拖入左侧</strong>
+            <span>创建顶级页面，附件进入收件箱</span>
+          </div>
+          <div className="app-file-drop-zone app-file-drop-zone-content">
+            <strong>拖入正文</strong>
+            <span>创建子页面，附件追加到当前页面</span>
+          </div>
+        </div>
+      ) : null}
       {hideSidebar ? null : (
         <>
           <aside className={sidebarClassName} aria-label={uiCopy.sidebar.ariaLabel}>

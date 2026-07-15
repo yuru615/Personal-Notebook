@@ -40,7 +40,7 @@ async function createVideoFirstFramePoster(assetUrl: string): Promise<string | n
 
   return new Promise((resolve) => {
     const video = document.createElement('video')
-    let timeoutId: ReturnType<typeof window.setTimeout> | null = null
+    let timeoutId: number | null = null
     let settled = false
 
     const settle = (posterUrl: string | null) => {

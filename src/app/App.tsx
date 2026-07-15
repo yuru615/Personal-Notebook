@@ -26,7 +26,7 @@ import {
   ExportImportPanel,
   type ArchiveTaskStatus,
 } from '../components/export/ExportImportPanel'
-import { AppShell } from '../components/layout/AppShell'
+import { AppShell, type FileDropTarget } from '../components/layout/AppShell'
 import { SearchDialog } from '../components/search/SearchDialog'
 import {
   DEFAULT_SETTINGS_SECTION,
@@ -64,6 +64,8 @@ import type {
 import type { AppAccentTheme } from '../domain/theme'
 import { collectPageRelationMatches } from '../domain/pageRelations'
 import { createInboxFileBlock } from '../domain/inboxFileImport'
+import { parseDocxPage } from '../domain/docxImport'
+import { parsePdfPage } from '../domain/pdfImport'
 import { parseMarkdownPage, type MarkdownImportBlock } from '../domain/markdownImport'
 import {
   createStorageWorkspaceRepository,
@@ -76,7 +78,10 @@ import {
   exportPagePackage,
   importPagePackageFromPath,
   importPagePackage,
+  importFileAssetFromPath,
+  readAssetBytesFromUrl,
   importMarkdownImageAsset,
+  writeAssetBytes,
   writeFileAsset,
 } from '../lib/assets'
 import {
@@ -88,9 +93,11 @@ import {
   openBinaryFile,
   openLocalFilePath,
   openTextFile,
+  readLocalTextFile,
   pickSaveFilePath,
   saveBinaryFile,
   saveTextFile,
+  type OpenedTextFile,
 } from '../lib/fileAccess'
 import { createWorkspaceStore, type McpWorkspaceUpdate } from '../store/createWorkspaceStore'
 import { uiCopy } from '../ui/copy'
@@ -117,6 +124,9 @@ const ZHIQI_ARCHIVE_FILE_FILTER = [{ name: '知栖归档', extensions: ['zhiqi']
 const PAGE_IMPORT_FILE_FILTER = [{ name: '知栖页面包', extensions: ['zhiqi', 'zip'] }]
 const WORKSPACE_IMPORT_FILE_FILTER = [{ name: '知栖工作区备份', extensions: ['zhiqi', 'json'] }]
 const MARKDOWN_FILE_FILTER = [{ name: 'Markdown', extensions: ['md', 'markdown'] }]
+const CONTENT_IMPORT_FILE_FILTER = [
+  { name: '知栖内容', extensions: ['zhiqi', 'zip', 'md', 'markdown'] },
+]
 
 function archiveErrorMessage(error: unknown, target: 'page' | 'workspace') {
   const code =
@@ -133,6 +143,58 @@ function archiveErrorMessage(error: unknown, target: 'page' | 'workspace') {
   if (code === 'archive_missing_asset') return uiCopy.export.archiveMissingAsset
   if (code === 'archive_corrupt') return uiCopy.export.archiveCorrupt
   return target === 'page' ? uiCopy.export.importError : uiCopy.export.workspaceImportError
+}
+
+function isMarkdownFile(name: string) {
+  const extension = name.toLowerCase().split('.').pop()
+  return extension === 'md' || extension === 'markdown'
+}
+
+function fileNameFromPath(path: string) {
+  return path.split(/[\\/]/).pop() || path
+}
+
+type DroppedFileKind = 'docx' | 'pdf' | 'markdown' | 'protected_archive' | 'potential_backup_json' | 'attachment'
+
+function getDroppedFileKind(name: string): DroppedFileKind {
+  const extension = name.toLowerCase().split('.').pop()
+
+  if (extension === 'docx') return 'docx'
+  if (extension === 'pdf') return 'pdf'
+  if (extension === 'md' || extension === 'markdown' || extension === 'txt') return 'markdown'
+  if (extension === 'zhiqi') return 'protected_archive'
+  if (extension === 'json') return 'potential_backup_json'
+  return 'attachment'
+}
+
+async function isWorkspaceBackupJson(file: File) {
+  try {
+    const value = JSON.parse(new TextDecoder().decode(await file.arrayBuffer())) as Record<string, unknown>
+    return (
+      Array.isArray(value.pages) &&
+      Array.isArray(value.boards) &&
+      typeof value.settings === 'object' &&
+      value.settings !== null &&
+      'lastOpenedPageId' in value.settings
+    )
+  } catch {
+    return false
+  }
+}
+
+async function isWorkspaceBackupJsonPath(path: string) {
+  try {
+    const value = JSON.parse(await readLocalTextFile(path)) as Record<string, unknown>
+    return (
+      Array.isArray(value.pages) &&
+      Array.isArray(value.boards) &&
+      typeof value.settings === 'object' &&
+      value.settings !== null &&
+      'lastOpenedPageId' in value.settings
+    )
+  } catch {
+    return false
+  }
 }
 
 const DataTablePage = lazy(() =>
@@ -584,22 +646,161 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
   }
 
   async function importDroppedFiles(files: File[]) {
-    const blocks = await Promise.all(
-      files.map(async (file) => {
-        const asset = await writeFileAsset(file)
-        return createInboxFileBlock({
+    const blocks: BlockRecord[] = []
+
+    for (const file of files) {
+      const asset = await writeFileAsset(file)
+      blocks.push(
+        createInboxFileBlock({
           assetId: asset.id,
           name: asset.name,
           mimeType: asset.mimeType,
-        })
-      }),
-    )
+        }),
+      )
+    }
+
     await store.getState().appendClipboardCaptureToInbox(blocks, undefined, '拖拽导入')
   }
 
-  async function importMarkdownPage() {
-    const file = await openTextFile({ filters: MARKDOWN_FILE_FILTER })
+  async function importDocxFile(file: File, parentId?: string) {
+    try {
+      const parsed = await parseDocxPage(file.name, new Uint8Array(await file.arrayBuffer()))
+      await store.getState().flushPendingSaves()
+      const imageAssets = await Promise.all(
+        parsed.images.map(async (image) => ({
+          blockId: image.blockId,
+          asset: await writeAssetBytes({
+            name: image.name,
+            mimeType: image.mimeType,
+            bytes: image.bytes,
+          }),
+        })),
+      )
+      const imageAssetsByBlockId = new Map(imageAssets.map(({ blockId, asset }) => [blockId, asset]))
+      const originalFileAsset = await writeFileAsset(file)
+      const blocks = [
+        ...parsed.blocks.map((block) => {
+          const asset = block.type === 'image' ? imageAssetsByBlockId.get(block.id) : null
+          return asset ? { ...block, assetId: asset.id, name: asset.name, mimeType: asset.mimeType } : block
+        }),
+        createInboxFileBlock({
+          assetId: originalFileAsset.id,
+          name: originalFileAsset.name,
+          mimeType: originalFileAsset.mimeType,
+        }),
+      ]
+      const page = parentId
+        ? await store.getState().createChildPage(parentId, { title: parsed.title, blocks })
+        : await store.getState().createPage(undefined, { title: parsed.title, blocks })
 
+      return page.id
+    } catch {
+      window.alert('Word 文档导入失败，请检查文件内容后重试。')
+      return null
+    }
+  }
+
+  async function importDocxPath(path: string, parentId?: string) {
+    try {
+      const originalFileAsset = await importFileAssetFromPath(path)
+      const parsed = await parseDocxPage(
+        fileNameFromPath(path),
+        await readAssetBytesFromUrl(originalFileAsset.id),
+      )
+      await store.getState().flushPendingSaves()
+      const imageAssets = await Promise.all(
+        parsed.images.map(async (image) => ({
+          blockId: image.blockId,
+          asset: await writeAssetBytes({
+            name: image.name,
+            mimeType: image.mimeType,
+            bytes: image.bytes,
+          }),
+        })),
+      )
+      const imageAssetsByBlockId = new Map(imageAssets.map(({ blockId, asset }) => [blockId, asset]))
+      const blocks = [
+        ...parsed.blocks.map((block) => {
+          const asset = block.type === 'image' ? imageAssetsByBlockId.get(block.id) : null
+          return asset ? { ...block, assetId: asset.id, name: asset.name, mimeType: asset.mimeType } : block
+        }),
+        createInboxFileBlock({
+          assetId: originalFileAsset.id,
+          name: originalFileAsset.name,
+          mimeType: originalFileAsset.mimeType,
+        }),
+      ]
+      const page = parentId
+        ? await store.getState().createChildPage(parentId, { title: parsed.title, blocks })
+        : await store.getState().createPage(undefined, { title: parsed.title, blocks })
+
+      return page.id
+    } catch {
+      window.alert('Word 文档导入失败，请检查文件内容后重试。')
+      return null
+    }
+  }
+
+  async function importPdfFile(file: File, parentId?: string) {
+    try {
+      const parsed = await parsePdfPage(file.name, new Uint8Array(await file.arrayBuffer()))
+      await store.getState().flushPendingSaves()
+      const originalFileAsset = await writeFileAsset(file)
+      const blocks = [
+        ...parsed.blocks,
+        createInboxFileBlock({
+          assetId: originalFileAsset.id,
+          name: originalFileAsset.name,
+          mimeType: originalFileAsset.mimeType,
+        }),
+      ]
+      const page = parentId
+        ? await store.getState().createChildPage(parentId, { title: parsed.title, blocks })
+        : await store.getState().createPage(undefined, { title: parsed.title, blocks })
+
+      return page.id
+    } catch (error) {
+      window.alert(
+        error instanceof Error && error.message.includes('未检测到可编辑文本')
+          ? error.message
+          : 'PDF 导入失败，请检查文件内容后重试。',
+      )
+      return null
+    }
+  }
+
+  async function importPdfPath(path: string, parentId?: string) {
+    try {
+      const originalFileAsset = await importFileAssetFromPath(path)
+      const parsed = await parsePdfPage(
+        fileNameFromPath(path),
+        await readAssetBytesFromUrl(originalFileAsset.id),
+      )
+      await store.getState().flushPendingSaves()
+      const blocks = [
+        ...parsed.blocks,
+        createInboxFileBlock({
+          assetId: originalFileAsset.id,
+          name: originalFileAsset.name,
+          mimeType: originalFileAsset.mimeType,
+        }),
+      ]
+      const page = parentId
+        ? await store.getState().createChildPage(parentId, { title: parsed.title, blocks })
+        : await store.getState().createPage(undefined, { title: parsed.title, blocks })
+
+      return page.id
+    } catch (error) {
+      window.alert(
+        error instanceof Error && error.message.includes('未检测到可编辑文本')
+          ? error.message
+          : 'PDF 导入失败，请检查文件内容后重试。',
+      )
+      return null
+    }
+  }
+
+  async function importMarkdownFile(file: OpenedTextFile | null, parentId?: string) {
     if (!file) {
       return store.getState().currentPageId
     }
@@ -608,15 +809,233 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       const parsed = parseMarkdownPage(file.name, file.contents)
       const blocks = await resolveMarkdownImportBlocks(parsed.blocks, file.path)
       await store.getState().flushPendingSaves()
-      const page = await store.getState().createPage(undefined, {
-        title: parsed.title,
-        blocks,
-      })
+      const page = parentId
+        ? await store.getState().createChildPage(parentId, { title: parsed.title, blocks })
+        : await store.getState().createPage(undefined, { title: parsed.title, blocks })
       return page.id
     } catch {
       window.alert('Markdown 导入失败，请检查文件内容后重试。')
+      return null
+    }
+  }
+
+  async function importDroppedFilesForTarget(files: File[], parentId?: string) {
+    let lastImportedPageId: string | null = null
+    let hasProtectedArchive = false
+
+    async function appendAttachment(file: File) {
+      const asset = await writeFileAsset(file)
+      const block = createInboxFileBlock({
+        assetId: asset.id,
+        name: asset.name,
+        mimeType: asset.mimeType,
+      })
+
+      if (parentId) {
+        await store.getState().pasteBlocks(parentId, null, [block])
+      } else {
+        await store.getState().appendClipboardCaptureToInbox([block], undefined, '拖拽导入')
+      }
+    }
+
+    for (const file of files) {
+      switch (getDroppedFileKind(file.name)) {
+        case 'docx': {
+          const pageId = await importDocxFile(file, parentId)
+          if (pageId) lastImportedPageId = pageId
+          break
+        }
+        case 'pdf': {
+          const pageId = await importPdfFile(file, parentId)
+          if (pageId) lastImportedPageId = pageId
+          break
+        }
+        case 'markdown': {
+          const pageId = await importMarkdownFile(
+            {
+              name: file.name,
+              contents: new TextDecoder().decode(await file.arrayBuffer()),
+            },
+            parentId,
+          )
+          if (pageId) lastImportedPageId = pageId
+          break
+        }
+        case 'protected_archive':
+          hasProtectedArchive = true
+          break
+        case 'potential_backup_json':
+          if (await isWorkspaceBackupJson(file)) {
+            hasProtectedArchive = true
+          } else {
+            await appendAttachment(file)
+          }
+          break
+        case 'attachment':
+          await appendAttachment(file)
+          break
+      }
+    }
+
+    if (hasProtectedArchive) {
+      window.alert('知栖页面包和完整备份请通过“导入内容”或“完整备份”入口导入。')
+    }
+
+    return lastImportedPageId
+  }
+
+  async function importDroppedPathsForTarget(paths: string[], parentId?: string) {
+    let lastImportedPageId: string | null = null
+    let hasProtectedArchive = false
+
+    async function appendAttachment(path: string) {
+      const asset = await importFileAssetFromPath(path)
+      const block = createInboxFileBlock({
+        assetId: asset.id,
+        name: asset.name,
+        mimeType: asset.mimeType,
+      })
+
+      if (parentId) {
+        await store.getState().pasteBlocks(parentId, null, [block])
+      } else {
+        await store.getState().appendClipboardCaptureToInbox([block], undefined, '拖拽导入')
+      }
+    }
+
+    for (const path of paths) {
+      switch (getDroppedFileKind(fileNameFromPath(path))) {
+        case 'docx': {
+          const pageId = await importDocxPath(path, parentId)
+          if (pageId) lastImportedPageId = pageId
+          break
+        }
+        case 'pdf': {
+          const pageId = await importPdfPath(path, parentId)
+          if (pageId) lastImportedPageId = pageId
+          break
+        }
+        case 'markdown': {
+          const pageId = await importMarkdownFile(
+            {
+              name: fileNameFromPath(path),
+              contents: await readLocalTextFile(path),
+              path,
+            },
+            parentId,
+          )
+          if (pageId) lastImportedPageId = pageId
+          break
+        }
+        case 'protected_archive':
+          hasProtectedArchive = true
+          break
+        case 'potential_backup_json':
+          if (await isWorkspaceBackupJsonPath(path)) {
+            hasProtectedArchive = true
+          } else {
+            await appendAttachment(path)
+          }
+          break
+        case 'attachment':
+          await appendAttachment(path)
+          break
+      }
+    }
+
+    if (hasProtectedArchive) {
+      window.alert('知栖页面包和完整备份请通过“导入内容”或“完整备份”入口导入。')
+    }
+
+    return lastImportedPageId
+  }
+
+  async function importMarkdownPage() {
+    return importMarkdownFile(await openTextFile({ filters: MARKDOWN_FILE_FILTER }))
+  }
+
+  async function importPageArchiveRequest(
+    importArchive: () => Promise<{ rootPageId: string }>,
+    initialPercent: number,
+  ) {
+    if (!window.confirm(uiCopy.export.importConfirm)) {
       return store.getState().currentPageId
     }
+
+    try {
+      showArchiveTask({ label: uiCopy.export.preparingImport, percent: 0 })
+      await store.getState().flushPendingSaves()
+      showArchiveTask({ label: uiCopy.export.importingArchive, percent: initialPercent })
+      const result = await importArchive()
+      showArchiveTask({ label: uiCopy.export.refreshingWorkspace, percent: 95 })
+      await store.getState().bootstrap()
+      finishArchiveTask(uiCopy.export.importComplete)
+      return result.rootPageId
+    } catch (error) {
+      const message = archiveErrorMessage(error, 'page')
+      failArchiveTask(message)
+      window.alert(message)
+      return store.getState().currentPageId
+    }
+  }
+
+  async function importPageArchiveFromPath(path: string) {
+    return importPageArchiveRequest(
+      () =>
+        importPagePackageFromPath(path, (progress) => {
+          showArchiveProgress(uiCopy.export.importingArchive, progress)
+        }),
+      0,
+    )
+  }
+
+  async function importPageArchiveFromBytes(contents: Uint8Array) {
+    return importPageArchiveRequest(() => importPagePackage(contents), 20)
+  }
+
+  async function importPageArchive() {
+    if (isDesktopRuntime()) {
+      const file = await openLocalFilePath({ filters: PAGE_IMPORT_FILE_FILTER })
+      return file ? importPageArchiveFromPath(file.path) : store.getState().currentPageId
+    }
+
+    const file = await openBinaryFile({ filters: PAGE_IMPORT_FILE_FILTER })
+    return file ? importPageArchiveFromBytes(file.contents) : store.getState().currentPageId
+  }
+
+  async function importContent() {
+    if (isDesktopRuntime()) {
+      const file = await openLocalFilePath({ filters: CONTENT_IMPORT_FILE_FILTER })
+
+      if (!file) {
+        return store.getState().currentPageId
+      }
+
+      if (isMarkdownFile(file.name)) {
+        try {
+          return await importMarkdownFile({
+            name: file.name,
+            path: file.path,
+            contents: await readLocalTextFile(file.path),
+          })
+        } catch {
+          window.alert('Markdown 导入失败，请检查文件内容后重试。')
+          return store.getState().currentPageId
+        }
+      }
+
+      return importPageArchiveFromPath(file.path)
+    }
+
+    const file = await openBinaryFile({ filters: CONTENT_IMPORT_FILE_FILTER })
+
+    if (!file) {
+      return store.getState().currentPageId
+    }
+
+    return isMarkdownFile(file.name)
+      ? importMarkdownFile({ name: file.name, contents: new TextDecoder().decode(file.contents) })
+      : importPageArchiveFromBytes(file.contents)
   }
 
   if (!isBootstrapped) {
@@ -813,64 +1232,11 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onExportWorkspace={exportWorkspaceSnapshot}
       onImportWorkspace={importWorkspaceSnapshot}
       onImportMarkdown={importMarkdownPage}
+      onImportContent={importContent}
       onDropFiles={importDroppedFiles}
-      onImportArchive={async () => {
-        if (isDesktopRuntime()) {
-          const file = await openLocalFilePath({ filters: PAGE_IMPORT_FILE_FILTER })
-
-          if (!file) {
-            return store.getState().currentPageId
-          }
-
-          if (!window.confirm(uiCopy.export.importConfirm)) {
-            return store.getState().currentPageId
-          }
-
-          try {
-            showArchiveTask({ label: uiCopy.export.preparingImport, percent: 0 })
-            await store.getState().flushPendingSaves()
-            showArchiveTask({ label: uiCopy.export.importingArchive, percent: 0 })
-            const result = await importPagePackageFromPath(file.path, (progress) => {
-              showArchiveProgress(uiCopy.export.importingArchive, progress)
-            })
-            showArchiveTask({ label: uiCopy.export.refreshingWorkspace, percent: 95 })
-            await store.getState().bootstrap()
-            finishArchiveTask(uiCopy.export.importComplete)
-            return result.rootPageId
-          } catch (error) {
-            const message = archiveErrorMessage(error, 'page')
-            failArchiveTask(message)
-            window.alert(message)
-            return store.getState().currentPageId
-          }
-        }
-
-        const file = await openBinaryFile({ filters: PAGE_IMPORT_FILE_FILTER })
-
-        if (!file) {
-          return store.getState().currentPageId
-        }
-
-        if (!window.confirm(uiCopy.export.importConfirm)) {
-          return store.getState().currentPageId
-        }
-
-        try {
-          showArchiveTask({ label: uiCopy.export.preparingImport, percent: 0 })
-          await store.getState().flushPendingSaves()
-          showArchiveTask({ label: uiCopy.export.importingArchive, percent: 20 })
-          const result = await importPagePackage(file.contents)
-          showArchiveTask({ label: uiCopy.export.refreshingWorkspace, percent: 95 })
-          await store.getState().bootstrap()
-          finishArchiveTask(uiCopy.export.importComplete)
-          return result.rootPageId
-        } catch (error) {
-          const message = archiveErrorMessage(error, 'page')
-          failArchiveTask(message)
-          window.alert(message)
-          return store.getState().currentPageId
-        }
-      }}
+      onDropFilesForTarget={importDroppedFilesForTarget}
+      onDropFilePathsForTarget={importDroppedPathsForTarget}
+      onImportArchive={importPageArchive}
       onCleanupOrphanBoards={() => store.getState().cleanupOrphanBoards()}
       onCleanupOrphanDataTables={() => store.getState().cleanupOrphanDataTables()}
       onCleanupOrphanAssets={() => store.getState().cleanupOrphanAssets()}
@@ -957,9 +1323,12 @@ interface AppRoutesProps {
   ) => Promise<void>
   onTogglePinnedSidebarItem: (item: SidebarPinnedItem) => Promise<void>
   onEnsureInboxPage: () => Promise<PageRecord>
+  onImportContent: () => Promise<string | null>
   onImportWorkspace: () => Promise<string | null>
   onImportMarkdown: () => Promise<string | null>
   onDropFiles: (files: File[]) => Promise<void>
+  onDropFilesForTarget: (files: File[], parentId?: string) => Promise<string | null>
+  onDropFilePathsForTarget: (paths: string[], parentId?: string) => Promise<string | null>
   onRoutePageChange: (pageId: string) => Promise<void>
   onRenamePage: (pageId: string, title: string) => Promise<void>
   onDuplicatePage: (pageId: string) => Promise<PageRecord | null>
@@ -1113,8 +1482,11 @@ function AppRoutes({
   onSetSearchPreferences,
   onTogglePinnedSidebarItem,
   onEnsureInboxPage,
+  onImportContent,
   onImportWorkspace,
   onDropFiles,
+  onDropFilesForTarget,
+  onDropFilePathsForTarget,
   onRoutePageChange,
   onRenamePage,
   onDuplicatePage,
@@ -1216,6 +1588,14 @@ function AppRoutes({
     }
   }
 
+  async function handleImportContentFromSidebar() {
+    const nextPageId = await onImportContent()
+
+    if (nextPageId) {
+      navigate(`/pages/${nextPageId}`)
+    }
+  }
+
   async function handleImportMarkdownFromSidebar() {
     const nextPageId = await onImportMarkdown()
 
@@ -1276,6 +1656,15 @@ function AppRoutes({
         void onSetSidebarWidth(width)
       }}
       onDropFiles={onDropFiles}
+      onDropFilePaths={async (paths, target: FileDropTarget) => {
+        const pageId = await onDropFilePathsForTarget(
+          paths,
+          target === 'content' ? currentPageId ?? undefined : undefined,
+        )
+        if (pageId) {
+          navigate(`/pages/${pageId}`)
+        }
+      }}
       sidebar={
         <SidebarTree
           pages={pages}
@@ -1288,6 +1677,15 @@ function AppRoutes({
             void handleCreatePage()
           }}
           onSearch={() => setIsSearchOpen(true)}
+          onImportContent={() => {
+            void handleImportContentFromSidebar()
+          }}
+          onDropFiles={async (files) => {
+            const pageId = await onDropFilesForTarget(files)
+            if (pageId) {
+              navigate(`/pages/${pageId}`)
+            }
+          }}
           onImportArchive={() => {
             void handleImportArchiveFromSidebar()
           }}
@@ -1415,6 +1813,7 @@ function AppRoutes({
                 linkOpenMode={workspaceSettings.linkOpenMode}
                 archiveTask={archiveTask}
                 onCreatePage={onCreatePage}
+                onDropFilesForTarget={onDropFilesForTarget}
                 onRoutePageChange={onRoutePageChange}
                 onRenamePage={onRenamePage}
                 onDeletePage={handleRequestDeletePage}
@@ -1716,6 +2115,7 @@ interface PageRouteProps {
   linkOpenMode?: NonNullable<WorkspaceSettings['linkOpenMode']>
   archiveTask: ArchiveTaskStatus | null
   onCreatePage: (parentId?: string, options?: CreatePageOptions) => Promise<PageRecord>
+  onDropFilesForTarget: (files: File[], parentId?: string) => Promise<string | null>
   onRoutePageChange: (pageId: string) => Promise<void>
   onRenamePage: (pageId: string, title: string) => Promise<void>
   onDeletePage: (pageId: string) => void
@@ -1829,6 +2229,7 @@ function PageRoute({
   linkOpenMode,
   archiveTask,
   onCreatePage,
+  onDropFilesForTarget,
   onRoutePageChange,
   onRenamePage,
   onDeletePage,
@@ -1992,6 +2393,33 @@ function PageRoute({
           ? 'page-with-outline page-with-outline-has-outline'
           : 'page-with-outline page-with-outline-hidden'
       }
+      onDragOver={(event) => {
+        if (isDesktopRuntime()) {
+          return
+        }
+
+        if (!Array.from(event.dataTransfer.types).includes('Files')) {
+          return
+        }
+
+        event.preventDefault()
+        event.stopPropagation()
+      }}
+      onDrop={(event) => {
+        if (isDesktopRuntime()) {
+          return
+        }
+
+        const files = Array.from(event.dataTransfer.files)
+
+        if (files.length === 0) {
+          return
+        }
+
+        event.preventDefault()
+        event.stopPropagation()
+        void onDropFilesForTarget(files, page.id)
+      }}
     >
       <div className={topbarScrolled ? 'page-route-topbar page-route-topbar-scrolled' : 'page-route-topbar'}>
         {breadcrumbs.length > 1 ? (

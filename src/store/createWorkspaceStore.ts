@@ -113,6 +113,7 @@ export interface WorkspaceState {
   bootstrap: () => Promise<void>
   ensureInboxPage: () => Promise<PageRecord>
   createPage: (parentId?: PageId, options?: CreatePageOptions) => Promise<PageRecord>
+  createChildPage: (parentId: PageId, options?: CreatePageOptions) => Promise<PageRecord>
   setCurrentPage: (pageId: PageId) => Promise<void>
   setAppCloseAction: (closeAction: AppCloseAction) => Promise<void>
   setAppAccentTheme: (theme: AppAccentTheme) => Promise<void>
@@ -263,6 +264,9 @@ function createEmptyState(): WorkspaceState {
       throw new Error('not implemented')
     },
     createPage: async () => {
+      throw new Error('not implemented')
+    },
+    createChildPage: async () => {
       throw new Error('not implemented')
     },
     setCurrentPage: async () => {
@@ -1690,6 +1694,75 @@ export function createWorkspaceStore(
       }
     }
 
+    async function createStoredPage(
+      parentId: PageId | undefined,
+      options: CreatePageOptions | undefined,
+      appendParentBlock: boolean,
+    ) {
+      const state = get()
+
+      if (appendParentBlock && (!parentId || !state.pages.some((page) => page.id === parentId))) {
+        throw new Error('Parent page not found')
+      }
+
+      const page = {
+        ...createPageRecord(parentId, options?.title, getPageDefaults(state.settings)),
+        blocks: options?.blocks ?? [],
+      }
+      const nextCurrentPageId = options?.setCurrent === false ? state.currentPageId : page.id
+      const nextSettings = createSettings(
+        nextCurrentPageId,
+        state.settings.sidebarLayout ?? 'compact',
+        state.settings.sidebarWidth ?? 272,
+        state.settings.pinnedSidebarItems ?? [],
+        state.settings.inboxPageId ?? null,
+        state.settings.welcomePageId ?? null,
+        getClipboardCaptureMode(state.settings),
+        getPageDefaults(state.settings),
+        getSearchPreferences(state.settings),
+        getBlockSelectionStartMode(state.settings),
+        getLinkOpenMode(state.settings),
+      )
+      const nextPages = appendParentBlock
+        ? state.pages.map((existingPage) =>
+            existingPage.id === parentId
+              ? {
+                  ...existingPage,
+                  updatedAt: page.createdAt,
+                  blocks: [
+                    ...existingPage.blocks,
+                    { id: createId('block'), type: 'child_page' as const, pageId: page.id },
+                  ],
+                }
+              : existingPage,
+          )
+        : state.pages
+      const nextSnapshot = createSnapshotFromState({
+        ...state,
+        pages: [...nextPages, page],
+        settings: nextSettings,
+      })
+
+      pushUndoSnapshot(state)
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save(nextSnapshot)
+        set({
+          boards: nextSnapshot.boards,
+          pages: nextSnapshot.pages,
+          settings: nextSettings,
+          currentPageId: nextCurrentPageId,
+          saveStatus: 'saved',
+        })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to create page')
+      }
+
+      return page
+    }
+
     return {
     ...createEmptyState(),
 
@@ -1797,51 +1870,11 @@ export function createWorkspaceStore(
       return inboxPage
     },
 
-    createPage: async (parentId?: PageId, options?: CreatePageOptions) => {
-      const state = get()
-      const page = {
-        ...createPageRecord(parentId, options?.title, getPageDefaults(state.settings)),
-        blocks: options?.blocks ?? [],
-      }
-      const nextCurrentPageId = options?.setCurrent === false ? state.currentPageId : page.id
-      const nextSettings = createSettings(
-        nextCurrentPageId,
-        state.settings.sidebarLayout ?? 'compact',
-        state.settings.sidebarWidth ?? 272,
-        state.settings.pinnedSidebarItems ?? [],
-        state.settings.inboxPageId ?? null,
-        state.settings.welcomePageId ?? null,
-        getClipboardCaptureMode(state.settings),
-        getPageDefaults(state.settings),
-        getSearchPreferences(state.settings),
-        getBlockSelectionStartMode(state.settings),
-        getLinkOpenMode(state.settings),
-      )
-      const nextSnapshot = createSnapshotFromState({
-        ...state,
-        pages: [...state.pages, page],
-        settings: nextSettings,
-      })
+    createPage: (parentId?: PageId, options?: CreatePageOptions) =>
+      createStoredPage(parentId, options, false),
 
-      pushUndoSnapshot(state)
-      set({ saveStatus: 'saving' })
-
-      try {
-        await repository.save(nextSnapshot)
-        set({
-          boards: nextSnapshot.boards,
-          pages: nextSnapshot.pages,
-          settings: nextSettings,
-          currentPageId: nextCurrentPageId,
-          saveStatus: 'saved',
-        })
-      } catch {
-        set({ saveStatus: 'error' })
-        throw new Error('Failed to create page')
-      }
-
-      return page
-    },
+    createChildPage: (parentId: PageId, options?: CreatePageOptions) =>
+      createStoredPage(parentId, options, true),
 
     setCurrentPage: async (pageId: PageId) => {
       await flushPendingSaves()

@@ -216,6 +216,7 @@ impl LocalMcpServer {
             is_small_text: None,
             font_family: None,
             show_outline: None,
+            show_properties: None,
             blocks: Vec::new(),
             created_at: now.clone(),
             updated_at: now,

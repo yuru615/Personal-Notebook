@@ -178,6 +178,16 @@ export async function openLocalFilePath(options: OpenLocalFilePathOptions) {
   }
 }
 
+export async function readLocalTextFile(path: string) {
+  const { readTextFile } = await import('@tauri-apps/plugin-fs')
+  return readTextFile(path)
+}
+
+export async function readLocalBinaryFile(path: string) {
+  const { readFile } = await import('@tauri-apps/plugin-fs')
+  return readFile(path)
+}
+
 async function pickSavePath(defaultPath: string, filters: FileAccessFilter[]) {
   const { save } = await import('@tauri-apps/plugin-dialog')
   return normalizeTauriPath(await save({ defaultPath, filters }))

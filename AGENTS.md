@@ -97,7 +97,7 @@ npm run test:watch
 - `npm run tauri:dev`：启动 Tauri 桌面开发模式，会自动拉起 Vite。
 - `npm run tauri:build`：按当前平台构建并打包桌面应用。
 - `npm run tauri:build:mac`：在 macOS 上打包 `.app` 和 `.dmg`。
-- `npm run tauri:build:windows`：在 Windows 上打包 NSIS `.exe` 和 MSI `.msi`。
+- `npm run tauri:build:windows`：在 Windows 上仅打包 NSIS `.exe` 安装包。
 - `npm run tauri:build:windows:cross`：通过 `cargo-xwin` 交叉构建 x64 Windows NSIS 安装包。
 
 运行单个测试示例：
@@ -117,7 +117,7 @@ npx vitest run -t "restores window"
 ## 桌面端边界
 
 - Tauri 配置集中在 `src-tauri/tauri.conf.json`。其中 `beforeDevCommand`/`beforeBuildCommand` 连接 Vite 构建，`devUrl` 是 `http://localhost:5173`，`frontendDist` 指向 `../dist`。
-- Windows 打包覆盖配置在 `src-tauri/tauri.windows.conf.json`，包含 NSIS/MSI、WebView2 bootstrapper、WiX upgrade code、安装语言和 currentUser 安装模式。
+- Windows 打包覆盖配置在 `src-tauri/tauri.windows.conf.json`，包含 NSIS/MSI、WebView2 bootstrapper、WiX upgrade code、安装语言和 currentUser 安装模式；后续实际发布只构建 NSIS 安装包，不构建 MSI。
 - Rust 入口在 `src-tauri/src/lib.rs`，注册 dialog/fs 插件和自定义 storage commands，声明 `open_external_url` 命令，创建系统托盘，并把主窗口关闭行为改为隐藏到托盘。
 - Tauri 权限集中在 `src-tauri/capabilities/default.json`。新增或收紧前端可调用能力时，同步检查 capability、插件注册、前端调用和打包。
 - 外部链接统一走 `src/lib/externalLinks.ts`：桌面端调用 Rust `open_external_url`，只允许 `http://`、`https://`、`mailto:`；浏览器环境回退到 `window.open`。
@@ -166,7 +166,7 @@ npx vitest run -t "restores window"
 - 不要直接编辑 `package-lock.json`、`public/mindmap-web/assets/*` 或静态 bundle 资源，除非任务明确涉及依赖安装、静态 bundle 更新或相关修复。
 - 不要提交 `src-tauri/target/`、`.app`、`.dmg`、`.msi`、NSIS `.exe` 等构建产物；Tauri schema、capabilities、平台配置、图标和 `Cargo.lock` 这类源码/配置文件可以随代码提交。
 - 对本地优先数据保持谨慎：导入、导出、删除、清理孤儿资源等操作要补测试，并保护 JSON 备份契约。
-- 完成代码改动后按风险运行验证：小改动至少运行相关测试；共享逻辑或数据模型改动运行 `npm test`；发布前运行 `npm run lint` 和 `npm run build`；涉及 Tauri、文件访问、路由或打包配置时运行当前平台对应的 Tauri 打包命令。Windows 产物优先用 Windows runner 验证 `npm run tauri:build:windows`。
+- 完成代码改动后按风险运行验证：小改动至少运行相关测试；共享逻辑或数据模型改动运行 `npm test`；发布前运行 `npm run lint` 和 `npm run build`；涉及 Tauri、文件访问、路由或打包配置时运行当前平台对应的 Tauri 打包命令。Windows 发布只构建并验证 NSIS 安装包，使用 `npm run tauri:build:windows`，不构建 MSI。
 - 如果不能运行验证命令，要在最终回复中明确说明原因和剩余风险。
 
 ## 更新记录维护

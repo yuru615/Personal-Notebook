@@ -286,6 +286,28 @@ describe('createWorkspaceStore page creation', () => {
       blocks,
     })
   })
+
+  it('creates an imported child page and its parent block in one save', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const store = createWorkspaceStore(counted.repository)
+    await store.getState().bootstrap()
+    const saveCountBeforeCreate = counted.getSaveCalls()
+
+    const child = await store.getState().createChildPage('page_1', {
+      title: 'Word 导入页面',
+      blocks: [{ id: 'block_imported_word', type: 'paragraph', text: '从 Word 导入的正文' }],
+    })
+
+    expect(counted.getSaveCalls()).toBe(saveCountBeforeCreate + 1)
+    expect(store.getState().pages.find((page) => page.id === child.id)).toMatchObject({
+      id: child.id,
+      parentId: 'page_1',
+      title: 'Word 导入页面',
+    })
+    expect(store.getState().pages.find((page) => page.id === 'page_1')?.blocks).toContainEqual(
+      expect.objectContaining({ type: 'child_page', pageId: child.id }),
+    )
+  })
 })
 
 describe('createWorkspaceStore data tables', () => {

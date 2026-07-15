@@ -46,6 +46,16 @@ export function guessMimeType(name: string, fallback = 'application/octet-stream
       return 'audio/ogg'
     case 'm4a':
       return 'audio/mp4'
+    case 'docx':
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    case 'pdf':
+      return 'application/pdf'
+    case 'md':
+    case 'markdown':
+    case 'txt':
+      return 'text/plain'
+    case 'zip':
+      return 'application/zip'
     default:
       return fallback
   }
@@ -113,6 +123,17 @@ export async function importImageAssetFromPath(path: string): Promise<AssetMeta 
   })
 }
 
+export function importFileAssetFromPath(path: string): Promise<AssetMeta> {
+  if (!isDesktopRuntime()) {
+    throw new Error('本机路径导入仅支持桌面端')
+  }
+
+  return storageClient.importAssetFile({
+    path,
+    mimeType: guessMimeType(path),
+  })
+}
+
 export async function importMarkdownImageAsset(
   markdownPath: string | undefined,
   source: string,
@@ -157,6 +178,16 @@ export async function getAssetUrl(assetId: string): Promise<string> {
   }
 
   return convertFileSrc(await storageClient.getAssetFilePath(assetId))
+}
+
+export async function readAssetBytesFromUrl(assetId: string): Promise<Uint8Array> {
+  const response = await fetch(await getAssetUrl(assetId))
+
+  if (!response.ok) {
+    throw new Error(`无法读取文件资源（${response.status}）`)
+  }
+
+  return new Uint8Array(await response.arrayBuffer())
 }
 
 export function exportPagePackage(pageId: string) {

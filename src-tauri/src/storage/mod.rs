@@ -1557,8 +1557,8 @@ impl Storage {
         self.connection.execute(
             "INSERT INTO zhiqi_pages
               (id, parent_id, title, icon, cover, is_full_width, is_small_text, font_family,
-                show_outline, position, created_at, updated_at)
-              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                show_outline, show_properties, position, created_at, updated_at)
+              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
               ON CONFLICT(id) DO UPDATE SET
                 parent_id = excluded.parent_id,
                 title = excluded.title,
@@ -1568,6 +1568,7 @@ impl Storage {
                 is_small_text = excluded.is_small_text,
                 font_family = excluded.font_family,
                 show_outline = excluded.show_outline,
+                show_properties = excluded.show_properties,
                 position = excluded.position,
                 created_at = excluded.created_at,
                 updated_at = excluded.updated_at",
@@ -1581,6 +1582,7 @@ impl Storage {
                 option_bool_to_i64(page.is_small_text),
                 page.font_family,
                 option_bool_to_i64(page.show_outline),
+                option_bool_to_i64(page.show_properties),
                 position as i64,
                 page.created_at,
                 page.updated_at
@@ -2003,8 +2005,8 @@ impl Storage {
     fn load_pages(&self) -> StorageResult<Vec<PageRecord>> {
         let mut statement = self.connection.prepare(
             "SELECT p.id, p.parent_id, p.title, p.icon, p.cover, p.is_full_width,
-              p.is_small_text, p.font_family, p.show_outline, c.blocks_json,
-              c.properties_json, p.created_at, p.updated_at
+              p.is_small_text, p.font_family, p.show_outline, p.show_properties,
+              c.blocks_json, c.properties_json, p.created_at, p.updated_at
               FROM zhiqi_pages p
               JOIN zhiqi_page_contents c ON c.page_id = p.id
               ORDER BY p.position ASC",
@@ -2020,10 +2022,11 @@ impl Storage {
                 row.get::<_, Option<i64>>(6)?,
                 row.get::<_, Option<String>>(7)?,
                 row.get::<_, Option<i64>>(8)?,
-                row.get::<_, String>(9)?,
+                row.get::<_, Option<i64>>(9)?,
                 row.get::<_, String>(10)?,
                 row.get::<_, String>(11)?,
                 row.get::<_, String>(12)?,
+                row.get::<_, String>(13)?,
             ))
         })?;
         let mut pages = Vec::new();
@@ -2039,6 +2042,7 @@ impl Storage {
                 is_small_text,
                 font_family,
                 show_outline,
+                show_properties,
                 blocks_json,
                 properties_json,
                 created_at,
@@ -2056,6 +2060,7 @@ impl Storage {
                 is_small_text: option_i64_to_bool(is_small_text),
                 font_family,
                 show_outline: option_i64_to_bool(show_outline),
+                show_properties: option_i64_to_bool(show_properties),
                 blocks: serde_json::from_str(&blocks_json).unwrap_or_default(),
                 created_at,
                 updated_at,
@@ -2875,6 +2880,7 @@ fn collect_ref_ids_from_synced_groups(
             is_small_text: None,
             font_family: None,
             show_outline: None,
+            show_properties: None,
             blocks: group.blocks.clone(),
             created_at: group.created_at.clone(),
             updated_at: group.updated_at.clone(),
@@ -2954,6 +2960,7 @@ fn collect_asset_ids_from_synced_groups(groups: &[SyncedBlockGroupRecord]) -> Ve
             is_small_text: None,
             font_family: None,
             show_outline: None,
+            show_properties: None,
             blocks: group.blocks.clone(),
             created_at: group.created_at.clone(),
             updated_at: group.updated_at.clone(),
@@ -3220,6 +3227,7 @@ mod tests {
                 is_small_text: None,
                 font_family: None,
                 show_outline: None,
+                show_properties: None,
                 blocks: vec![
                     json!({ "id": "block_1", "type": "paragraph", "text": "Hello storage engine" }),
                     json!({ "id": "block_2", "type": "whiteboard", "boardId": "board_1" }),
@@ -3339,6 +3347,7 @@ mod tests {
                     is_small_text: None,
                     font_family: None,
                     show_outline: None,
+                    show_properties: None,
                     blocks: Vec::new(),
                     created_at: "2026-07-13T00:00:00.000Z".to_string(),
                     updated_at: "2026-07-13T00:00:00.000Z".to_string(),
@@ -3986,6 +3995,31 @@ mod tests {
     }
 
     #[test]
+    fn workspace_backup_round_trips_hidden_page_properties_panel() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let mut snapshot_value =
+            serde_json::to_value(sample_snapshot()).expect("serialize snapshot");
+        snapshot_value["pages"][0]["showProperties"] = json!(false);
+        let snapshot: WorkspaceSnapshot =
+            serde_json::from_value(snapshot_value).expect("deserialize snapshot");
+
+        storage
+            .replace_workspace_backup(snapshot)
+            .expect("replace snapshot");
+
+        let exported = serde_json::to_value(
+            storage
+                .export_workspace_backup()
+                .expect("export workspace backup"),
+        )
+        .expect("serialize exported workspace");
+        assert_eq!(
+            exported.pointer("/pages/0/showProperties"),
+            Some(&json!(false))
+        );
+    }
+
+    #[test]
     fn workspace_archive_restores_media_and_rejects_page_packages() {
         let source = Storage::open_in_memory_for_tests().expect("source opens");
         let asset = source
@@ -4144,6 +4178,7 @@ mod tests {
             is_small_text: None,
             font_family: None,
             show_outline: None,
+            show_properties: None,
             blocks: vec![
                 json!({
                     "id": "block_image",
@@ -4211,6 +4246,7 @@ mod tests {
                     is_small_text: None,
                     font_family: None,
                     show_outline: None,
+                    show_properties: None,
                     blocks: vec![],
                     created_at: "2026-07-06T00:00:00.000Z".to_string(),
                     updated_at: "2026-07-06T00:00:00.000Z".to_string(),
@@ -4226,6 +4262,7 @@ mod tests {
                     is_small_text: None,
                     font_family: None,
                     show_outline: None,
+                    show_properties: None,
                     blocks: vec![json!({
                         "id": "block_relation",
                         "type": "paragraph",
@@ -4290,6 +4327,7 @@ mod tests {
                     is_small_text: None,
                     font_family: None,
                     show_outline: None,
+                    show_properties: None,
                     blocks: vec![json!({
                         "id": "container_sync",
                         "type": "synced_block",
@@ -4311,6 +4349,7 @@ mod tests {
                     is_small_text: None,
                     font_family: None,
                     show_outline: None,
+                    show_properties: None,
                     blocks: vec![json!({
                         "id": "container_reference",
                         "type": "synced_block",
@@ -4380,6 +4419,7 @@ mod tests {
                 is_small_text: None,
                 font_family: None,
                 show_outline: None,
+                show_properties: None,
                 blocks: vec![
                     json!({
                         "id": "container_sync",
@@ -4442,6 +4482,7 @@ mod tests {
                 is_small_text: None,
                 font_family: None,
                 show_outline: None,
+                show_properties: None,
                 blocks: vec![json!({
                     "id": "block_alpha",
                     "type": "paragraph",
@@ -4461,6 +4502,7 @@ mod tests {
                 is_small_text: None,
                 font_family: None,
                 show_outline: None,
+                show_properties: None,
                 blocks: vec![json!({
                     "id": "block_beta",
                     "type": "paragraph",
@@ -4652,6 +4694,14 @@ mod tests {
             .expect("query page content pragma")
             .collect::<Result<Vec<_>, _>>()
             .expect("collect page content columns");
+        let page_columns = storage
+            .connection
+            .prepare("PRAGMA table_info(zhiqi_pages)")
+            .expect("prepare page pragma")
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query page pragma")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect page columns");
         let search_document_columns = storage
             .connection
             .prepare("PRAGMA table_info(zhiqi_search_documents)")
@@ -4683,6 +4733,9 @@ mod tests {
         assert!(page_content_columns
             .iter()
             .any(|name| name == "properties_json"));
+        assert!(page_columns
+            .iter()
+            .any(|name| name == "show_properties"));
         assert!(search_document_columns
             .iter()
             .any(|name| name == "match_source"));
@@ -4715,6 +4768,7 @@ mod tests {
                 is_small_text: None,
                 font_family: None,
                 show_outline: None,
+                show_properties: None,
                 blocks: vec![json!({
                     "id": format!("block_{index}"),
                     "type": "paragraph",
@@ -5640,6 +5694,7 @@ mod tests {
             is_small_text: None,
             font_family: None,
             show_outline: None,
+            show_properties: None,
             blocks: vec![json!({
                 "id": "block_image",
                 "type": "image",
@@ -5663,6 +5718,7 @@ mod tests {
             is_small_text: None,
             font_family: None,
             show_outline: None,
+            show_properties: None,
             blocks: vec![],
             created_at: "2026-07-02T00:00:00.000Z".to_string(),
             updated_at: "2026-07-02T00:00:00.000Z".to_string(),
@@ -5720,6 +5776,7 @@ mod tests {
             is_small_text: None,
             font_family: None,
             show_outline: None,
+            show_properties: None,
             blocks: vec![],
             created_at: "2026-07-02T00:00:00.000Z".to_string(),
             updated_at: "2026-07-02T00:00:00.000Z".to_string(),
@@ -5735,6 +5792,7 @@ mod tests {
             is_small_text: None,
             font_family: None,
             show_outline: None,
+            show_properties: None,
             blocks: vec![],
             created_at: "2026-07-02T00:00:00.000Z".to_string(),
             updated_at: "2026-07-02T00:00:00.000Z".to_string(),
@@ -5958,6 +6016,7 @@ mod tests {
             is_small_text: None,
             font_family: None,
             show_outline: None,
+            show_properties: None,
             blocks: vec![],
             created_at: "2026-07-02T00:00:00.000Z".to_string(),
             updated_at: "2026-07-02T00:00:00.000Z".to_string(),
@@ -6043,6 +6102,7 @@ mod tests {
                     is_small_text: None,
                     font_family: None,
                     show_outline: None,
+                    show_properties: None,
                     blocks: vec![
                         json!({
                             "id": "block_link_child",
@@ -6071,6 +6131,7 @@ mod tests {
                     is_small_text: None,
                     font_family: None,
                     show_outline: None,
+                    show_properties: None,
                     blocks: vec![],
                     created_at: "2026-07-06T00:00:00.000Z".to_string(),
                     updated_at: "2026-07-06T00:00:00.000Z".to_string(),
@@ -6142,6 +6203,7 @@ mod tests {
             is_small_text: None,
             font_family: None,
             show_outline: None,
+            show_properties: None,
             blocks: vec![],
             created_at: "2026-07-02T00:00:00.000Z".to_string(),
             updated_at: "2026-07-02T00:00:00.000Z".to_string(),
@@ -6157,6 +6219,7 @@ mod tests {
             is_small_text: None,
             font_family: None,
             show_outline: None,
+            show_properties: None,
             blocks: vec![],
             created_at: "2026-07-02T00:00:00.000Z".to_string(),
             updated_at: "2026-07-02T00:00:00.000Z".to_string(),
@@ -6517,6 +6580,7 @@ mod tests {
             is_small_text: None,
             font_family: None,
             show_outline: None,
+            show_properties: None,
             blocks: vec![],
             created_at: "2026-07-02T00:00:00.000Z".to_string(),
             updated_at: "2026-07-02T00:00:00.000Z".to_string(),
@@ -6602,6 +6666,7 @@ mod tests {
                 is_small_text: None,
                 font_family: None,
                 show_outline: None,
+                show_properties: None,
                 blocks: vec![],
                 created_at: "2026-07-02T00:00:00.000Z".to_string(),
                 updated_at: "2026-07-02T00:00:00.000Z".to_string(),
@@ -6639,6 +6704,7 @@ mod tests {
             is_small_text: None,
             font_family: None,
             show_outline: None,
+            show_properties: None,
             blocks: vec![],
             created_at: "2026-07-02T00:00:00.000Z".to_string(),
             updated_at: "2026-07-02T00:00:00.000Z".to_string(),
@@ -6695,6 +6761,7 @@ mod tests {
                 is_small_text: None,
                 font_family: None,
                 show_outline: None,
+                show_properties: None,
                 blocks: vec![],
                 created_at: "2026-07-02T00:00:00.000Z".to_string(),
                 updated_at: "2026-07-02T00:00:00.000Z".to_string(),
@@ -6710,6 +6777,7 @@ mod tests {
                 is_small_text: None,
                 font_family: None,
                 show_outline: None,
+                show_properties: None,
                 blocks: vec![],
                 created_at: "2026-07-02T00:00:00.000Z".to_string(),
                 updated_at: "2026-07-02T00:00:00.000Z".to_string(),

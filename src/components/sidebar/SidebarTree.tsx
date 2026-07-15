@@ -14,6 +14,7 @@ import type {
 } from '../../domain/types'
 import { uiCopy } from '../../ui/copy'
 import { buildVisiblePageItems } from '../../utils/pageTree'
+import { isDesktopRuntime } from '../../lib/fileAccess'
 
 const RECENT_WHITEBOARDS_LABEL = '最近白板'
 const DATA_TABLE_ICON = '▦'
@@ -65,6 +66,8 @@ interface SidebarTreeProps {
   onExportPage?: (pageId: PageId) => void | Promise<void>
   onDuplicatePage?: (pageId: PageId) => void | Promise<void>
   onDeletePage?: (pageId: PageId) => void | Promise<void>
+  onImportContent?: () => void | Promise<void>
+  onDropFiles?: (files: File[]) => void | Promise<void>
   onImportWorkspace?: () => void | Promise<void>
   onImportArchive?: () => void | Promise<void>
   onImportMarkdown?: () => void | Promise<void>
@@ -93,6 +96,8 @@ export function SidebarTree({
   onExportPage,
   onDuplicatePage,
   onDeletePage,
+  onImportContent,
+  onDropFiles,
   onImportWorkspace,
   onImportArchive,
   onImportMarkdown,
@@ -580,9 +585,9 @@ export function SidebarTree({
             className="sidebar-tool-button"
             aria-label={uiCopy.sidebar.import}
             data-tooltip={uiCopy.sidebar.import}
-            disabled={!onImportWorkspace}
+            disabled={!onImportContent}
             onClick={() => {
-              void onImportWorkspace?.()
+              void onImportContent?.()
             }}
           >
             <Upload size={15} strokeWidth={1.9} />
@@ -676,6 +681,40 @@ export function SidebarTree({
 
       <div
         className="sidebar-scroll-content"
+        onDragOver={(event) => {
+          if (isDesktopRuntime()) {
+            return
+          }
+
+          if (
+            event.target !== event.currentTarget ||
+            !Array.from(event.dataTransfer.types).includes('Files')
+          ) {
+            return
+          }
+
+          event.preventDefault()
+          event.stopPropagation()
+        }}
+        onDrop={(event) => {
+          if (isDesktopRuntime()) {
+            return
+          }
+
+          if (event.target !== event.currentTarget) {
+            return
+          }
+
+          const files = Array.from(event.dataTransfer.files)
+
+          if (files.length === 0) {
+            return
+          }
+
+          event.preventDefault()
+          event.stopPropagation()
+          void onDropFiles?.(files)
+        }}
         onScroll={(event) => {
           const nextScrolled = event.currentTarget.scrollTop > 2
           setSidebarScrolled((current) => (current === nextScrolled ? current : nextScrolled))
@@ -861,8 +900,16 @@ export function SidebarTree({
                 ]
                   .filter(Boolean)
                   .join(' ')}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={() => {
+                onDragOver={(event) => {
+                  if (!Array.from(event.dataTransfer.types).includes('Files')) {
+                    event.preventDefault()
+                  }
+                }}
+                onDrop={(event) => {
+                  if (event.dataTransfer.files.length > 0) {
+                    return
+                  }
+
                   if (draggingPageId.current && draggingPageId.current !== page.id) {
                     onReorderPage?.(draggingPageId.current, page.id)
                   }

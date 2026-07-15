@@ -11,19 +11,22 @@ type TauriConfig = {
   }
   bundle?: {
     icon?: string[]
+    targets?: string[]
   }
 }
 
 const srcTauriDir = dirname(fileURLToPath(import.meta.url))
 const configPath = join(srcTauriDir, 'tauri.conf.json')
+const windowsConfigPath = join(srcTauriDir, 'tauri.windows.conf.json')
 
 const readConfig = () => JSON.parse(readFileSync(configPath, 'utf8')) as TauriConfig
+const readWindowsConfig = () => JSON.parse(readFileSync(windowsConfigPath, 'utf8')) as TauriConfig
 
 describe('Tauri config', () => {
-  it('keeps WebView file drag/drop interception disabled for HTML5 mindmap dragging', () => {
+  it('enables native file drag/drop paths for the desktop file importer', () => {
     const config = readConfig()
 
-    expect(config.app?.windows?.[0]?.dragDropEnabled).toBe(false)
+    expect(config.app?.windows?.[0]?.dragDropEnabled).toBe(true)
   })
 
   it('keeps bundle icon paths backed by the approved Zhiqi source icon', () => {
@@ -47,5 +50,9 @@ describe('Tauri config', () => {
     expect(sourceIcon).toContain('data-zhiqi-logo="perch-page"')
     expect(sourceIcon).toContain('#0E766E')
     expect(sourceIcon).toContain('#DDAE4E')
+  })
+
+  it('builds only the NSIS installer on Windows', () => {
+    expect(readWindowsConfig().bundle?.targets).toEqual(['nsis'])
   })
 })

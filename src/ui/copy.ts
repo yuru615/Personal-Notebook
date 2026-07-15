@@ -3,7 +3,7 @@ export const uiCopy = {
     ariaLabel: '侧边栏',
     search: '搜索',
     newPage: '新建页面',
-    import: '导入',
+    import: '导入内容',
     notifications: '消息',
     more: '更多',
     tools: '侧边栏工具',

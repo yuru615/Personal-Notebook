@@ -15,6 +15,15 @@ function cssRule(selector: string) {
 }
 
 describe('editor multi select layout', () => {
+  it('aligns a new paragraph with the trailing empty input row', () => {
+    expect(cssRule('.block-frame')).toContain(
+      'margin-left: calc(-18px - var(--editor-gutter-gap));',
+    )
+    expect(cssRule('.empty-block-row')).toContain(
+      'grid-template-columns: var(--editor-gutter-size) minmax(0, 1fr);',
+    )
+  })
+
   it('matches the block background surface without highlighting the selection gutter or handle', () => {
     expect(styles).not.toMatch(/\.editor-row-selected\s*\{[^}]*background:/)
     const selectedContent = cssRule('.editor-row-selected > .block-frame > .block-frame-content')
@@ -44,5 +53,9 @@ describe('editor multi select layout', () => {
     expect(cssRule('.block-selection-gutter')).not.toContain('cursor: crosshair;')
     expect(cssRule('.sidebar-link:hover')).toContain('background: var(--app-accent-hover);')
     expect(cssRule('.page-outline-item:hover')).toContain('background: var(--app-accent-hover);')
+  })
+
+  it('keeps the global file-drop overlay transparent to pointer events', () => {
+    expect(cssRule('.app-file-drop-overlay')).toContain('pointer-events: none;')
   })
 })

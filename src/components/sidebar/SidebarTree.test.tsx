@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -67,7 +67,7 @@ describe('SidebarTree', () => {
     expect(screen.getByText('本地工作区')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '搜索' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '新建页面' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '导入' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '导入内容' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '导出工作区' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '消息' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '搜索' })).toHaveAttribute('data-tooltip', '搜索')
@@ -107,25 +107,27 @@ describe('SidebarTree', () => {
     expect(onExportWorkspace).toHaveBeenCalledTimes(1)
   })
 
-  it('triggers workspace backup import from the compact import button', async () => {
+  it('triggers content import from the compact import button', async () => {
     const user = userEvent.setup()
-    const onImportWorkspace = vi.fn()
+    const onImportContent = vi.fn()
 
     render(
       <MemoryRouter>
         <SidebarTree
-          pages={pages as never}
-          currentPageId="page_parent"
-          onCreatePage={vi.fn()}
-          layout="compact"
-          onImportWorkspace={onImportWorkspace}
+          {...({
+            pages: pages as never,
+            currentPageId: 'page_parent',
+            onCreatePage: vi.fn(),
+            layout: 'compact',
+            onImportContent,
+          } as never)}
         />
       </MemoryRouter>,
     )
 
-    await user.click(screen.getByRole('button', { name: '导入' }))
+    await user.click(screen.getByRole('button', { name: '导入内容' }))
 
-    expect(onImportWorkspace).toHaveBeenCalledTimes(1)
+    expect(onImportContent).toHaveBeenCalledTimes(1)
   })
 
   it('renders a settings action in the utility menu', async () => {
@@ -1385,5 +1387,81 @@ describe('SidebarTree', () => {
       writable: true,
       value: originalInnerHeight,
     })
+  })
+
+  it('sends every supported file dropped on the page-tree blank area to one target-aware importer', () => {
+    const onDropFiles = vi.fn()
+    const file = new File(['Word content'], '会议记录.docx', {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    })
+    const { container } = render(
+      <MemoryRouter>
+        <SidebarTree
+          {...({
+            pages: pages as never,
+            currentPageId: 'page_parent',
+            onCreatePage: vi.fn(),
+            onDropFiles,
+          } as never)}
+        />
+      </MemoryRouter>,
+    )
+
+    fireEvent.drop(container.querySelector('.sidebar-scroll-content')!, {
+      dataTransfer: { files: [file] },
+    })
+
+    expect(onDropFiles).toHaveBeenCalledWith([file])
+  })
+
+  it('keeps a Windows file drag over the sidebar blank area out of the global inbox handler', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <SidebarTree
+          {...({
+            pages: pages as never,
+            currentPageId: 'page_parent',
+            onCreatePage: vi.fn(),
+          } as never)}
+        />
+      </MemoryRouter>,
+    )
+    const target = container.querySelector('.sidebar-scroll-content')!
+    const event = createEvent.dragOver(target)
+    Object.defineProperty(event, 'dataTransfer', {
+      value: { types: ['Files'], files: [] },
+    })
+    const globalDragOver = vi.fn()
+    document.body.addEventListener('dragover', globalDragOver)
+
+    fireEvent(target, event)
+    document.body.removeEventListener('dragover', globalDragOver)
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(globalDragOver).not.toHaveBeenCalled()
+  })
+
+  it('keeps mixed document and attachment drops in their original order', async () => {
+    const onDropFiles = vi.fn()
+    const docx = new File(['Word content'], '会议记录.docx')
+    const pdf = new File(['PDF content'], '合同.pdf', { type: 'application/pdf' })
+    const { container } = render(
+      <MemoryRouter>
+        <SidebarTree
+          {...({
+            pages: pages as never,
+            currentPageId: 'page_parent',
+            onCreatePage: vi.fn(),
+            onDropFiles,
+          } as never)}
+        />
+      </MemoryRouter>,
+    )
+
+    fireEvent.drop(container.querySelector('.sidebar-scroll-content')!, {
+      dataTransfer: { files: [docx, pdf] },
+    })
+
+    await waitFor(() => expect(onDropFiles).toHaveBeenCalledWith([docx, pdf]))
   })
 })

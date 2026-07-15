@@ -1604,6 +1604,43 @@ describe('BlockEditor', () => {
     expect(onInsert).toHaveBeenCalledWith('paragraph')
   })
 
+  it('moves to a new paragraph when Enter is pressed in the blank trailing row', async () => {
+    const user = userEvent.setup()
+
+    function EmptyPageHarness() {
+      const [currentPage, setCurrentPage] = useState({ ...page, blocks: [] as never[] })
+      const nextBlockNumber = useRef(0)
+
+      return (
+        <BlockEditor
+          page={currentPage as never}
+          allPages={[currentPage as never]}
+          onUpdateBlock={vi.fn()}
+          onInsert={async (type) => {
+            nextBlockNumber.current += 1
+            const id = `empty_paragraph_${nextBlockNumber.current}`
+            setCurrentPage((previousPage) => ({
+              ...previousPage,
+              blocks: [...previousPage.blocks, { id, type, text: '' }],
+            }))
+            return id
+          }}
+        />
+      )
+    }
+
+    render(<EmptyPageHarness />)
+
+    await user.click(screen.getByRole('textbox'))
+    await user.keyboard('{Enter}')
+
+    await waitFor(() => {
+      const paragraphs = screen.getAllByRole('textbox', { name: '输入正文' })
+      expect(paragraphs).toHaveLength(2)
+      expect(paragraphs[1]).toHaveFocus()
+    })
+  })
+
   it('shows an upper drop indicator while dragging over the upper half of another block', () => {
     const onReorderBlock = vi.fn()
     const { container } = render(

@@ -11,6 +11,7 @@ import { useDismissableLayer } from './useDismissableLayer'
 interface EmptyBlockRowProps {
   allowedBlockTypes?: BlockType[]
   onInsert: (type: SlashMenuCommand) => void
+  onSubmitEmpty?: () => void
   onInsertParagraph?: (text: string) => void
   onPasteImage?: (source: PastedImageSource) => Promise<void> | void
   onPasteStructuredContent?: (clipboardData: DataTransfer) => boolean
@@ -131,6 +132,7 @@ function hasReadableClipboardText(dataTransfer: DataTransfer) {
 export function EmptyBlockRow({
   allowedBlockTypes,
   onInsert,
+  onSubmitEmpty,
   onInsertParagraph,
   onPasteImage,
   onPasteStructuredContent,
@@ -196,7 +198,11 @@ export function EmptyBlockRow({
     const nextValue = value.trim()
 
     if (!nextValue) {
-      onInsert('paragraph')
+      if (onSubmitEmpty) {
+        onSubmitEmpty()
+      } else {
+        onInsert('paragraph')
+      }
       setValue('')
       setSlashMenuDismissed(false)
       return

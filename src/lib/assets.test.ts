@@ -94,6 +94,55 @@ describe('asset helpers', () => {
     })
   })
 
+  it('imports a dropped desktop file by path without sending its bytes through write_asset', async () => {
+    Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    })
+    invoke.mockResolvedValue({
+      id: 'asset_docx',
+      sha256: 'sha',
+      name: '会议记录.docx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      byteSize: 10,
+      relativePath: 'sh/sha.docx',
+      createdAt: '2026-07-15T00:00:00.000Z',
+    })
+
+    const { importFileAssetFromPath } = await import('./assets')
+
+    await expect(importFileAssetFromPath('C:/drop/会议记录.docx')).resolves.toMatchObject({
+      id: 'asset_docx',
+    })
+    expect(invoke).toHaveBeenCalledWith('import_asset_file', {
+      input: {
+        path: 'C:/drop/会议记录.docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      },
+    })
+    expect(invoke).not.toHaveBeenCalledWith('write_asset', expect.anything())
+  })
+
+  it('reads a managed desktop asset through the asset URL instead of a binary invoke response', async () => {
+    Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    })
+    invoke.mockResolvedValue('C:/Users/test/AppData/Roaming/com.zhiqi.desktop/zhiqi-assets/sh/sha.docx')
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(new Uint8Array([80, 75, 3, 4])),
+    )
+
+    const { readAssetBytesFromUrl } = await import('./assets')
+
+    await expect(readAssetBytesFromUrl('asset_docx')).resolves.toEqual(new Uint8Array([80, 75, 3, 4]))
+    expect(invoke).toHaveBeenCalledWith('get_asset_file_path', { assetId: 'asset_docx' })
+    expect(fetch).toHaveBeenCalledWith(
+      'asset://C:/Users/test/AppData/Roaming/com.zhiqi.desktop/zhiqi-assets/sh/sha.docx',
+    )
+    expect(invoke).not.toHaveBeenCalledWith('read_asset', expect.anything())
+  })
+
   it('returns null for non-image local paths', async () => {
     Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
       configurable: true,
