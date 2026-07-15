@@ -4203,6 +4203,44 @@ mod tests {
     }
 
     #[test]
+    fn failed_auto_backup_publish_keeps_previously_published_archives() {
+        let data_dir = unique_test_data_dir("auto-backup-publish-failure");
+        let mut storage = Storage::open(&data_dir).expect("storage opens");
+        storage
+            .replace_workspace_backup(sample_snapshot())
+            .expect("seed workspace");
+        for index in 0..2 {
+            storage
+                .create_auto_backup_at(
+                    UNIX_EPOCH + Duration::from_secs(1_700_000_000 + index),
+                    2,
+                )
+                .expect("publish initial backup");
+        }
+        let published_dir = storage.auto_backup_dir.clone();
+        let previous = storage.list_auto_backups().expect("list published backups");
+        let blocked_parent = data_dir.join("auto-backup-blocker");
+        std::fs::write(&blocked_parent, b"not a directory").expect("write blocking file");
+        storage.auto_backup_dir = blocked_parent.join("child");
+
+        assert!(storage
+            .create_auto_backup_at(UNIX_EPOCH + Duration::from_secs(1_700_000_002), 1)
+            .is_err());
+        assert!(previous
+            .iter()
+            .all(|backup| published_dir.join(&backup.file_name).is_file()));
+        assert_eq!(
+            std::fs::read_dir(&published_dir)
+                .expect("read published backup directory")
+                .count(),
+            previous.len()
+        );
+
+        drop(storage);
+        std::fs::remove_dir_all(data_dir).expect("remove test data directory");
+    }
+
+    #[test]
     fn auto_backup_cleanup_ignores_temporary_and_unmanaged_files() {
         let data_dir = unique_test_data_dir("auto-backup-cleanup");
         let storage = Storage::open(&data_dir).expect("storage opens");
