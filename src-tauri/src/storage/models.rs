@@ -223,14 +223,18 @@ mod tests {
             Some("violet")
         );
         assert_eq!(
-            serialized.pointer("/mcp/token").and_then(Value::as_str),
-            Some("test-token")
+            serialized.pointer("/mcp"),
+            Some(&json!({
+                "enabled": true,
+                "port": 38472,
+                "token": "test-token",
+            }))
         );
     }
 
     #[test]
     fn null_or_non_object_auto_backup_values_use_complete_defaults() {
-        for auto_backup in [Value::Null, json!([])] {
+        for auto_backup in [Value::Null, json!([]), json!("bad")] {
             let settings: AppSettings = serde_json::from_value(json!({
                 "autoBackup": auto_backup,
             }))
@@ -243,6 +247,80 @@ mod tests {
                     "enabled": true,
                     "intervalMinutes": 15,
                     "retentionCount": 14,
+                }))
+            );
+        }
+    }
+
+    #[test]
+    fn out_of_range_auto_backup_numbers_fall_back_without_rejecting_settings() {
+        for (auto_backup, expected) in [
+            (
+                json!({ "enabled": false, "intervalMinutes": -1, "retentionCount": 14 }),
+                json!({ "enabled": false, "intervalMinutes": 15, "retentionCount": 14 }),
+            ),
+            (
+                json!({ "enabled": false, "intervalMinutes": 15, "retentionCount": 999 }),
+                json!({ "enabled": false, "intervalMinutes": 15, "retentionCount": 14 }),
+            ),
+            (
+                json!({ "enabled": false, "intervalMinutes": 65_536, "retentionCount": 256 }),
+                json!({ "enabled": false, "intervalMinutes": 15, "retentionCount": 14 }),
+            ),
+        ] {
+            let settings: AppSettings = serde_json::from_value(json!({
+                "autoBackup": auto_backup,
+            }))
+            .expect("out-of-range auto backup settings should deserialize");
+            let serialized = serde_json::to_value(settings).expect("app settings serialize");
+
+            assert_eq!(serialized.pointer("/autoBackup"), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn valid_auto_backup_interval_and_retention_combinations_are_preserved() {
+        for (interval_minutes, retention_count) in [(15, 7), (30, 14), (60, 30)] {
+            let settings: AppSettings = serde_json::from_value(json!({
+                "autoBackup": {
+                    "enabled": false,
+                    "intervalMinutes": interval_minutes,
+                    "retentionCount": retention_count,
+                },
+            }))
+            .expect("valid auto backup settings should deserialize");
+            let serialized = serde_json::to_value(settings).expect("app settings serialize");
+
+            assert_eq!(
+                serialized.pointer("/autoBackup"),
+                Some(&json!({
+                    "enabled": false,
+                    "intervalMinutes": interval_minutes,
+                    "retentionCount": retention_count,
+                }))
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_auto_backup_enabled_values_fall_back_to_true() {
+        for enabled in [Value::Null, json!("false")] {
+            let settings: AppSettings = serde_json::from_value(json!({
+                "autoBackup": {
+                    "enabled": enabled,
+                    "intervalMinutes": 30,
+                    "retentionCount": 7,
+                },
+            }))
+            .expect("invalid enabled value should deserialize");
+            let serialized = serde_json::to_value(settings).expect("app settings serialize");
+
+            assert_eq!(
+                serialized.pointer("/autoBackup"),
+                Some(&json!({
+                    "enabled": true,
+                    "intervalMinutes": 30,
+                    "retentionCount": 7,
                 }))
             );
         }
