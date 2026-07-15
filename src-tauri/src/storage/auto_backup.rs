@@ -41,6 +41,8 @@ pub struct AutoBackupRecoveryStatus {
     pub should_offer_restore: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latest_backup: Option<AutoBackupRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recovery_check_warning: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -131,13 +133,17 @@ impl Storage {
 
     pub fn begin_auto_backup_session(&self) -> StorageResult<AutoBackupRecoveryStatus> {
         let previous = self.load_auto_backup_runtime_state()?.unwrap_or_default();
-        let latest_backup = self.latest_valid_auto_backup()?.map(|(backup, _)| backup);
+        let (latest_backup, recovery_check_warning) = match self.latest_valid_auto_backup() {
+            Ok(latest_backup) => (latest_backup.map(|(backup, _)| backup), None),
+            Err(error) => (None, Some(format!("检查自动备份时失败：{error}"))),
+        };
         self.save_auto_backup_runtime_state(&AutoBackupRuntimeState {
             session_running: true,
         })?;
         Ok(AutoBackupRecoveryStatus {
             should_offer_restore: previous.session_running && latest_backup.is_some(),
             latest_backup,
+            recovery_check_warning,
         })
     }
 

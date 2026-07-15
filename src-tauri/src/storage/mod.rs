@@ -4449,6 +4449,38 @@ mod tests {
     }
 
     #[test]
+    fn backup_scan_failures_do_not_block_starting_a_new_auto_backup_session() {
+        let data_dir = unique_test_data_dir("auto-backup-scan-failure");
+        let mut storage = Storage::open(&data_dir).expect("storage opens");
+        let unreadable_backup_dir = data_dir.join("not-a-directory");
+        std::fs::write(&unreadable_backup_dir, b"not a directory")
+            .expect("write scan blocker");
+        storage.auto_backup_dir = unreadable_backup_dir;
+
+        let recovery = storage
+            .begin_auto_backup_session()
+            .expect("scan failure does not block session start");
+
+        assert!(!recovery.should_offer_restore);
+        assert!(recovery.latest_backup.is_none());
+        assert!(recovery.recovery_check_warning.is_some());
+
+        storage.auto_backup_dir = data_dir.join(auto_backup::AUTO_BACKUP_DIR_NAME);
+        assert!(storage
+            .load_auto_backup_runtime_state()
+            .expect("load runtime state")
+            .expect("runtime state was persisted")
+            .session_running);
+        let next_recovery = storage
+            .begin_auto_backup_session()
+            .expect("next session still starts");
+        assert!(next_recovery.recovery_check_warning.is_none());
+
+        drop(storage);
+        std::fs::remove_dir_all(data_dir).expect("remove test data directory");
+    }
+
+    #[test]
     fn workspace_replacement_preserves_an_unfinished_auto_backup_session() {
         let data_dir = unique_test_data_dir("auto-backup-runtime-preserved");
         let storage = Storage::open(&data_dir).expect("storage opens");
