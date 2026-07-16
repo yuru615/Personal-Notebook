@@ -11,8 +11,18 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const scriptPath = path.join(root, 'scripts/generate-teacher-template.mjs')
 const outputDirectory = path.join(root, 'public/templates')
 const outputName = 'high-school-chinese-teacher-workbench.zhiqi'
-const expectedHash = '71c04eadb838be9b831df7599406957b5b49926cc15d3a532f298dffc5f7829e'
+const outputPath = path.join(outputDirectory, outputName)
+const expectedHash = 'acbc71fe07e869c630c850c3f537a3c43384f044776a2cb598c93419bd608f0f'
 const temporaryOutputPrefix = `${outputName}.tmp`
+
+it('keeps the committed teacher package in sync with the template source', async () => {
+  const bytes = await readFile(outputPath)
+  const hash = createHash('sha256').update(bytes).digest('hex')
+
+  expect(bytes.byteLength).toBeGreaterThan(0)
+  expect(hash).toBe(expectedHash)
+})
+
 const originalViteUrl = `${import.meta.resolve('vite')}?teacher-template-test-original`
 const closeTrackingWrapper = `
   import * as original from ${JSON.stringify(originalViteUrl)}

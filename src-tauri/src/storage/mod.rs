@@ -7874,6 +7874,82 @@ mod tests {
         );
     }
 
+    #[derive(Default)]
+    struct ImportedBlockReferences {
+        board_ids: HashSet<String>,
+        data_table_ids: HashSet<String>,
+        mindmap_ids: HashSet<String>,
+        sync_group_ids: HashSet<String>,
+        sync_instance_ids: HashSet<String>,
+        asset_block_ids: HashSet<String>,
+        asset_ids: HashSet<String>,
+    }
+
+    fn collect_imported_block_references(
+        pages: &[PageRecord],
+        page_ids: &HashSet<String>,
+    ) -> ImportedBlockReferences {
+        let mut references = ImportedBlockReferences::default();
+        for block in pages
+            .iter()
+            .filter(|page| page_ids.contains(&page.id))
+            .flat_map(|page| page.blocks.iter())
+        {
+            collect_block_references(block, &mut references);
+        }
+        references
+    }
+
+    fn collect_block_references(value: &Value, references: &mut ImportedBlockReferences) {
+        match value {
+            Value::Array(values) => {
+                for value in values {
+                    collect_block_references(value, references);
+                }
+            }
+            Value::Object(object) => {
+                match object.get("type").and_then(Value::as_str) {
+                    Some("whiteboard") => {
+                        if let Some(id) = object.get("boardId").and_then(Value::as_str) {
+                            references.board_ids.insert(id.to_string());
+                        }
+                    }
+                    Some("data_table") => {
+                        if let Some(id) = object.get("databaseId").and_then(Value::as_str) {
+                            references.data_table_ids.insert(id.to_string());
+                        }
+                    }
+                    Some("mindmap") => {
+                        if let Some(id) = object.get("mindmapId").and_then(Value::as_str) {
+                            references.mindmap_ids.insert(id.to_string());
+                        }
+                    }
+                    Some("synced_block") => {
+                        if let Some(id) = object.get("groupId").and_then(Value::as_str) {
+                            references.sync_group_ids.insert(id.to_string());
+                        }
+                        if let Some(id) = object.get("instanceId").and_then(Value::as_str) {
+                            references.sync_instance_ids.insert(id.to_string());
+                        }
+                    }
+                    Some("image" | "file") => {
+                        if let Some(id) = object.get("id").and_then(Value::as_str) {
+                            references.asset_block_ids.insert(id.to_string());
+                        }
+                        if let Some(id) = object.get("assetId").and_then(Value::as_str) {
+                            references.asset_ids.insert(id.to_string());
+                        }
+                    }
+                    _ => {}
+                }
+                for value in object.values() {
+                    collect_block_references(value, references);
+                }
+            }
+            _ => {}
+        }
+    }
+
     #[test]
     fn teacher_template_package_imports_twice_without_collisions() {
         let package_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(
@@ -7910,6 +7986,29 @@ mod tests {
             .expect("second imported page tree")
             .into_iter()
             .collect::<HashSet<_>>();
+        let first_references = collect_imported_block_references(&imported.pages, &first_page_ids);
+        let second_references =
+            collect_imported_block_references(&imported.pages, &second_page_ids);
+        let imported_board_ids = imported
+            .boards
+            .iter()
+            .map(|board| board.id.clone())
+            .collect::<HashSet<_>>();
+        let imported_data_table_ids = imported
+            .data_tables
+            .iter()
+            .map(|data_table| data_table.id.clone())
+            .collect::<HashSet<_>>();
+        let imported_mindmap_ids = imported
+            .mindmaps
+            .iter()
+            .map(|mindmap| mindmap.id.clone())
+            .collect::<HashSet<_>>();
+        let imported_sync_group_ids = imported
+            .synced_block_groups
+            .iter()
+            .map(|group| group.id.clone())
+            .collect::<HashSet<_>>();
 
         assert_ne!(first.root_page_id, second.root_page_id);
         assert_eq!(imported.pages.len(), 72);
@@ -7931,6 +8030,48 @@ mod tests {
         assert_eq!(first_page_ids.len(), 36);
         assert_eq!(second_page_ids.len(), 36);
         assert!(first_page_ids.is_disjoint(&second_page_ids));
+        for references in [&first_references, &second_references] {
+            assert_eq!(references.board_ids.len(), 2);
+            assert_eq!(references.data_table_ids.len(), 3);
+            assert_eq!(references.mindmap_ids.len(), 2);
+            assert_eq!(references.sync_group_ids.len(), 2);
+            assert_eq!(references.sync_instance_ids.len(), 13);
+            assert_eq!(references.asset_block_ids.len(), 2);
+            assert_eq!(references.asset_ids.len(), 2);
+            assert!(references.board_ids.is_subset(&imported_board_ids));
+            assert!(references
+                .data_table_ids
+                .is_subset(&imported_data_table_ids));
+            assert!(references.mindmap_ids.is_subset(&imported_mindmap_ids));
+            assert!(references
+                .sync_group_ids
+                .is_subset(&imported_sync_group_ids));
+            for asset_id in &references.asset_ids {
+                assert!(!target
+                    .read_asset(asset_id)
+                    .expect("read imported teacher template asset")
+                    .is_empty());
+            }
+        }
+        assert!(first_references
+            .board_ids
+            .is_disjoint(&second_references.board_ids));
+        assert!(first_references
+            .data_table_ids
+            .is_disjoint(&second_references.data_table_ids));
+        assert!(first_references
+            .mindmap_ids
+            .is_disjoint(&second_references.mindmap_ids));
+        assert!(first_references
+            .sync_group_ids
+            .is_disjoint(&second_references.sync_group_ids));
+        assert!(first_references
+            .sync_instance_ids
+            .is_disjoint(&second_references.sync_instance_ids));
+        assert!(first_references
+            .asset_block_ids
+            .is_disjoint(&second_references.asset_block_ids));
+        assert_eq!(first_references.asset_ids, second_references.asset_ids);
     }
 
     #[test]

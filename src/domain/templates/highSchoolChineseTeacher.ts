@@ -811,7 +811,7 @@ function createTeachingDataTables(): DataTableRecord[] {
       { slug: 'gantt', name: '单元进度', layout: 'gantt', startKey: 'startDate', endKey: 'dueDate' },
       {
         slug: 'week',
-        name: '本周待办',
+        name: '未完成任务',
         layout: 'table',
         filter: { key: 'status', operator: 'isNot', value: '已完成' },
       },
@@ -1414,7 +1414,7 @@ export function createHighSchoolChineseTeacherTemplate(): TeacherTemplateBundle 
     ]),
     page('semester-map', pageIds.planning, '学期教学地图', '🧭', [
       heading_1('semester-map', 0, '学期教学地图｜文本版'),
-      paragraph('semester-map', 1, '后续将在此页加入可编辑思维导图块；当前文本版已经可以用于周计划、单元衔接和教研讨论。'),
+      paragraph('semester-map', 1, '模板已嵌入可编辑对象；思维导图位于“第七单元知识导图”等对应页面，当前文本版可用于周计划、单元衔接和教研讨论。'),
       heading_2('semester-map', 2, '四条学期主线'),
       table('semester-map', 3, [
         ['主线', '持续追问', '可观察成果'],
@@ -1490,7 +1490,7 @@ export function createHighSchoolChineseTeacherTemplate(): TeacherTemplateBundle 
     ]),
     page('execution', pageIds.root, '03 教学执行', '✅', [
       heading_1('execution', 0, '把计划变成可追踪的课堂行动'),
-      paragraph('execution', 1, '本分支保留备课任务、教学进度和课堂流程入口。当前文本与表格可直接使用，后续还可接入数据表和白板。'),
+      paragraph('execution', 1, '本分支保留备课任务、教学进度和课堂流程入口，下方页面已嵌入数据表和白板；当前文本与表格也可直接使用。'),
       child_page('execution', 2, pageIds.preparationTasks),
       child_page('execution', 3, pageIds.calendar),
       child_page('execution', 4, pageIds.classroomBoard),
@@ -1521,7 +1521,7 @@ export function createHighSchoolChineseTeacherTemplate(): TeacherTemplateBundle 
     ]),
     page('classroom-board', pageIds.execution, '第七单元课堂流程白板', '🧑‍🏫', [
       heading_1('classroom-board', 0, '课堂流程白板｜文本预案'),
-      paragraph('classroom-board', 1, '后续将在此页接入可拖拽白板；当前预案可直接投屏或复制到备课页。'),
+      paragraph('classroom-board', 1, '下方已嵌入可拖拽白板；当前文本预案也可直接投屏或复制到备课页。'),
       code('classroom-board', 2, '单元主题 → 核心问题 → 文本研读 → 学习活动 → 学习成果 → 评价与复盘\n\n现代散文：故都的秋／荷塘月色／我与地坛\n古代山水：赤壁赋／登泰山记\n\n课堂生成区：新证据｜新问题｜待澄清概念'),
       heading_2('classroom-board', 3, '课堂使用规则'),
       bulleted_list('classroom-board', 4, ['每次只移动一个关键问题到“当前研读”。', '学生回答必须落在证据区，再进入结论区。', '未解决的问题放入课堂生成区，不用仓促封闭。']),
@@ -1621,7 +1621,7 @@ export function createHighSchoolChineseTeacherTemplate(): TeacherTemplateBundle 
     ]),
     page('unit-mindmap', pageIds.resources, '第七单元知识导图', '🌿', [
       heading_1('unit-mindmap', 0, '自然情怀知识导图｜文本骨架'),
-      paragraph('unit-mindmap', 1, '后续将在此页加入思维导图块；当前骨架可用于课前预习、单元回顾和知识卡片索引。'),
+      paragraph('unit-mindmap', 1, '下方已嵌入可编辑思维导图；当前文本骨架也可用于课前预习、单元回顾和知识卡片索引。'),
       code('unit-mindmap', 2, '自然情怀\n├─ 现代散文：故都的秋／荷塘月色／我与地坛\n├─ 古代山水：赤壁赋／登泰山记\n├─ 阅读方法：景物选择／层次／情感线索／比较阅读\n├─ 表达知识：情景交融／通感／比喻拟人／移步换景／虚词“而”\n└─ 单元成果：朗读标记／赏析札记／微写作'),
     ]),
     page('homework', pageIds.root, '05 作业与学情', '📝', [

@@ -519,13 +519,17 @@ describe('createHighSchoolChineseTeacherTemplate', () => {
       'gantt',
       'table',
     ])
-    expect(taskState.database.viewOrder.map((viewId) => taskState.database.views[viewId]?.name)).toEqual([
+    const taskViewNames = taskState.database.viewOrder
+      .map((viewId) => taskState.database.views[viewId]?.name)
+    expect(taskViewNames).toEqual([
       '全部任务',
       '备课看板',
       '教学日历',
       '单元进度',
-      '本周待办',
+      '未完成任务',
     ])
+    expect(taskViewNames).toContain('未完成任务')
+    expect(taskViewNames).not.toContain('本周待办')
 
     const taskProperties = Object.values(taskState.properties)
     const dueDateProperty = taskProperties.find((property) => property.key === 'dueDate')
@@ -552,8 +556,8 @@ describe('createHighSchoolChineseTeacherTemplate', () => {
     expect(dueDates[0]).toBe('2026-10-19')
     expect(dueDates.at(-1)).toBe('2026-11-13')
     expect(dueDates).toEqual([...dueDates].sort())
-    const weekView = taskState.database.views[taskState.database.viewOrder[4]!]
-    expect(weekView?.filters).toEqual([
+    const unfinishedView = taskState.database.views[taskState.database.viewOrder[4]!]
+    expect(unfinishedView?.filters).toEqual([
       expect.objectContaining({
         propertyId: statusProperty.id,
         operator: 'isNot',
@@ -885,6 +889,19 @@ describe('createHighSchoolChineseTeacherTemplate', () => {
 
   it('builds deeply equal deterministic template output', () => {
     expect(createHighSchoolChineseTeacherTemplate()).toEqual(createHighSchoolChineseTeacherTemplate())
+  })
+
+  it('describes embedded editable objects as already available', () => {
+    const template = createHighSchoolChineseTeacherTemplate()
+    const serialized = JSON.stringify(template)
+    const pageText = (title: string) => template.pages
+      .find((page) => page.title === title)?.blocks.map(blockText).join('\n') ?? ''
+
+    expect(serialized).not.toMatch(/后续(?:将在此页|还可)?(?:加入|接入)/)
+    expect(pageText('学期教学地图')).toContain('已嵌入可编辑对象')
+    expect(pageText('03 教学执行')).toContain('下方页面已嵌入')
+    expect(pageText('第七单元课堂流程白板')).toContain('下方已嵌入可拖拽白板')
+    expect(pageText('第七单元知识导图')).toContain('下方已嵌入可编辑思维导图')
   })
 
   it('keeps examples anonymous, copyright-safe, and independently mutable', () => {
