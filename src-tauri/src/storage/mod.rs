@@ -7875,6 +7875,65 @@ mod tests {
     }
 
     #[test]
+    fn teacher_template_package_imports_twice_without_collisions() {
+        let package_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../public/templates/high-school-chinese-teacher-workbench.zhiqi",
+        );
+        let archive = fs::read(package_path).expect("teacher template package exists");
+        let target = Storage::open_in_memory_for_tests().expect("target opens");
+        let mut empty_target = sample_snapshot();
+        empty_target.pages.clear();
+        empty_target.boards.clear();
+        empty_target.data_tables.clear();
+        empty_target.mindmaps.clear();
+        empty_target.synced_block_groups.clear();
+        empty_target.page_properties.clear();
+        empty_target.settings.last_opened_page_id = None;
+        target
+            .replace_workspace_backup(empty_target)
+            .expect("initialize target settings");
+
+        let first = target
+            .import_page_package(archive.clone())
+            .expect("first teacher template import");
+        let second = target
+            .import_page_package(archive)
+            .expect("second teacher template import");
+        let imported = target.export_workspace_backup().expect("export target");
+        let first_page_ids = target
+            .descendant_page_ids(&first.root_page_id)
+            .expect("first imported page tree")
+            .into_iter()
+            .collect::<HashSet<_>>();
+        let second_page_ids = target
+            .descendant_page_ids(&second.root_page_id)
+            .expect("second imported page tree")
+            .into_iter()
+            .collect::<HashSet<_>>();
+
+        assert_ne!(first.root_page_id, second.root_page_id);
+        assert_eq!(imported.pages.len(), 72);
+        assert_eq!(imported.boards.len(), 4);
+        assert_eq!(imported.data_tables.len(), 6);
+        assert_eq!(imported.mindmaps.len(), 4);
+        assert_eq!(imported.synced_block_groups.len(), 4);
+        assert_eq!(
+            imported
+                .pages
+                .iter()
+                .filter(|page| {
+                    page.parent_id.is_none()
+                        && page.title == "高中语文教师工作台｜高一上学期"
+                })
+                .count(),
+            2
+        );
+        assert_eq!(first_page_ids.len(), 36);
+        assert_eq!(second_page_ids.len(), 36);
+        assert!(first_page_ids.is_disjoint(&second_page_ids));
+    }
+
+    #[test]
     fn page_package_importing_same_archive_twice_keeps_both_imported_roots() {
         let source = Storage::open_in_memory_for_tests().expect("source opens");
         source

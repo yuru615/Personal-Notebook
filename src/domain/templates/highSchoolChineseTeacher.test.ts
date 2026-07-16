@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import type { AppState } from '../../components/dataTable/domain/types'
 import type { WhiteboardSnapshot } from '../../components/whiteboard/whiteboardModel'
 import type { BlockRecord } from '../types'
-import { createHighSchoolChineseTeacherTemplate } from './highSchoolChineseTeacher'
+import {
+  createHighSchoolChineseTeacherTemplate,
+  validateHighSchoolChineseTeacherTemplate,
+} from './highSchoolChineseTeacher'
 
 const lessonTitles = [
   '14-1《故都的秋》',
@@ -111,6 +114,39 @@ function blockText(block: BlockRecord) {
     .filter((value): value is string => typeof value === 'string')
     .join('\n')
 }
+
+describe('validateHighSchoolChineseTeacherTemplate', () => {
+  it('accepts the complete teacher template bundle', () => {
+    expect(() => validateHighSchoolChineseTeacherTemplate(
+      createHighSchoolChineseTeacherTemplate(),
+    )).not.toThrow()
+  })
+
+  it('rejects a whiteboard block whose board is missing', () => {
+    const template = structuredClone(createHighSchoolChineseTeacherTemplate())
+    const root = template.pages.find((page) => page.id === template.rootPageId)!
+
+    root.blocks.push({
+      id: 'teacher-template-block-missing-board',
+      type: 'whiteboard',
+      boardId: 'missing-board',
+    })
+
+    expect(() => validateHighSchoolChineseTeacherTemplate(template))
+      .toThrow('missing board: missing-board')
+  })
+
+  it('accepts hidden view groups that also occur in the group order', () => {
+    const template = createHighSchoolChineseTeacherTemplate()
+    const taskState = template.dataTables[0]!.snapshot as AppState
+    const boardView = Object.values(taskState.database.views)
+      .find((view) => view.layout === 'board')!
+
+    boardView.boardHiddenColumnIds = [boardView.boardColumnOrder[0]!]
+
+    expect(() => validateHighSchoolChineseTeacherTemplate(template)).not.toThrow()
+  })
+})
 
 describe('createHighSchoolChineseTeacherTemplate', () => {
   it('creates the approved single-root teacher page tree', () => {

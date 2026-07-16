@@ -8,7 +8,10 @@ import type {
   SelectOption,
 } from '../../components/dataTable/domain/types'
 import { createEmptyMindmapSnapshot } from '../../components/mindmap/mindmapModel'
-import { createEmptyBoardSnapshot } from '../../components/whiteboard/whiteboardModel'
+import {
+  createEmptyBoardSnapshot,
+  type WhiteboardSnapshot,
+} from '../../components/whiteboard/whiteboardModel'
 import type {
   BlockRecord,
   BoardRecord,
@@ -1806,5 +1809,391 @@ export function createHighSchoolChineseTeacherTemplate(): TeacherTemplateBundle 
     mindmaps,
     syncedBlockGroups,
     assets,
+  }
+}
+
+interface TemplateReferenceIds {
+  pages: Set<string>
+  boards: Set<string>
+  dataTables: Set<string>
+  mindmaps: Set<string>
+  syncedGroups: Set<string>
+  assets: Set<string>
+}
+
+interface TemplateMindmapNode {
+  id: string
+  parentId: string | null
+  childIds: string[]
+}
+
+interface TemplateMindmapSnapshot {
+  rootId: string
+  nodes: Record<string, TemplateMindmapNode>
+}
+
+function requireUnique(values: Iterable<string>, label: string) {
+  const seen = new Set<string>()
+
+  for (const value of values) {
+    if (seen.has(value)) {
+      throw new Error(`duplicate ${label}: ${value}`)
+    }
+    seen.add(value)
+  }
+}
+
+function requireReference(ids: Set<string>, value: string, label: string) {
+  if (!ids.has(value)) {
+    throw new Error(`missing ${label}: ${value}`)
+  }
+}
+
+function validateCompleteOrder(order: string[], ids: Set<string>, label: string) {
+  requireUnique(order, `${label} id`)
+  for (const value of order) {
+    requireReference(ids, value, label)
+  }
+  if (order.length !== ids.size) {
+    throw new Error(`incomplete ${label}`)
+  }
+}
+
+function validateBlockReferences(
+  block: BlockRecord,
+  ids: TemplateReferenceIds,
+  allowSyncedBlock: boolean,
+) {
+  if ('richText' in block) {
+    for (const segment of block.richText ?? []) {
+      if (segment.pageId !== undefined) {
+        requireReference(ids.pages, segment.pageId, 'page')
+      }
+    }
+  }
+
+  switch (block.type) {
+    case 'child_page':
+      requireReference(ids.pages, block.pageId, 'page')
+      break
+    case 'whiteboard':
+      requireReference(ids.boards, block.boardId, 'board')
+      break
+    case 'data_table':
+      requireReference(ids.dataTables, block.databaseId, 'data table')
+      break
+    case 'mindmap':
+      requireReference(ids.mindmaps, block.mindmapId, 'mindmap')
+      break
+    case 'synced_block':
+      if (!allowSyncedBlock) {
+        throw new Error(`nested synced block: ${block.id}`)
+      }
+      requireReference(ids.syncedGroups, block.groupId, 'synced group')
+      break
+    case 'image':
+    case 'video':
+    case 'audio':
+    case 'file':
+      if (block.assetId !== null) {
+        requireReference(ids.assets, block.assetId, 'asset')
+      }
+      break
+  }
+}
+
+function validatePageTree(bundle: TeacherTemplateBundle, pageIds: Set<string>) {
+  requireReference(pageIds, bundle.rootPageId, 'root page')
+  const root = bundle.pages.find((page) => page.id === bundle.rootPageId)!
+  if (root.parentId !== null) {
+    throw new Error(`root page has parent: ${bundle.rootPageId}`)
+  }
+
+  const roots = bundle.pages.filter((page) => page.parentId === null)
+  if (roots.length !== 1) {
+    throw new Error(`expected exactly one root page, found ${roots.length}`)
+  }
+
+  const childrenByParent = new Map<string, string[]>()
+  for (const page of bundle.pages) {
+    if (page.parentId === null) {
+      continue
+    }
+    requireReference(pageIds, page.parentId, 'parent page')
+    const children = childrenByParent.get(page.parentId) ?? []
+    children.push(page.id)
+    childrenByParent.set(page.parentId, children)
+  }
+
+  const reachable = new Set<string>()
+  const queue = [bundle.rootPageId]
+  while (queue.length > 0) {
+    const pageId = queue.shift()!
+    if (reachable.has(pageId)) {
+      continue
+    }
+    reachable.add(pageId)
+    queue.push(...(childrenByParent.get(pageId) ?? []))
+  }
+
+  const unreachable = bundle.pages.find((page) => !reachable.has(page.id))
+  if (unreachable) {
+    throw new Error(`unreachable page: ${unreachable.id}`)
+  }
+}
+
+function validateDataTable(dataTable: DataTableRecord) {
+  if (!dataTable.snapshot || typeof dataTable.snapshot !== 'object') {
+    throw new Error(`invalid data table snapshot: ${dataTable.id}`)
+  }
+
+  const snapshot = dataTable.snapshot as AppState
+  if (snapshot.database.id !== dataTable.id) {
+    throw new Error(`data table id mismatch: ${dataTable.id}`)
+  }
+
+  const propertyEntries = Object.entries(snapshot.properties)
+  const properties = propertyEntries.map(([, property]) => property)
+  const propertyIds = new Set(propertyEntries.map(([propertyId]) => propertyId))
+  requireUnique(properties.map((property) => property.id), 'data table property id')
+  for (const [propertyId, property] of propertyEntries) {
+    if (property.id !== propertyId) {
+      throw new Error(`data table property key mismatch: ${propertyId}`)
+    }
+    const options = property.config.options ?? []
+    requireUnique(options.map((option) => option.id), 'select option id')
+    requireUnique(options.map((option) => option.label), 'select option label')
+  }
+  validateCompleteOrder(snapshot.database.propertyOrder, propertyIds, 'data table property')
+
+  const viewEntries = Object.entries(snapshot.database.views)
+  const viewIds = new Set(viewEntries.map(([viewId]) => viewId))
+  requireUnique(viewEntries.map(([, view]) => view.id), 'data table view id')
+  for (const [viewId, view] of viewEntries) {
+    if (view.id !== viewId) {
+      throw new Error(`data table view key mismatch: ${viewId}`)
+    }
+  }
+  validateCompleteOrder(snapshot.database.viewOrder, viewIds, 'data table view')
+  requireReference(viewIds, snapshot.database.activeViewId, 'active data table view')
+
+  const recordEntries = Object.entries(snapshot.records)
+  const recordIds = new Set(recordEntries.map(([recordId]) => recordId))
+  requireUnique(recordEntries.map(([, record]) => record.id), 'data table record id')
+  for (const [recordId, record] of recordEntries) {
+    if (record.id !== recordId) {
+      throw new Error(`data table record key mismatch: ${recordId}`)
+    }
+    for (const propertyId of Object.keys(record.values)) {
+      requireReference(propertyIds, propertyId, 'data table property')
+    }
+
+    for (const property of properties) {
+      if (property.type !== 'select' && property.type !== 'multiSelect') {
+        continue
+      }
+      const value = record.values[property.id]
+      const labels = Array.isArray(value)
+        ? value
+        : value === null || value === undefined || value === ''
+          ? []
+          : [String(value)]
+      const optionLabels = new Set((property.config.options ?? []).map((option) => option.label))
+      for (const label of labels) {
+        requireReference(optionLabels, label, 'select option label')
+      }
+    }
+  }
+
+  for (const [recordId, recordPage] of Object.entries(snapshot.recordPages)) {
+    requireReference(recordIds, recordId, 'data table record')
+    if (recordPage.recordId !== recordId) {
+      throw new Error(`record page key mismatch: ${recordId}`)
+    }
+  }
+  if (Object.keys(snapshot.recordPages).length !== recordIds.size) {
+    throw new Error(`incomplete record pages: ${dataTable.id}`)
+  }
+
+  for (const view of Object.values(snapshot.database.views)) {
+    const propertyReferences = [
+      view.sort?.propertyId,
+      ...view.filters.map((filter) => filter.propertyId),
+      view.tableGroupPropertyId,
+      view.boardGroupPropertyId,
+      view.ganttStartPropertyId,
+      view.ganttEndPropertyId,
+      view.calendarDatePropertyId,
+      ...view.hiddenPropertyIds,
+      ...Object.keys(view.columnWidths),
+    ].filter((propertyId): propertyId is string => propertyId !== null && propertyId !== undefined)
+    for (const propertyId of propertyReferences) {
+      requireReference(propertyIds, propertyId, 'data table property')
+    }
+
+    for (const optionIds of [
+      view.tableGroupOrder,
+      view.tableHiddenGroupIds ?? [],
+      view.tableCollapsedGroupIds ?? [],
+    ]) {
+      validateViewGroupOptions(view.tableGroupPropertyId, optionIds, snapshot, view.id)
+    }
+    for (const optionIds of [view.boardColumnOrder, view.boardHiddenColumnIds ?? []]) {
+      validateViewGroupOptions(view.boardGroupPropertyId, optionIds, snapshot, view.id)
+    }
+  }
+}
+
+function validateViewGroupOptions(
+  propertyId: string | null,
+  optionIds: string[],
+  snapshot: AppState,
+  viewId: string,
+) {
+  requireUnique(optionIds, `view group option id in ${viewId}`)
+  if (optionIds.length === 0) {
+    return
+  }
+  if (propertyId === null) {
+    throw new Error(`missing group property: ${viewId}`)
+  }
+  const validOptions = new Set(
+    (snapshot.properties[propertyId]?.config.options ?? []).map((option) => option.id),
+  )
+  for (const optionId of optionIds) {
+    requireReference(validOptions, optionId, 'view group option')
+  }
+}
+
+function validateBoard(board: BoardRecord) {
+  const snapshot = board.snapshot as Partial<WhiteboardSnapshot> | null
+  if (
+    !snapshot ||
+    !Array.isArray(snapshot.notes) ||
+    !Array.isArray(snapshot.shapes) ||
+    !Array.isArray(snapshot.connections)
+  ) {
+    throw new Error(`invalid board snapshot: ${board.id}`)
+  }
+
+  const endpointIds = new Set([
+    ...snapshot.notes.map((note) => note.id),
+    ...snapshot.shapes.map((shape) => shape.id),
+  ])
+  for (const connection of snapshot.connections) {
+    requireReference(endpointIds, connection.from, 'board connection endpoint')
+    requireReference(endpointIds, connection.to, 'board connection endpoint')
+  }
+}
+
+function validateMindmap(mindmap: MindmapRecord) {
+  if (!mindmap.snapshot || typeof mindmap.snapshot !== 'object') {
+    throw new Error(`invalid mindmap snapshot: ${mindmap.id}`)
+  }
+
+  const snapshot = mindmap.snapshot as TemplateMindmapSnapshot
+  const nodeEntries = Object.entries(snapshot.nodes ?? {})
+  const nodeIds = new Set(nodeEntries.map(([nodeId]) => nodeId))
+  requireReference(nodeIds, snapshot.rootId, 'mindmap root node')
+  requireUnique(nodeEntries.map(([, node]) => node.id), 'mindmap node id')
+
+  for (const [nodeId, node] of nodeEntries) {
+    if (node.id !== nodeId) {
+      throw new Error(`mindmap node key mismatch: ${nodeId}`)
+    }
+    requireUnique(node.childIds, `mindmap child id for ${nodeId}`)
+    if (nodeId === snapshot.rootId) {
+      if (node.parentId !== null) {
+        throw new Error(`mindmap root has parent: ${snapshot.rootId}`)
+      }
+    } else if (node.parentId === null) {
+      throw new Error(`mindmap node missing parent: ${nodeId}`)
+    } else {
+      requireReference(nodeIds, node.parentId, 'mindmap parent node')
+      const parent = snapshot.nodes[node.parentId]!
+      if (!parent.childIds.includes(nodeId)) {
+        throw new Error(`mindmap parent missing child: ${nodeId}`)
+      }
+    }
+
+    for (const childId of node.childIds) {
+      requireReference(nodeIds, childId, 'mindmap child node')
+      if (snapshot.nodes[childId]!.parentId !== nodeId) {
+        throw new Error(`mindmap child parent mismatch: ${childId}`)
+      }
+    }
+  }
+
+  const reachable = new Set<string>()
+  const queue = [snapshot.rootId]
+  while (queue.length > 0) {
+    const nodeId = queue.shift()!
+    if (reachable.has(nodeId)) {
+      continue
+    }
+    reachable.add(nodeId)
+    queue.push(...snapshot.nodes[nodeId]!.childIds)
+  }
+  const unreachable = nodeEntries.find(([nodeId]) => !reachable.has(nodeId))
+  if (unreachable) {
+    throw new Error(`unreachable mindmap node: ${unreachable[0]}`)
+  }
+}
+
+export function validateHighSchoolChineseTeacherTemplate(bundle: TeacherTemplateBundle): void {
+  requireUnique(bundle.pages.map((page) => page.id), 'page id')
+  requireUnique(bundle.pages.flatMap((page) => page.blocks.map((block) => block.id)), 'page block id')
+  requireUnique(bundle.boards.map((board) => board.id), 'board id')
+  requireUnique(bundle.dataTables.map((dataTable) => dataTable.id), 'data table id')
+  requireUnique(bundle.mindmaps.map((mindmap) => mindmap.id), 'mindmap id')
+  requireUnique(bundle.syncedBlockGroups.map((group) => group.id), 'synced group id')
+  requireUnique(bundle.assets.map((asset) => asset.id), 'asset id')
+  requireUnique(bundle.assets.map((asset) => asset.relativePath), 'asset relative path')
+
+  const ids: TemplateReferenceIds = {
+    pages: new Set(bundle.pages.map((page) => page.id)),
+    boards: new Set(bundle.boards.map((board) => board.id)),
+    dataTables: new Set(bundle.dataTables.map((dataTable) => dataTable.id)),
+    mindmaps: new Set(bundle.mindmaps.map((mindmap) => mindmap.id)),
+    syncedGroups: new Set(bundle.syncedBlockGroups.map((group) => group.id)),
+    assets: new Set(bundle.assets.map((asset) => asset.id)),
+  }
+
+  validatePageTree(bundle, ids.pages)
+
+  const syncedInstances = bundle.pages.flatMap((page) => page.blocks
+    .filter((block) => block.type === 'synced_block'))
+  requireUnique(syncedInstances.map((block) => block.instanceId), 'synced instance id')
+  const syncedInstanceById = new Map(syncedInstances.map((block) => [block.instanceId, block]))
+
+  for (const page of bundle.pages) {
+    for (const block of page.blocks) {
+      validateBlockReferences(block, ids, true)
+    }
+  }
+  for (const group of bundle.syncedBlockGroups) {
+    requireUnique(group.blocks.map((block) => block.id), `block id in synced group ${group.id}`)
+    for (const block of group.blocks) {
+      validateBlockReferences(block, ids, false)
+    }
+    const primary = syncedInstanceById.get(group.primaryInstanceId)
+    if (!primary || primary.groupId !== group.id) {
+      throw new Error(`missing synced primary instance: ${group.primaryInstanceId}`)
+    }
+  }
+
+  for (const asset of bundle.assets) {
+    if (asset.bytes.byteLength === 0) {
+      throw new Error(`empty asset bytes: ${asset.id}`)
+    }
+  }
+  for (const dataTable of bundle.dataTables) {
+    validateDataTable(dataTable)
+  }
+  for (const board of bundle.boards) {
+    validateBoard(board)
+  }
+  for (const mindmap of bundle.mindmaps) {
+    validateMindmap(mindmap)
   }
 }
