@@ -1671,3 +1671,24 @@
 - 已通过完整前端测试：89 个测试文件、787 条测试；完整 Rust 测试：155 passed、0 failed；`npm run lint`：0 error、5 条既有 Hook warning；`npm run build` 通过。
 - 已完成真实 Chatbox 六类内容写入与知栖页面、原生数据表、白板、思维导图打开验收；`scripts/mcp-smoke-test.mjs` 的完整隔离实例复跑、令牌轮换与真实重启验收仍待桌面解锁后执行。
 - 采用新 `zhiqi` 应用标识的 Windows 1.1.0 release 可执行文件与 `知栖_1.1.0_x64-setup.exe`（NSIS）已重新构建并核对；MSI 在 NSIS 生成后超过本次打包时限，待后续单独补建。
+# 2026-07-16 客户端公网 IP 构建与更新器启动修复
+
+提交：待提交
+
+简要描述：
+
+修复 Tauri 开发模式因 updater 空配置崩溃的问题，并支持在尚无 HTTPS 域名时通过公网 IP 构建仅供联调的签名安装包。
+
+详细描述：
+
+- Tauri 基础配置显式声明 updater 对象和验签公钥，避免插件把缺失配置解析为 `null` 后在应用启动阶段崩溃。
+- 桌面打包命令统一使用构建包装脚本，优先读取环境变量，并可从 `~/.config/zhiqi/updater/` 加载本机密钥；私钥和密码不会进入仓库。
+- API 地址为 HTTP 时，包装脚本显式合并 `dangerousInsecureTransportProtocol` 并设置构建许可；HTTPS 构建保持默认安全行为。
+- Release 构建仍会拒绝未显式许可的 HTTP 地址，避免普通生产构建意外降级。
+
+验证情况：
+
+- 已验证 `npm run tauri:dev` 正常启动，updater 插件不再因缺失配置崩溃。
+- 已通过 `npx vitest run src-tauri/tauriConfig.test.ts`，共 3 项测试，并增加 updater 公钥严格 Base64 解码回归。
+- 已通过 `npm run build` 和更新端点 Rust 定向测试。
+- 已通过 `npm run tauri:build`，成功生成 `.app`、`.dmg`、`.app.tar.gz` 与 `.sig`。

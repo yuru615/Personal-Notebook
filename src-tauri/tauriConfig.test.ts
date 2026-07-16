@@ -14,6 +14,11 @@ type TauriConfig = {
     createUpdaterArtifacts?: boolean
   }
   version?: string
+  plugins?: {
+    updater?: {
+      pubkey?: string
+    }
+  }
 }
 
 const srcTauriDir = dirname(fileURLToPath(import.meta.url))
@@ -56,5 +61,11 @@ describe('Tauri config', () => {
 
     expect(config.version).toBe('0.1.0')
     expect(config.bundle?.createUpdaterArtifacts).toBe(true)
+    const updaterPublicKey = config.plugins?.updater?.pubkey ?? ''
+    const decodedPublicKey = Buffer.from(updaterPublicKey, 'base64').toString('utf8')
+
+    expect(updaterPublicKey.length % 4).toBe(0)
+    expect(Buffer.from(decodedPublicKey).toString('base64')).toBe(updaterPublicKey)
+    expect(decodedPublicKey).toMatch(/^untrusted comment: minisign public key:/)
   })
 })

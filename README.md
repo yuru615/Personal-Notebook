@@ -93,12 +93,17 @@ npm run dev
 - 会话 Token 由 Rust 保存到 macOS Keychain 或 Windows Credential Manager，不写入知识库数据库、localStorage 或 React 状态。
 - 未登录、账号停用或会话过期时不会初始化工作区，也不会启动本机 MCP；退出登录不会删除本地内容。
 
-账号服务和更新服务 origin 在编译时通过 `ZHIQI_API_BASE_URL` 注入。Debug 构建允许 HTTP 联调；Release 构建必须同时设置 HTTPS 地址和 Tauri updater 公钥，否则构建会失败：
+账号服务和更新服务 origin 在编译时通过 `ZHIQI_API_BASE_URL` 注入。Debug 构建允许 HTTP 联调；`npm run tauri:build` 会优先读取环境变量，否则读取 `~/.config/zhiqi/updater/` 中的本机 updater 密钥。当前未设置 API 地址时默认使用 `http://117.72.91.46`，包装脚本会显式开启仅供开发联调的 HTTP transport：
+
+```bash
+npm run tauri:build
+```
+
+正式构建应设置 HTTPS 地址；此时包装脚本不会开启不安全 transport：
 
 ```bash
 ZHIQI_API_BASE_URL=https://account.example.com \
-TAURI_UPDATER_PUBLIC_KEY='<updater-public-key>' \
-TAURI_SIGNING_PRIVATE_KEY='<private-key-path-or-content>' \
+TAURI_SIGNING_PRIVATE_KEY='<private-key-content>' \
 TAURI_SIGNING_PRIVATE_KEY_PASSWORD='<private-key-password>' \
 npm run tauri:build:mac
 ```
@@ -115,7 +120,7 @@ npm run tauri:build:mac
 npm run tauri -- signer generate -w ~/.config/zhiqi/updater.key
 ```
 
-私钥和密码只通过 `TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 提供；公钥同时配置到客户端构建环境和服务端 `TAURI_UPDATER_PUBLIC_KEY`。私钥不得进入仓库、管理后台或服务器。首版发布后更换公钥会使旧客户端无法验证新更新包。
+私钥内容和密码只通过 `TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 提供；本机构建包装脚本可从安全目录读取私钥内容后仅传给构建子进程。公钥固定在客户端 Tauri 配置中，并同时配置到服务端 `TAURI_UPDATER_PUBLIC_KEY`。私钥不得进入仓库、管理后台或服务器。首版发布后更换公钥会使旧客户端无法验证新更新包。
 
 本地正式产物按平台构建：
 
