@@ -958,7 +958,11 @@ function createTeachingDataTables(): DataTableRecord[] {
       title,
       values: { className, lesson, observationType, frequency, evidence, strategy, status, reviewDate },
     })),
-    [{ slug: 'all', name: '全部观察', layout: 'table' }],
+    [
+      { slug: 'all', name: '全部观察', layout: 'table' },
+      { slug: 'follow-up', name: '跟进看板', layout: 'board', groupKey: 'status' },
+      { slug: 'review-calendar', name: '复查日历', layout: 'calendar', dateKey: 'reviewDate' },
+    ],
   )
 
   return [taskTable, resourceTable, observationTable]

@@ -326,6 +326,26 @@ describe('createHighSchoolChineseTeacherTemplate', () => {
     ])
   })
 
+  it('uses table, follow-up board, and review calendar layouts for observations', () => {
+    const template = createHighSchoolChineseTeacherTemplate()
+    const observationTable = template.dataTables.find((dataTable) => dataTable.title === '学情观察库')
+
+    expect(observationTable).toBeDefined()
+    if (!observationTable) {
+      return
+    }
+
+    const snapshot = observationTable.snapshot as AppState
+    const statusProperty = Object.values(snapshot.properties).find((property) => property.key === 'status')
+    const reviewDateProperty = Object.values(snapshot.properties).find((property) => property.key === 'reviewDate')
+    const views = snapshot.database.viewOrder.map((viewId) => snapshot.database.views[viewId]!)
+
+    expect(views.map((view) => view.layout)).toEqual(['table', 'board', 'calendar'])
+    expect(views.map((view) => view.name)).toEqual(['全部观察', '跟进看板', '复查日历'])
+    expect(views[1]?.boardGroupPropertyId).toBe(statusProperty?.id)
+    expect(views[2]?.calendarDatePropertyId).toBe(reviewDateProperty?.id)
+  })
+
   it('keeps every data-table property, record-page, and view reference valid', () => {
     const template = createHighSchoolChineseTeacherTemplate()
 
