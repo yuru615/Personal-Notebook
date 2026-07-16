@@ -4,6 +4,7 @@ import type { WhiteboardSnapshot } from '../../components/whiteboard/whiteboardM
 import type { BlockRecord } from '../types'
 import {
   createHighSchoolChineseTeacherTemplate,
+  type TeacherTemplateBundle,
   validateHighSchoolChineseTeacherTemplate,
 } from './highSchoolChineseTeacher'
 
@@ -115,6 +116,84 @@ function blockText(block: BlockRecord) {
     .join('\n')
 }
 
+interface InvalidTeacherTemplateCase {
+  name: string
+  expectedError: string
+  mutate: (template: TeacherTemplateBundle) => void
+}
+
+const invalidTeacherTemplateCases: InvalidTeacherTemplateCase[] = [
+  {
+    name: 'duplicate page ids',
+    expectedError: 'duplicate page id: teacher-template-page-root',
+    mutate: (template) => {
+      template.pages.push(structuredClone(template.pages[0]!))
+    },
+  },
+  {
+    name: 'a missing page parent',
+    expectedError: 'missing parent page: missing-parent',
+    mutate: (template) => {
+      template.pages[1]!.parentId = 'missing-parent'
+    },
+  },
+  {
+    name: 'a child page reference to a missing page',
+    expectedError: 'missing page: missing-child-page',
+    mutate: (template) => {
+      const childPage = template.pages[0]!.blocks.find((block) => block.type === 'child_page')!
+      childPage.pageId = 'missing-child-page'
+    },
+  },
+  {
+    name: 'a nested synced block in group content',
+    expectedError: 'nested synced block: nested-synced-block',
+    mutate: (template) => {
+      const group = template.syncedBlockGroups[0]!
+      group.blocks.push({
+        id: 'nested-synced-block',
+        type: 'synced_block',
+        groupId: group.id,
+        instanceId: 'nested-synced-instance',
+        mode: 'reference',
+      })
+    },
+  },
+  {
+    name: 'a data-table view property reference that is missing',
+    expectedError: 'missing data table property: missing-view-property',
+    mutate: (template) => {
+      const state = template.dataTables[0]!.snapshot as AppState
+      const view = state.database.views[state.database.viewOrder[0]!]!
+      view.hiddenPropertyIds.push('missing-view-property')
+    },
+  },
+  {
+    name: 'duplicate asset relative paths',
+    expectedError: 'duplicate asset relative path: teacher-template/lotus-pond.svg',
+    mutate: (template) => {
+      template.assets[1]!.relativePath = template.assets[0]!.relativePath
+    },
+  },
+  {
+    name: 'a whiteboard connection endpoint that is missing',
+    expectedError: 'missing board connection endpoint: missing-board-endpoint',
+    mutate: (template) => {
+      const board = template.boards[0]!.snapshot as WhiteboardSnapshot
+      board.connections[0]!.from = 'missing-board-endpoint'
+    },
+  },
+  {
+    name: 'a mindmap parent that does not list its child',
+    expectedError: 'mindmap parent missing child:',
+    mutate: (template) => {
+      const snapshot = template.mindmaps[0]!.snapshot as TemplateMindmapSnapshot
+      const root = snapshot.nodes[snapshot.rootId]!
+      root.childIds = root.childIds.slice(1)
+    },
+  },
+]
+
 describe('validateHighSchoolChineseTeacherTemplate', () => {
   it('accepts the complete teacher template bundle', () => {
     expect(() => validateHighSchoolChineseTeacherTemplate(
@@ -145,6 +224,14 @@ describe('validateHighSchoolChineseTeacherTemplate', () => {
     boardView.boardHiddenColumnIds = [boardView.boardColumnOrder[0]!]
 
     expect(() => validateHighSchoolChineseTeacherTemplate(template)).not.toThrow()
+  })
+
+  it.each(invalidTeacherTemplateCases)('rejects $name', ({ expectedError, mutate }) => {
+    const template = structuredClone(createHighSchoolChineseTeacherTemplate())
+
+    mutate(template)
+
+    expect(() => validateHighSchoolChineseTeacherTemplate(template)).toThrow(expectedError)
   })
 })
 
