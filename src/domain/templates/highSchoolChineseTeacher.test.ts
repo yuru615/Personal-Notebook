@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import type { AppState } from '../../components/dataTable/domain/types'
+import type { WhiteboardSnapshot } from '../../components/whiteboard/whiteboardModel'
 import type { BlockRecord } from '../types'
 import { createHighSchoolChineseTeacherTemplate } from './highSchoolChineseTeacher'
 
@@ -22,6 +24,83 @@ const lessonSectionTitles = [
   '作业设计',
   '课后复盘',
 ]
+
+const taskTitles = [
+  '完成第七单元整体设计',
+  '整理单元学习任务单',
+  '制作《故都的秋》课件',
+  '高一（3）班《故都的秋》授课',
+  '高一（6）班《故都的秋》授课',
+  '完成《荷塘月色》第一课时备课',
+  '高一（3）班《荷塘月色》第一课时',
+  '高一（6）班《荷塘月色》第一课时',
+  '完成《荷塘月色》第二课时备课',
+  '高一（3）班《荷塘月色》第二课时',
+  '高一（6）班《荷塘月色》第二课时',
+  '完成《我与地坛（节选）》备课',
+  '高一（3）班《我与地坛（节选）》授课',
+  '高一（6）班《我与地坛（节选）》授课',
+  '整理《赤壁赋》文言知识清单',
+  '高一（3）班《赤壁赋》授课',
+  '高一（6）班《赤壁赋》授课',
+  '制作《登泰山记》游踪图',
+  '高一（3）班《登泰山记》授课',
+  '高一（6）班《登泰山记》授课',
+  '批改单元微写作',
+  '完成第七单元教学复盘',
+]
+
+const resourceTitles = [
+  '第七单元整体教学设计',
+  '第七单元比较阅读任务单',
+  '《故都的秋》景物与色彩整理',
+  '《故都的秋》南北秋景比较表',
+  '《荷塘月色》教师朗读提示',
+  '《荷塘月色》意象示意图',
+  '通感知识卡片',
+  '《我与地坛》关键语段研读提示',
+  '史铁生生平背景资料入口',
+  '《赤壁赋》重点实词与虚词清单',
+  '《赤壁赋》主客问答结构图',
+  '《登泰山记》游踪图',
+  '《登泰山记》日出描写赏析表',
+  '写景散文微写作提示',
+  '单元写作评价量规',
+  '单元复习与自测题',
+]
+
+const observationTitles = [
+  '高一（3）班对通感和比喻辨析不清',
+  '高一（6）班朗读能够感知节奏但缺少文本依据',
+  '《故都的秋》景物特点概括停留在形容词罗列',
+  '《我与地坛》母亲形象分析缺少细节证据',
+  '《赤壁赋》主客问答结构理解困难',
+  '文言虚词“而”的关系判断不稳定',
+  '《登泰山记》游踪与时间线容易混淆',
+  '写景练习存在景物堆砌且缺少情感线索',
+]
+
+const knowledgeCardTitles = [
+  '情景交融',
+  '通感',
+  '比喻与拟人',
+  '文言虚词“而”',
+  '移步换景',
+  '散文的情感线索',
+]
+
+interface TemplateMindmapSnapshot {
+  title: string
+  themeId: string
+  rootId: string
+  updatedAt: string
+  nodes: Record<string, {
+    id: string
+    parentId: string | null
+    childIds: string[]
+    text: string
+  }>
+}
 
 function blockText(block: BlockRecord) {
   const text = 'text' in block ? block.text : ''
@@ -176,5 +255,356 @@ describe('createHighSchoolChineseTeacherTemplate', () => {
 
     expect(text).not.toContain('\uFFFD')
     expect(text).not.toContain('Task 1')
+  })
+
+  it('contains the approved structured teaching records and task views', () => {
+    const template = createHighSchoolChineseTeacherTemplate()
+
+    expect(template.dataTables.map((dataTable) => dataTable.title)).toEqual([
+      '教学任务库',
+      '教学资源库',
+      '学情观察库',
+    ])
+    if (template.dataTables.length !== 3) {
+      return
+    }
+
+    const snapshots = template.dataTables.map((dataTable) => dataTable.snapshot as AppState)
+    expect(snapshots.map((snapshot) => Object.keys(snapshot.records).length)).toEqual([22, 16, 8])
+    expect(Object.values(snapshots[0]!.records).map((record) => record.title)).toEqual(taskTitles)
+    expect(Object.values(snapshots[1]!.records).map((record) => record.title)).toEqual(resourceTitles)
+    expect(Object.values(snapshots[2]!.records).map((record) => record.title)).toEqual(observationTitles)
+
+    const taskState = snapshots[0]!
+    expect(taskState.database.viewOrder.map((viewId) => taskState.database.views[viewId]?.layout)).toEqual([
+      'table',
+      'board',
+      'calendar',
+      'gantt',
+      'table',
+    ])
+    expect(taskState.database.viewOrder.map((viewId) => taskState.database.views[viewId]?.name)).toEqual([
+      '全部任务',
+      '备课看板',
+      '教学日历',
+      '单元进度',
+      '本周待办',
+    ])
+
+    const taskProperties = Object.values(taskState.properties)
+    const dueDateProperty = taskProperties.find((property) => property.key === 'dueDate')
+    const statusProperty = taskProperties.find((property) => property.key === 'status')
+    const priorityProperty = taskProperties.find((property) => property.key === 'priority')
+    expect(dueDateProperty).toBeDefined()
+    expect(statusProperty?.config.options?.map((option) => option.label)).toEqual([
+      '已完成',
+      '进行中',
+      '待反馈',
+      '未开始',
+    ])
+    expect(priorityProperty?.config.options?.map(({ id, label }) => [id, label])).toEqual([
+      ['high', '高'],
+      ['medium', '中'],
+      ['low', '低'],
+    ])
+
+    if (!dueDateProperty || !statusProperty) {
+      return
+    }
+
+    const dueDates = Object.values(taskState.records).map((record) => String(record.values[dueDateProperty.id]))
+    expect(dueDates[0]).toBe('2026-10-19')
+    expect(dueDates.at(-1)).toBe('2026-11-13')
+    expect(dueDates).toEqual([...dueDates].sort())
+    const weekView = taskState.database.views[taskState.database.viewOrder[4]!]
+    expect(weekView?.filters).toEqual([
+      expect.objectContaining({
+        propertyId: statusProperty.id,
+        operator: 'isNot',
+        value: '已完成',
+      }),
+    ])
+  })
+
+  it('keeps every data-table property, record-page, and view reference valid', () => {
+    const template = createHighSchoolChineseTeacherTemplate()
+
+    expect(template.dataTables).toHaveLength(3)
+    if (template.dataTables.length !== 3) {
+      return
+    }
+
+    for (const dataTable of template.dataTables) {
+      const snapshot = dataTable.snapshot as AppState
+      const propertyIds = new Set(Object.keys(snapshot.properties))
+      const recordIds = Object.keys(snapshot.records)
+
+      expect(snapshot.database.id).toBe(dataTable.id)
+      expect(snapshot.database.name).toBe(dataTable.title)
+      expect(snapshot.database.propertyOrder.every((propertyId) => propertyIds.has(propertyId))).toBe(true)
+      expect(Object.keys(snapshot.recordPages)).toEqual(recordIds)
+      expect(snapshot.database.viewOrder.every((viewId) => Boolean(snapshot.database.views[viewId]))).toBe(true)
+
+      for (const record of Object.values(snapshot.records)) {
+        expect(Object.keys(record.values).every((propertyId) => propertyIds.has(propertyId))).toBe(true)
+        expect(snapshot.recordPages[record.id]).toEqual({
+          recordId: record.id,
+          blockIds: [],
+          updatedAt: record.updatedAt,
+        })
+      }
+
+      for (const view of Object.values(snapshot.database.views)) {
+        const propertyReferences = [
+          view.sort?.propertyId,
+          ...view.filters.map((filter) => filter.propertyId),
+          view.tableGroupPropertyId,
+          view.boardGroupPropertyId,
+          view.ganttStartPropertyId,
+          view.ganttEndPropertyId,
+          view.calendarDatePropertyId,
+          ...view.hiddenPropertyIds,
+          ...Object.keys(view.columnWidths),
+        ].filter((propertyId): propertyId is string => Boolean(propertyId))
+
+        expect(propertyReferences.every((propertyId) => propertyIds.has(propertyId))).toBe(true)
+      }
+    }
+  })
+
+  it('creates editable boards and fully connected mindmaps', () => {
+    const template = createHighSchoolChineseTeacherTemplate()
+
+    expect(template.boards.map((board) => board.title)).toEqual([
+      '第七单元教学设计白板',
+      '《荷塘月色》课堂流程白板',
+    ])
+    expect(template.mindmaps.map((mindmap) => mindmap.title)).toEqual([
+      '第七单元知识导图',
+      '《荷塘月色》文本细读导图',
+    ])
+    if (template.boards.length !== 2 || template.mindmaps.length !== 2) {
+      return
+    }
+
+    const unitBoard = template.boards[0]!.snapshot as WhiteboardSnapshot
+    const lotusBoard = template.boards[1]!.snapshot as WhiteboardSnapshot
+    expect(unitBoard.shapes.map((shape) => shape.text)).toEqual([
+      '单元主题',
+      '核心问题',
+      '文本研读',
+      '学习活动',
+      '学习成果',
+      '评价与复盘',
+    ])
+    expect(unitBoard.notes).toHaveLength(6)
+    expect(new Set(unitBoard.notes.slice(0, 5).map((note) => note.color)).size).toBe(2)
+    expect(unitBoard.notes.some((note) => note.text.trim() === '课堂生成')).toBe(true)
+    expect(unitBoard.texts.length).toBeGreaterThan(0)
+
+    expect(lotusBoard.shapes.map((shape) => shape.text)).toEqual([
+      '第一课时',
+      '第二课时',
+      '板书布局',
+      '课堂生成',
+    ])
+    expect(lotusBoard.notes.length).toBeGreaterThanOrEqual(8)
+    expect(lotusBoard.notes.every((note) => /\d+ 分钟/.test(note.text))).toBe(true)
+
+    for (const board of [unitBoard, lotusBoard]) {
+      const endpointIds = new Set([
+        ...board.notes.map((note) => note.id),
+        ...board.shapes.map((shape) => shape.id),
+        ...board.texts.map((text) => text.id),
+      ])
+      expect(board.connections.length).toBeGreaterThan(0)
+      expect(board.connections.every((connection) => (
+        endpointIds.has(connection.from) && endpointIds.has(connection.to)
+      ))).toBe(true)
+    }
+
+    const expectedMaps = [
+      {
+        snapshot: template.mindmaps[0]!.snapshot as TemplateMindmapSnapshot,
+        themeId: 'mint',
+        rootText: '自然情怀',
+        branches: ['现代散文', '古代山水', '阅读方法', '表达知识', '单元成果'],
+      },
+      {
+        snapshot: template.mindmaps[1]!.snapshot as TemplateMindmapSnapshot,
+        themeId: 'dusk',
+        rootText: '荷塘月色',
+        branches: ['行文结构', '景物层次', '语言特点', '情感变化', '主题理解'],
+      },
+    ]
+
+    for (const { snapshot, themeId, rootText, branches } of expectedMaps) {
+      const root = snapshot.nodes[snapshot.rootId]
+      expect(snapshot.themeId).toBe(themeId)
+      expect(snapshot.updatedAt).toBe('2026-07-16T00:00:00.000Z')
+      expect(root?.text).toBe(rootText)
+      expect(root?.childIds.map((childId) => snapshot.nodes[childId]?.text)).toEqual(branches)
+      expect(root?.childIds.every((childId) => (snapshot.nodes[childId]?.childIds.length ?? 0) > 0)).toBe(true)
+
+      const reachable = new Set<string>()
+      const queue = [snapshot.rootId]
+      while (queue.length > 0) {
+        const nodeId = queue.shift()!
+        if (reachable.has(nodeId)) {
+          continue
+        }
+        reachable.add(nodeId)
+        const node = snapshot.nodes[nodeId]
+        for (const childId of node?.childIds ?? []) {
+          expect(snapshot.nodes[childId]?.parentId).toBe(nodeId)
+          queue.push(childId)
+        }
+      }
+      expect(reachable.size).toBe(Object.keys(snapshot.nodes).length)
+    }
+  })
+
+  it('attaches valid structured references, synced instances, mentions, and assets to planned pages', () => {
+    const template = createHighSchoolChineseTeacherTemplate()
+    const pagesByTitle = new Map(template.pages.map((page) => [page.title, page]))
+    const dataTablesByTitle = new Map(template.dataTables.map((dataTable) => [dataTable.title, dataTable]))
+    const boardsByTitle = new Map(template.boards.map((board) => [board.title, board]))
+    const mindmapsByTitle = new Map(template.mindmaps.map((mindmap) => [mindmap.title, mindmap]))
+    const pageIds = new Set(template.pages.map((page) => page.id))
+    const assetIds = new Set(template.assets.map((asset) => asset.id))
+
+    expect(template.syncedBlockGroups.map((group) => group.id)).toEqual([
+      'teacher-template-synced-group-unit-goals',
+      'teacher-template-synced-group-reflection-questions',
+    ])
+    expect(template.assets.map((asset) => asset.name)).toEqual([
+      '荷塘月色意象示意图.svg',
+      '朗读停连标记示例.txt',
+    ])
+    if (
+      template.dataTables.length !== 3 ||
+      template.boards.length !== 2 ||
+      template.mindmaps.length !== 2 ||
+      template.syncedBlockGroups.length !== 2 ||
+      template.assets.length !== 2
+    ) {
+      return
+    }
+
+    const expectedTablePages = [
+      ['01 教师工作台', '教学任务库'],
+      ['备课与教学任务', '教学任务库'],
+      ['教学进度与日历', '教学任务库'],
+      ['教学资源库', '教学资源库'],
+      ['班级教学观察', '学情观察库'],
+    ] as const
+    for (const [pageTitle, dataTableTitle] of expectedTablePages) {
+      const page = pagesByTitle.get(pageTitle)
+      const dataTable = dataTablesByTitle.get(dataTableTitle)
+      expect(page?.blocks.some((block) => (
+        block.type === 'data_table' && block.databaseId === dataTable?.id
+      ))).toBe(true)
+    }
+
+    expect(pagesByTitle.get('第七单元课堂流程白板')?.blocks.some((block) => (
+      block.type === 'whiteboard' && block.boardId === boardsByTitle.get('第七单元教学设计白板')?.id
+    ))).toBe(true)
+    expect(pagesByTitle.get('14-2《荷塘月色》')?.blocks.some((block) => (
+      block.type === 'whiteboard' && block.boardId === boardsByTitle.get('《荷塘月色》课堂流程白板')?.id
+    ))).toBe(true)
+    expect(pagesByTitle.get('第七单元知识导图')?.blocks.some((block) => (
+      block.type === 'mindmap' && block.mindmapId === mindmapsByTitle.get('第七单元知识导图')?.id
+    ))).toBe(true)
+    expect(pagesByTitle.get('14-2《荷塘月色》')?.blocks.some((block) => (
+      block.type === 'mindmap' && block.mindmapId === mindmapsByTitle.get('《荷塘月色》文本细读导图')?.id
+    ))).toBe(true)
+
+    const syncedInstances = template.pages.flatMap((page) => page.blocks
+      .filter((block) => block.type === 'synced_block')
+      .map((block) => ({ pageTitle: page.title, block })))
+    const unitGoalInstances = syncedInstances.filter(({ block }) => (
+      block.groupId === 'teacher-template-synced-group-unit-goals'
+    ))
+    const reflectionInstances = syncedInstances.filter(({ block }) => (
+      block.groupId === 'teacher-template-synced-group-reflection-questions'
+    ))
+    expect(unitGoalInstances.map(({ pageTitle, block }) => [pageTitle, block.mode])).toEqual([
+      ['01 教师工作台', 'sync'],
+      ['单元总览', 'reference'],
+      ...lessonTitles.map((title) => [title, 'reference']),
+    ])
+    expect(reflectionInstances.map(({ pageTitle, block }) => [pageTitle, block.mode])).toEqual([
+      ...lessonTitles.map((title) => [title, 'reference']),
+      ['课后复盘', 'sync'],
+    ])
+    for (const group of template.syncedBlockGroups) {
+      expect(group.blocks.some((block) => block.type === 'synced_block')).toBe(false)
+      expect(syncedInstances.some(({ block }) => block.instanceId === group.primaryInstanceId)).toBe(true)
+    }
+
+    const knowledgeCardIds = new Set(knowledgeCardTitles.map((title) => pagesByTitle.get(title)?.id))
+    const mentionedCardIds = new Set<string>()
+    for (const lessonTitle of lessonTitles) {
+      const lesson = pagesByTitle.get(lessonTitle)
+      const mentions = lesson?.blocks.flatMap((block) => (
+        'richText' in block ? block.richText ?? [] : []
+      )).filter((segment) => segment.relationKind === 'mention') ?? []
+      expect(mentions.length).toBeGreaterThan(0)
+      for (const mention of mentions) {
+        expect(mention.pageId && pageIds.has(mention.pageId)).toBe(true)
+        expect(mention.pageId && knowledgeCardIds.has(mention.pageId)).toBe(true)
+        if (mention.pageId) {
+          mentionedCardIds.add(mention.pageId)
+        }
+      }
+    }
+    expect(mentionedCardIds).toEqual(knowledgeCardIds)
+
+    const lotusPage = pagesByTitle.get('14-2《荷塘月色》')
+    const image = lotusPage?.blocks.find((block) => block.type === 'image')
+    const file = lotusPage?.blocks.find((block) => block.type === 'file')
+    expect(image?.type === 'image' && image.assetId && assetIds.has(image.assetId)).toBe(true)
+    expect(file?.type === 'file' && file.assetId && assetIds.has(file.assetId)).toBe(true)
+    if (image?.type === 'image') {
+      expect(image.caption).not.toBe('')
+      expect(image.alt).not.toBe('')
+    }
+  })
+
+  it('keeps examples anonymous, copyright-safe, and independently mutable', () => {
+    const firstTemplate = createHighSchoolChineseTeacherTemplate()
+    const serialized = JSON.stringify(firstTemplate)
+
+    expect(serialized).not.toMatch(/张三|李四|王五|学号[：:]?\s*\d+/)
+    expect(serialized).toContain('待补充')
+    expect(serialized).not.toMatch(/(?:教材扫描件|商业课件附件).{0,20}(?:已包含|已附|随模板提供)/)
+    expect(firstTemplate.assets.map(({ name, mimeType, relativePath }) => ({ name, mimeType, relativePath }))).toEqual([
+      {
+        name: '荷塘月色意象示意图.svg',
+        mimeType: 'image/svg+xml',
+        relativePath: 'teacher-template/lotus-pond.svg',
+      },
+      {
+        name: '朗读停连标记示例.txt',
+        mimeType: 'text/plain',
+        relativePath: 'teacher-template/reading-pauses.txt',
+      },
+    ])
+    if (firstTemplate.dataTables.length === 0 || firstTemplate.boards.length === 0 || firstTemplate.assets.length === 0) {
+      return
+    }
+
+    const firstTaskState = firstTemplate.dataTables[0]!.snapshot as AppState
+    const firstBoard = firstTemplate.boards[0]!.snapshot as WhiteboardSnapshot
+    firstTaskState.database.viewOrder.push('mutated-view')
+    firstBoard.notes[0]!.text = 'mutated note'
+    firstTemplate.assets[0]!.bytes[0] = 0
+
+    const freshTemplate = createHighSchoolChineseTeacherTemplate()
+    const freshTaskState = freshTemplate.dataTables[0]!.snapshot as AppState
+    const freshBoard = freshTemplate.boards[0]!.snapshot as WhiteboardSnapshot
+    expect(freshTaskState.database.viewOrder).not.toContain('mutated-view')
+    expect(freshBoard.notes[0]?.text).not.toBe('mutated note')
+    expect(freshTemplate.assets[0]?.bytes[0]).not.toBe(0)
   })
 })

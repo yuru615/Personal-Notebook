@@ -1,3 +1,14 @@
+import { createDefaultDatabaseView } from '../../components/dataTable/domain/factory'
+import type {
+  AppState,
+  DatabaseView,
+  Property,
+  PropertyType,
+  RecordValue,
+  SelectOption,
+} from '../../components/dataTable/domain/types'
+import { createEmptyMindmapSnapshot } from '../../components/mindmap/mindmapModel'
+import { createEmptyBoardSnapshot } from '../../components/whiteboard/whiteboardModel'
 import type {
   BlockRecord,
   BoardRecord,
@@ -70,6 +81,190 @@ function code(pageSlug: string, index: number, text: string): BlockRecord {
 
 function child_page(pageSlug: string, index: number, pageId: string): BlockRecord {
   return { id: blockId(pageSlug, index), type: 'child_page', pageId }
+}
+
+function data_table(
+  pageSlug: string,
+  index: number,
+  databaseId: string,
+  displayMode?: 'inline',
+): BlockRecord {
+  return { id: blockId(pageSlug, index), type: 'data_table', databaseId, displayMode }
+}
+
+function whiteboard(pageSlug: string, index: number, boardId: string): BlockRecord {
+  return { id: blockId(pageSlug, index), type: 'whiteboard', boardId }
+}
+
+function mindmap(pageSlug: string, index: number, mindmapId: string): BlockRecord {
+  return { id: blockId(pageSlug, index), type: 'mindmap', mindmapId }
+}
+
+function synced_block(
+  pageSlug: string,
+  index: number,
+  groupId: string,
+  instanceId: string,
+  mode: 'sync' | 'reference',
+): BlockRecord {
+  return { id: blockId(pageSlug, index), type: 'synced_block', groupId, instanceId, mode }
+}
+
+function mentionParagraph(
+  pageSlug: string,
+  index: number,
+  mentions: Array<{ text: string; pageId: string }>,
+): BlockRecord {
+  const richText = mentions.flatMap(({ text, pageId }, mentionIndex) => [
+    ...(mentionIndex > 0 ? [{ text: '、' }] : []),
+    { text, pageId, relationKind: 'mention' as const },
+  ])
+  const text = `相关知识卡：${mentions.map((mention) => mention.text).join('、')}`
+
+  return {
+    id: blockId(pageSlug, index),
+    type: 'paragraph',
+    text,
+    richText: [{ text: '相关知识卡：' }, ...richText],
+  }
+}
+
+interface TemplateFieldSpec {
+  key: string
+  name: string
+  type: PropertyType
+  options?: SelectOption[]
+}
+
+interface TemplateViewSpec {
+  slug: string
+  name: string
+  layout: DatabaseView['layout']
+  groupKey?: string
+  dateKey?: string
+  startKey?: string
+  endKey?: string
+  filter?: {
+    key: string
+    operator: 'isNot'
+    value: RecordValue
+  }
+}
+
+interface TemplateRecordSpec {
+  title: string
+  values: Record<string, RecordValue>
+}
+
+function createTemplateProperty(tableSlug: string, field: TemplateFieldSpec): Property {
+  return {
+    id: id('property', `${tableSlug}-${field.key}`),
+    key: field.key,
+    name: field.name,
+    type: field.type,
+    config: field.options ? { options: field.options.map((option) => ({ ...option })) } : {},
+    createdAt: TEMPLATE_NOW,
+    updatedAt: TEMPLATE_NOW,
+  }
+}
+
+function createTemplateView(
+  tableSlug: string,
+  spec: TemplateViewSpec,
+  properties: Property[],
+): DatabaseView {
+  const view = createDefaultDatabaseView(spec.layout)
+  const propertyByKey = new Map(properties.map((property) => [property.key, property]))
+  const groupProperty = spec.groupKey ? propertyByKey.get(spec.groupKey) : undefined
+
+  return {
+    ...view,
+    id: id('view', `${tableSlug}-${spec.slug}`),
+    name: spec.name,
+    layout: spec.layout,
+    filters: spec.filter
+      ? [{
+          id: id('filter', `${tableSlug}-${spec.slug}`),
+          propertyId: propertyByKey.get(spec.filter.key)!.id,
+          operator: spec.filter.operator,
+          value: Array.isArray(spec.filter.value) ? [...spec.filter.value] : spec.filter.value,
+        }]
+      : [],
+    boardGroupPropertyId: spec.layout === 'board' ? groupProperty?.id ?? null : null,
+    boardColumnOrder: spec.layout === 'board'
+      ? groupProperty?.config.options?.map((option) => option.id) ?? []
+      : [],
+    calendarDatePropertyId: spec.layout === 'calendar'
+      ? propertyByKey.get(spec.dateKey!)!.id
+      : null,
+    ganttStartPropertyId: spec.layout === 'gantt'
+      ? propertyByKey.get(spec.startKey!)!.id
+      : null,
+    ganttEndPropertyId: spec.layout === 'gantt'
+      ? propertyByKey.get(spec.endKey!)!.id
+      : null,
+    createdAt: TEMPLATE_NOW,
+    updatedAt: TEMPLATE_NOW,
+  }
+}
+
+function createTemplateDataTable(
+  tableSlug: string,
+  title: string,
+  fields: TemplateFieldSpec[],
+  recordSpecs: TemplateRecordSpec[],
+  viewSpecs: TemplateViewSpec[],
+): DataTableRecord {
+  const dataTableId = id('data-table', tableSlug)
+  const properties = fields.map((field) => createTemplateProperty(tableSlug, field))
+  const propertyByKey = new Map(properties.map((property) => [property.key, property]))
+  const views = viewSpecs.map((viewSpec) => createTemplateView(tableSlug, viewSpec, properties))
+  const records = Object.fromEntries(recordSpecs.map((recordSpec, index) => {
+    const recordId = id('record', `${tableSlug}-${String(index + 1).padStart(2, '0')}`)
+    const values = Object.fromEntries(Object.entries(recordSpec.values).map(([key, value]) => [
+      propertyByKey.get(key)!.id,
+      Array.isArray(value) ? [...value] : value,
+    ]))
+
+    return [recordId, {
+      id: recordId,
+      title: recordSpec.title,
+      values,
+      createdAt: TEMPLATE_NOW,
+      updatedAt: TEMPLATE_NOW,
+    }]
+  }))
+  const recordPages = Object.fromEntries(Object.keys(records).map((recordId) => [recordId, {
+    recordId,
+    blockIds: [],
+    updatedAt: TEMPLATE_NOW,
+  }]))
+  const snapshot: AppState = {
+    version: 1,
+    database: {
+      id: dataTableId,
+      name: title,
+      propertyOrder: properties.map((property) => property.id),
+      activeViewId: views[0]!.id,
+      viewOrder: views.map((view) => view.id),
+      views: Object.fromEntries(views.map((view) => [view.id, view])),
+      createdAt: TEMPLATE_NOW,
+      updatedAt: TEMPLATE_NOW,
+    },
+    properties: Object.fromEntries(properties.map((property) => [property.id, property])),
+    records,
+    recordPages,
+    blocks: {},
+    assets: {},
+  }
+
+  return {
+    id: dataTableId,
+    title,
+    snapshot,
+    createdAt: TEMPLATE_NOW,
+    updatedAt: TEMPLATE_NOW,
+  }
 }
 
 function page(
@@ -441,7 +636,694 @@ const lessonSpecs: Array<{ title: string; icon: string; spec: LessonSpec }> = [
   },
 ]
 
+function createTeachingDataTables(): DataTableRecord[] {
+  const taskTitles = [
+    '完成第七单元整体设计',
+    '整理单元学习任务单',
+    '制作《故都的秋》课件',
+    '高一（3）班《故都的秋》授课',
+    '高一（6）班《故都的秋》授课',
+    '完成《荷塘月色》第一课时备课',
+    '高一（3）班《荷塘月色》第一课时',
+    '高一（6）班《荷塘月色》第一课时',
+    '完成《荷塘月色》第二课时备课',
+    '高一（3）班《荷塘月色》第二课时',
+    '高一（6）班《荷塘月色》第二课时',
+    '完成《我与地坛（节选）》备课',
+    '高一（3）班《我与地坛（节选）》授课',
+    '高一（6）班《我与地坛（节选）》授课',
+    '整理《赤壁赋》文言知识清单',
+    '高一（3）班《赤壁赋》授课',
+    '高一（6）班《赤壁赋》授课',
+    '制作《登泰山记》游踪图',
+    '高一（3）班《登泰山记》授课',
+    '高一（6）班《登泰山记》授课',
+    '批改单元微写作',
+    '完成第七单元教学复盘',
+  ]
+  const taskDates = [
+    '2026-10-19',
+    '2026-10-20',
+    '2026-10-21',
+    '2026-10-22',
+    '2026-10-23',
+    '2026-10-24',
+    '2026-10-26',
+    '2026-10-27',
+    '2026-10-28',
+    '2026-10-29',
+    '2026-10-30',
+    '2026-11-02',
+    '2026-11-03',
+    '2026-11-04',
+    '2026-11-05',
+    '2026-11-06',
+    '2026-11-09',
+    '2026-11-09',
+    '2026-11-10',
+    '2026-11-11',
+    '2026-11-12',
+    '2026-11-13',
+  ]
+  const taskRecords = taskTitles.map((title, index): TemplateRecordSpec => {
+    const lesson = title.includes('故都的秋')
+      ? '故都的秋'
+      : title.includes('荷塘月色')
+        ? '荷塘月色'
+        : title.includes('我与地坛')
+          ? '我与地坛（节选）'
+          : title.includes('赤壁赋')
+            ? '赤壁赋'
+            : title.includes('登泰山记')
+              ? '登泰山记'
+              : '第七单元'
+    const taskType = title.includes('授课') || /高一（[36]）班《荷塘月色》/.test(title)
+      ? '授课'
+      : title.includes('备课')
+        ? '备课'
+        : title.includes('制作') || title.includes('整理')
+          ? '资源制作'
+          : title.includes('批改')
+            ? '批改'
+            : title.includes('复盘')
+              ? '复盘'
+              : '单元设计'
+    const className = title.startsWith('高一（3）班')
+      ? ['高一（3）班']
+      : title.startsWith('高一（6）班')
+        ? ['高一（6）班']
+        : []
+    const status = index < 5
+      ? '已完成'
+      : index < 9
+        ? '进行中'
+        : index === 20
+          ? '待反馈'
+          : '未开始'
+    const priority = taskType === '授课' || taskType === '备课' || taskType === '单元设计'
+      ? '高'
+      : taskType === '资源制作'
+        ? '中'
+        : '低'
+
+    return {
+      title,
+      values: {
+        status,
+        taskType,
+        lesson,
+        className,
+        startDate: taskDates[index]!,
+        dueDate: taskDates[index]!,
+        priority,
+        notes: '示例计划，请按本校校历和实际课次调整。',
+      },
+    }
+  })
+  const taskTable = createTemplateDataTable(
+    'teaching-tasks',
+    '教学任务库',
+    [
+      { key: 'name', name: '任务名称', type: 'title' },
+      {
+        key: 'status',
+        name: '状态',
+        type: 'select',
+        options: [
+          { id: 'completed', label: '已完成', color: 'green' },
+          { id: 'in-progress', label: '进行中', color: 'blue' },
+          { id: 'feedback', label: '待反馈', color: 'orange' },
+          { id: 'not-started', label: '未开始', color: 'gray' },
+        ],
+      },
+      {
+        key: 'taskType',
+        name: '任务类型',
+        type: 'select',
+        options: ['单元设计', '资源制作', '备课', '授课', '批改', '复盘'].map((label, index) => ({
+          id: `task-type-${index + 1}`,
+          label,
+          color: ['purple', 'yellow', 'blue', 'green', 'orange', 'gray'][index]!,
+        })),
+      },
+      {
+        key: 'lesson',
+        name: '所属课文',
+        type: 'select',
+        options: ['第七单元', '故都的秋', '荷塘月色', '我与地坛（节选）', '赤壁赋', '登泰山记'].map((label, index) => ({
+          id: `lesson-${index + 1}`,
+          label,
+          color: ['green', 'orange', 'purple', 'blue', 'red', 'yellow'][index]!,
+        })),
+      },
+      {
+        key: 'className',
+        name: '班级',
+        type: 'multiSelect',
+        options: [
+          { id: 'class-3', label: '高一（3）班', color: 'blue' },
+          { id: 'class-6', label: '高一（6）班', color: 'purple' },
+        ],
+      },
+      { key: 'startDate', name: '开始日期', type: 'date' },
+      { key: 'dueDate', name: '截止日期', type: 'date' },
+      {
+        key: 'priority',
+        name: '优先级',
+        type: 'select',
+        options: [
+          { id: 'high', label: '高', color: 'red' },
+          { id: 'medium', label: '中', color: 'orange' },
+          { id: 'low', label: '低', color: 'gray' },
+        ],
+      },
+      { key: 'notes', name: '备注', type: 'text' },
+    ],
+    taskRecords,
+    [
+      { slug: 'all', name: '全部任务', layout: 'table' },
+      { slug: 'board', name: '备课看板', layout: 'board', groupKey: 'status' },
+      { slug: 'calendar', name: '教学日历', layout: 'calendar', dateKey: 'dueDate' },
+      { slug: 'gantt', name: '单元进度', layout: 'gantt', startKey: 'startDate', endKey: 'dueDate' },
+      {
+        slug: 'week',
+        name: '本周待办',
+        layout: 'table',
+        filter: { key: 'status', operator: 'isNot', value: '已完成' },
+      },
+    ],
+  )
+
+  const resourceRows: Array<[string, string, string, string[], string, string[], string, string]> = [
+    ['第七单元整体教学设计', '教学设计', '第七单元', ['单元规划'], '模板自制表格', ['单元', '设计'], '已包含', '对应单元总览与三周任务链。'],
+    ['第七单元比较阅读任务单', '任务单', '第七单元', ['课堂', '作业'], '模板自制表格', ['比较阅读'], '已包含', '可按班级进度调整比较维度。'],
+    ['《故都的秋》景物与色彩整理', '整理表', '故都的秋', ['备课', '课堂'], '模板自制表格', ['景物', '色彩'], '已包含', '模板仅含自制整理表；教师自有课件待补充。'],
+    ['《故都的秋》南北秋景比较表', '比较表', '故都的秋', ['课堂'], '模板自制表格', ['比较阅读'], '已包含', '用于统一景物、节奏与情感维度。'],
+    ['《荷塘月色》教师朗读提示', '朗读文本', '荷塘月色', ['备课', '课堂'], '模板内置文本文件', ['朗读', '停连'], '已包含', '仅含自制文字标记示例；外部音频、视频待补充。'],
+    ['《荷塘月色》意象示意图', '示意图', '荷塘月色', ['课堂'], '模板内置 SVG', ['意象', '月色'], '已包含', '原创轻量示意图，可继续编辑说明文字。'],
+    ['通感知识卡片', '知识卡片', '荷塘月色', ['备课', '课堂'], '模板知识卡片页', ['通感', '修辞'], '已包含', '通过页面提及连接到课文。'],
+    ['《我与地坛》关键语段研读提示', '研读提示', '我与地坛（节选）', ['备课', '课堂'], '模板自制表格', ['证据', '人物'], '已包含', '只提供方法提示，不复制教材原句。'],
+    ['史铁生生平背景资料入口', '背景阅读', '我与地坛（节选）', ['备课'], '合法公开来源待核验', ['背景'], '待补充', '使用前核验来源、授权与教学必要性。'],
+    ['《赤壁赋》重点实词与虚词清单', '知识清单', '赤壁赋', ['备课', '复习'], '模板自制表格', ['文言', '虚词'], '已包含', '例句由教师从合法课堂笔记中补充。'],
+    ['《赤壁赋》主客问答结构图', '结构图', '赤壁赋', ['课堂'], '模板自制表格', ['结构', '哲思'], '已包含', '用于梳理乐—悲—达。'],
+    ['《登泰山记》游踪图', '路线图', '登泰山记', ['课堂'], '模板自制表格', ['游踪', '时空'], '已包含', '可按地点与时间词继续整理节点。'],
+    ['《登泰山记》日出描写赏析表', '赏析表', '登泰山记', ['课堂', '作业'], '模板自制表格', ['日出', '赏析'], '已包含', '覆盖色彩、动态和空间层次。'],
+    ['写景散文微写作提示', '写作提示', '第七单元', ['课堂', '作业'], '模板自制表格', ['微写作'], '已包含', '强调景物层次与真实情感线索。'],
+    ['单元写作评价量规', '评价量规', '第七单元', ['作业', '评价'], '模板自制表格', ['评价', '写作'], '已包含', '用于初稿、自评与修改。'],
+    ['单元复习与自测题', '练习', '第七单元', ['复习'], '教师自备', ['复习', '自测'], '待补充', '题目需结合教学进度自行补充，不随模板打包教材或商业附件。'],
+  ]
+  const resourceTable = createTemplateDataTable(
+    'teaching-resources',
+    '教学资源库',
+    [
+      { key: 'name', name: '资源名称', type: 'title' },
+      {
+        key: 'resourceType',
+        name: '资源类型',
+        type: 'select',
+        options: ['教学设计', '任务单', '整理表', '比较表', '朗读文本', '示意图', '知识卡片', '研读提示', '背景阅读', '知识清单', '结构图', '路线图', '赏析表', '写作提示', '评价量规', '练习'].map((label, index) => ({
+          id: `resource-type-${index + 1}`,
+          label,
+          color: ['green', 'blue', 'yellow', 'purple'][index % 4]!,
+        })),
+      },
+      {
+        key: 'lesson',
+        name: '适用课文',
+        type: 'select',
+        options: ['第七单元', '故都的秋', '荷塘月色', '我与地坛（节选）', '赤壁赋', '登泰山记'].map((label, index) => ({
+          id: `resource-lesson-${index + 1}`,
+          label,
+          color: ['green', 'orange', 'purple', 'blue', 'red', 'yellow'][index]!,
+        })),
+      },
+      {
+        key: 'scene',
+        name: '使用场景',
+        type: 'multiSelect',
+        options: ['单元规划', '备课', '课堂', '作业', '评价', '复习'].map((label, index) => ({
+          id: `scene-${index + 1}`,
+          label,
+          color: ['green', 'blue', 'purple', 'orange', 'red', 'yellow'][index]!,
+        })),
+      },
+      { key: 'source', name: '来源', type: 'text' },
+      { key: 'tags', name: '标签', type: 'multiSelect' },
+      {
+        key: 'readiness',
+        name: '准备状态',
+        type: 'select',
+        options: [
+          { id: 'included', label: '已包含', color: 'green' },
+          { id: 'pending', label: '待补充', color: 'orange' },
+        ],
+      },
+      { key: 'notes', name: '备注', type: 'text' },
+    ],
+    resourceRows.map(([title, resourceType, lesson, scene, source, tags, readiness, notes]) => ({
+      title,
+      values: { resourceType, lesson, scene, source, tags, readiness, notes },
+    })),
+    [{ slug: 'all', name: '全部资源', layout: 'table' }],
+  )
+
+  const observationRows: Array<[string, string[], string, string, string, string, string, string, string]> = [
+    ['高一（3）班对通感和比喻辨析不清', ['高一（3）班'], '荷塘月色', '概念辨析', '多次出现', '能够指出相似表达，但未说明是否发生跨感官转换。', '使用“原感官—借用感官—共同感受”三步支架。', '调整中', '2026-10-30'],
+    ['高一（6）班朗读能够感知节奏但缺少文本依据', ['高一（6）班'], '荷塘月色', '朗读证据', '多次出现', '能够说出舒缓或轻快，但停连理由未对应句意和景物层次。', '朗读标记后补写一句文本依据。', '待跟进', '2026-11-02'],
+    ['《故都的秋》景物特点概括停留在形容词罗列', ['高一（3）班', '高一（6）班'], '故都的秋', '景物概括', '多次出现', '答案集中于“清、静、悲凉”，缺少色彩、声音和观察角度。', '先完成景物—语言—感受三列表。', '调整中', '2026-10-28'],
+    ['《我与地坛》母亲形象分析缺少细节证据', ['高一（3）班', '高一（6）班'], '我与地坛（节选）', '人物分析', '偶发', '判断较完整，但动作、等待和叙述视角没有形成证据链。', '每个判断至少连接两类细节。', '待跟进', '2026-11-06'],
+    ['《赤壁赋》主客问答结构理解困难', ['高一（3）班', '高一（6）班'], '赤壁赋', '结构理解', '多次出现', '能够分别复述观点，不能说明主人如何回应客人的困惑。', '用问题—回应—意象依据完成对照表。', '待跟进', '2026-11-10'],
+    ['文言虚词“而”的关系判断不稳定', ['高一（3）班', '高一（6）班'], '赤壁赋', '文言知识', '多次出现', '多处统一译为“并且”，未先划分前后成分。', '先判断并列、承接、修饰或转折，再决定译法。', '调整中', '2026-11-10'],
+    ['《登泰山记》游踪与时间线容易混淆', ['高一（3）班', '高一（6）班'], '登泰山记', '时空梳理', '偶发', '地点词能够找到，但登临、夜宿和日出的时间节点未对齐。', '在游踪图旁并列一条时间轴。', '待跟进', '2026-11-12'],
+    ['写景练习存在景物堆砌且缺少情感线索', ['高一（3）班', '高一（6）班'], '第七单元', '写作表达', '多次出现', '景物和修辞数量较多，但视线移动与心境变化没有关系。', '删去一半景物，保留三处能推动情感的细节。', '待反馈', '2026-11-13'],
+  ]
+  const observationTable = createTemplateDataTable(
+    'learning-observations',
+    '学情观察库',
+    [
+      { key: 'name', name: '观察标题', type: 'title' },
+      {
+        key: 'className',
+        name: '班级',
+        type: 'multiSelect',
+        options: [
+          { id: 'observation-class-3', label: '高一（3）班', color: 'blue' },
+          { id: 'observation-class-6', label: '高一（6）班', color: 'purple' },
+        ],
+      },
+      {
+        key: 'lesson',
+        name: '所属课文',
+        type: 'select',
+        options: ['第七单元', '故都的秋', '荷塘月色', '我与地坛（节选）', '赤壁赋', '登泰山记'].map((label, index) => ({
+          id: `observation-lesson-${index + 1}`,
+          label,
+          color: ['green', 'orange', 'purple', 'blue', 'red', 'yellow'][index]!,
+        })),
+      },
+      {
+        key: 'observationType',
+        name: '观察类型',
+        type: 'select',
+        options: ['概念辨析', '朗读证据', '景物概括', '人物分析', '结构理解', '文言知识', '时空梳理', '写作表达'].map((label, index) => ({
+          id: `observation-type-${index + 1}`,
+          label,
+          color: ['blue', 'purple', 'green', 'orange'][index % 4]!,
+        })),
+      },
+      {
+        key: 'frequency',
+        name: '频率',
+        type: 'select',
+        options: [
+          { id: 'repeated', label: '多次出现', color: 'red' },
+          { id: 'occasional', label: '偶发', color: 'yellow' },
+        ],
+      },
+      { key: 'evidence', name: '课堂证据', type: 'text' },
+      { key: 'strategy', name: '改进策略', type: 'text' },
+      {
+        key: 'status',
+        name: '跟进状态',
+        type: 'select',
+        options: [
+          { id: 'follow-up', label: '待跟进', color: 'orange' },
+          { id: 'adjusting', label: '调整中', color: 'blue' },
+          { id: 'feedback', label: '待反馈', color: 'purple' },
+        ],
+      },
+      { key: 'reviewDate', name: '复查日期', type: 'date' },
+    ],
+    observationRows.map(([title, className, lesson, observationType, frequency, evidence, strategy, status, reviewDate]) => ({
+      title,
+      values: { className, lesson, observationType, frequency, evidence, strategy, status, reviewDate },
+    })),
+    [{ slug: 'all', name: '全部观察', layout: 'table' }],
+  )
+
+  return [taskTable, resourceTable, observationTable]
+}
+
+function createTeachingBoards(): BoardRecord[] {
+  const unitSnapshot = createEmptyBoardSnapshot()
+  unitSnapshot.camera = { x: 0, y: 0, scale: 0.88 }
+  unitSnapshot.shapes = ['单元主题', '核心问题', '文本研读', '学习活动', '学习成果', '评价与复盘'].map((text, index) => ({
+    id: id('board-shape', `unit-stage-${index + 1}`),
+    type: 'rect',
+    x: 40 + index * 205,
+    y: 120,
+    w: 165,
+    h: 86,
+    color: '#2f6f62',
+    size: 3,
+    text,
+    z: index + 1,
+  }))
+  unitSnapshot.notes = [
+    ['14-1《故都的秋》', 70, '#dcefe8'],
+    ['14-2《荷塘月色》', 280, '#dcefe8'],
+    ['15《我与地坛（节选）》', 490, '#dcefe8'],
+    ['16-1《赤壁赋》', 700, '#f3e4c8'],
+    ['16-2《登泰山记》', 910, '#f3e4c8'],
+    ['课堂生成\n', 1120, '#fff4c4'],
+  ].map(([text, x, color], index) => ({
+    id: id('board-note', `unit-${index + 1}`),
+    x: Number(x),
+    y: 300,
+    w: 180,
+    h: 110,
+    text: String(text),
+    color: String(color),
+    z: 20 + index,
+  }))
+  unitSnapshot.texts = [{
+    id: id('board-text', 'unit-title'),
+    x: 40,
+    y: 35,
+    w: 560,
+    h: 48,
+    text: '第七单元｜自然情怀：从目标到评价的可移动设计',
+    color: '#173f37',
+    fontFamily: unitSnapshot.textFontFamily,
+    fontSize: 30,
+    fontWeight: '700',
+    fontStyle: 'normal',
+    autoSize: false,
+    z: 40,
+  }]
+  unitSnapshot.connections = unitSnapshot.shapes.slice(0, -1).map((shape, index) => ({
+    id: id('board-connection', `unit-${index + 1}`),
+    from: shape.id,
+    to: unitSnapshot.shapes[index + 1]!.id,
+    fromSide: 'e',
+    toSide: 'w',
+    fromMarker: 'none',
+    toMarker: 'arrow',
+    mode: 'straight',
+    color: '#557d74',
+    size: 3,
+  }))
+
+  const lotusSnapshot = createEmptyBoardSnapshot()
+  lotusSnapshot.camera = { x: 0, y: 0, scale: 0.85 }
+  lotusSnapshot.shapes = [
+    ['第一课时', 40, 70, 560, 330, '#587c73'],
+    ['第二课时', 640, 70, 560, 330, '#6d5b8c'],
+    ['板书布局', 40, 440, 560, 230, '#456b7d'],
+    ['课堂生成', 640, 440, 560, 230, '#8a7045'],
+  ].map(([text, x, y, w, h, color], index) => ({
+    id: id('board-shape', `lotus-region-${index + 1}`),
+    type: 'rect',
+    x: Number(x),
+    y: Number(y),
+    w: Number(w),
+    h: Number(h),
+    color: String(color),
+    size: 3,
+    text: String(text),
+    z: index + 1,
+  }))
+  lotusSnapshot.notes = [
+    ['情境导入｜5 分钟', 70, 130, '#e2f0ea'],
+    ['朗读设计｜12 分钟', 330, 130, '#e2f0ea'],
+    ['结构梳理｜10 分钟', 70, 255, '#e2f0ea'],
+    ['景物层次｜18 分钟', 330, 255, '#e2f0ea'],
+    ['语言赏析｜15 分钟', 670, 130, '#eee7f7'],
+    ['通感探究｜10 分钟', 930, 130, '#eee7f7'],
+    ['情感移动｜10 分钟', 670, 255, '#eee7f7'],
+    ['微写作｜10 分钟', 930, 255, '#eee7f7'],
+  ].map(([text, x, y, color], index) => ({
+    id: id('board-note', `lotus-activity-${index + 1}`),
+    x: Number(x),
+    y: Number(y),
+    w: 220,
+    h: 90,
+    text: String(text),
+    color: String(color),
+    z: 20 + index,
+  }))
+  lotusSnapshot.texts = [
+    {
+      id: id('board-text', 'lotus-board-layout'),
+      x: 75,
+      y: 500,
+      w: 480,
+      h: 105,
+      text: '行踪线：出门 → 荷塘 → 回家\n景物层：荷叶荷花 → 月光 → 树影远景\n情感线：不宁静 → 暂得宁静 → 回到现实',
+      color: '#244858',
+      fontFamily: lotusSnapshot.textFontFamily,
+      fontSize: 20,
+      fontWeight: '500',
+      fontStyle: 'normal',
+      autoSize: false,
+      z: 40,
+    },
+    {
+      id: id('board-text', 'lotus-classroom-generation'),
+      x: 675,
+      y: 500,
+      w: 480,
+      h: 105,
+      text: '现场补充：新证据｜新问题｜时间偏差｜下次调整',
+      color: '#6b522b',
+      fontFamily: lotusSnapshot.textFontFamily,
+      fontSize: 22,
+      fontWeight: '500',
+      fontStyle: 'normal',
+      autoSize: false,
+      z: 41,
+    },
+  ]
+  lotusSnapshot.connections = lotusSnapshot.notes.slice(0, -1).map((note, index) => ({
+    id: id('board-connection', `lotus-${index + 1}`),
+    from: note.id,
+    to: lotusSnapshot.notes[index + 1]!.id,
+    fromSide: 'e',
+    toSide: 'w',
+    fromMarker: 'none',
+    toMarker: 'arrow',
+    mode: 'curve',
+    color: '#6d7485',
+    size: 3,
+  }))
+
+  return [
+    {
+      id: id('board', 'unit-design'),
+      title: '第七单元教学设计白板',
+      snapshot: unitSnapshot,
+      createdAt: TEMPLATE_NOW,
+      updatedAt: TEMPLATE_NOW,
+    },
+    {
+      id: id('board', 'lotus-flow'),
+      title: '《荷塘月色》课堂流程白板',
+      snapshot: lotusSnapshot,
+      createdAt: TEMPLATE_NOW,
+      updatedAt: TEMPLATE_NOW,
+    },
+  ]
+}
+
+function createTemplateMindmap(
+  slug: string,
+  title: string,
+  themeId: 'mint' | 'dusk',
+  rootText: string,
+  branches: Array<{ text: string; children: string[] }>,
+): MindmapRecord {
+  const snapshot = createEmptyMindmapSnapshot({ themeId })
+  const nodes: Record<string, {
+    id: string
+    parentId: string | null
+    childIds: string[]
+    text: string
+    collapsed: boolean
+    style: {
+      nodeColor: string
+      branchColor: string
+    }
+  }> = snapshot.nodes
+  const root = nodes[snapshot.rootId]!
+  const palette = themeId === 'mint'
+    ? ['#138a72', '#2f7a62', '#4f8f78', '#267d70', '#5f9070']
+    : ['#6d5bd0', '#7a5fa3', '#8a638d', '#745b9e', '#5f648f']
+  const branchIds = branches.map((_, branchIndex) => id('mindmap-node', `${slug}-branch-${branchIndex + 1}`))
+
+  snapshot.title = title
+  snapshot.updatedAt = TEMPLATE_NOW
+  root.text = rootText
+  root.childIds = branchIds
+
+  branches.forEach((branch, branchIndex) => {
+    const branchId = branchIds[branchIndex]!
+    const childIds = branch.children.map((_, childIndex) => (
+      id('mindmap-node', `${slug}-${branchIndex + 1}-${childIndex + 1}`)
+    ))
+    nodes[branchId] = {
+      id: branchId,
+      parentId: snapshot.rootId,
+      childIds,
+      text: branch.text,
+      collapsed: false,
+      style: {
+        nodeColor: '#ffffff',
+        branchColor: palette[branchIndex]!,
+      },
+    }
+    branch.children.forEach((text, childIndex) => {
+      const childId = childIds[childIndex]!
+      nodes[childId] = {
+        id: childId,
+        parentId: branchId,
+        childIds: [],
+        text,
+        collapsed: false,
+        style: {
+          nodeColor: '#ffffff',
+          branchColor: palette[branchIndex]!,
+        },
+      }
+    })
+  })
+
+  return {
+    id: id('mindmap', slug),
+    title,
+    snapshot,
+    createdAt: TEMPLATE_NOW,
+    updatedAt: TEMPLATE_NOW,
+  }
+}
+
+function createTeachingMindmaps(): MindmapRecord[] {
+  return [
+    createTemplateMindmap('unit-knowledge', '第七单元知识导图', 'mint', '自然情怀', [
+      { text: '现代散文', children: ['《故都的秋》', '《荷塘月色》', '《我与地坛（节选）》'] },
+      { text: '古代山水', children: ['《赤壁赋》', '《登泰山记》'] },
+      { text: '阅读方法', children: ['抓景物特征', '理写景层次', '品味语言', '比较阅读'] },
+      { text: '表达知识', children: ['情景交融', '通感', '比喻与拟人', '移步换景', '虚实结合', '文言虚词“而”'] },
+      { text: '单元成果', children: ['朗读标记', '赏析札记', '写景散文'] },
+    ]),
+    createTemplateMindmap('lotus-close-reading', '《荷塘月色》文本细读导图', 'dusk', '荷塘月色', [
+      { text: '行文结构', children: ['出门', '月下荷塘', '回家'] },
+      { text: '景物层次', children: ['月下荷塘', '荷塘上的月色', '荷塘四周'] },
+      { text: '语言特点', children: ['比喻', '拟人', '通感', '叠词'] },
+      { text: '情感变化', children: ['“颇不宁静”', '暂得宁静', '回到现实'] },
+      { text: '主题理解', children: ['景物与心境互文', '背景材料的解释边界'] },
+    ]),
+  ]
+}
+
 export function createHighSchoolChineseTeacherTemplate(): TeacherTemplateBundle {
+  const dataTables = createTeachingDataTables()
+  const boards = createTeachingBoards()
+  const mindmaps = createTeachingMindmaps()
+  const lotusPondSvg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#17324d"/>
+      <stop offset="1" stop-color="#446b6a"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="675" fill="url(#sky)"/>
+  <circle cx="930" cy="120" r="58" fill="#f5efcf" opacity="0.92"/>
+  <path d="M0 440 Q250 395 480 445 T920 430 T1200 445 V675 H0Z" fill="#183f48"/>
+  <g fill="#4f806d" stroke="#9bc4a7" stroke-width="4">
+    <ellipse cx="250" cy="470" rx="120" ry="38"/>
+    <ellipse cx="520" cy="505" rx="145" ry="42"/>
+    <ellipse cx="820" cy="470" rx="130" ry="40"/>
+  </g>
+  <g fill="#d7a6b2">
+    <circle cx="250" cy="430" r="25"/>
+    <circle cx="520" cy="458" r="28"/>
+    <circle cx="820" cy="425" r="24"/>
+  </g>
+  <g stroke="#b8d2c8" stroke-width="3" opacity="0.55">
+    <path d="M110 560 H1080"/>
+    <path d="M170 600 H1010"/>
+  </g>
+  <text x="60" y="90" fill="#f7f5e8" font-size="38" font-family="serif">荷塘 · 月色 · 心境</text>
+</svg>`.trim()
+  const readingPauseText = `朗读符号说明
+/  短停顿
+// 较长停顿
+↑ 语调上扬
+↓ 语调下降
+· 轻读
+
+练习方法：先按句意划分停连，再用重音和语调呈现景物层次与情绪变化。`
+  const encoder = new TextEncoder()
+  const assets: TeacherTemplateAsset[] = [
+    {
+      id: id('asset', 'lotus-pond'),
+      name: '荷塘月色意象示意图.svg',
+      mimeType: 'image/svg+xml',
+      relativePath: 'teacher-template/lotus-pond.svg',
+      bytes: encoder.encode(lotusPondSvg),
+    },
+    {
+      id: id('asset', 'reading-pauses'),
+      name: '朗读停连标记示例.txt',
+      mimeType: 'text/plain',
+      relativePath: 'teacher-template/reading-pauses.txt',
+      bytes: encoder.encode(readingPauseText),
+    },
+  ]
+  const unitGoalGroupId = id('synced-group', 'unit-goals')
+  const reflectionGroupId = id('synced-group', 'reflection-questions')
+  const unitGoalInstanceIds = {
+    dashboard: id('synced-instance', 'unit-goals-dashboard'),
+    unitOverview: id('synced-instance', 'unit-goals-unit-overview'),
+    lessonAutumn: id('synced-instance', 'unit-goals-lesson-autumn'),
+    lessonLotus: id('synced-instance', 'unit-goals-lesson-lotus'),
+    lessonDitan: id('synced-instance', 'unit-goals-lesson-ditan'),
+    lessonChibi: id('synced-instance', 'unit-goals-lesson-chibi'),
+    lessonTaishan: id('synced-instance', 'unit-goals-lesson-taishan'),
+  }
+  const reflectionInstanceIds = {
+    lessonAutumn: id('synced-instance', 'reflection-lesson-autumn'),
+    lessonLotus: id('synced-instance', 'reflection-lesson-lotus'),
+    lessonDitan: id('synced-instance', 'reflection-lesson-ditan'),
+    lessonChibi: id('synced-instance', 'reflection-lesson-chibi'),
+    lessonTaishan: id('synced-instance', 'reflection-lesson-taishan'),
+    afterClass: id('synced-instance', 'reflection-after-class'),
+  }
+  const syncedBlockGroups: SyncedBlockGroupRecord[] = [
+    {
+      id: unitGoalGroupId,
+      blocks: [{
+        id: id('synced-content', 'unit-goals'),
+        type: 'numbered_list',
+        items: [
+          '梳理写景顺序，概括不同文本的景物特征。',
+          '结合具体语句，分析语言特点和情景关系。',
+          '比较现代散文与古代山水文章中的自然观照和生命感受。',
+          '完成赏析札记与写景片段，并依据评价量规修改表达。',
+        ],
+      }],
+      primaryInstanceId: unitGoalInstanceIds.dashboard,
+      createdAt: TEMPLATE_NOW,
+      updatedAt: TEMPLATE_NOW,
+    },
+    {
+      id: reflectionGroupId,
+      blocks: [{
+        id: id('synced-content', 'reflection-questions'),
+        type: 'numbered_list',
+        items: [
+          '学习目标达成了吗？',
+          '哪个课堂证据最能说明问题？',
+          '哪个环节需要删减或调整？',
+          '下次教学最先改变什么？',
+        ],
+      }],
+      primaryInstanceId: reflectionInstanceIds.afterClass,
+      createdAt: TEMPLATE_NOW,
+      updatedAt: TEMPLATE_NOW,
+    },
+  ]
   const pages: PageRecord[] = [
     page('root', null, '高中语文教师工作台｜高一上学期', '📚', [
       heading_1('root', 0, '教学、积累与复盘，从同一棵页面树开始'),
@@ -805,13 +1687,109 @@ export function createHighSchoolChineseTeacherTemplate(): TeacherTemplateBundle 
     ]),
   ]
 
+  const appendPageBlocks = (pageId: string, ...blocks: BlockRecord[]) => {
+    pages.find((candidate) => candidate.id === pageId)!.blocks.push(...blocks)
+  }
+  const taskTableId = dataTables[0]!.id
+  const resourceTableId = dataTables[1]!.id
+  const observationTableId = dataTables[2]!.id
+  const unitBoardId = boards[0]!.id
+  const lotusBoardId = boards[1]!.id
+  const unitMindmapId = mindmaps[0]!.id
+  const lotusMindmapId = mindmaps[1]!.id
+
+  appendPageBlocks(
+    pageIds.dashboard,
+    data_table('dashboard', 8, taskTableId, 'inline'),
+    synced_block('dashboard', 9, unitGoalGroupId, unitGoalInstanceIds.dashboard, 'sync'),
+  )
+  appendPageBlocks(
+    pageIds.unitOverview,
+    synced_block('unit-overview', 11, unitGoalGroupId, unitGoalInstanceIds.unitOverview, 'reference'),
+  )
+  appendPageBlocks(
+    pageIds.lessonAutumn,
+    mentionParagraph('lesson-autumn', 20, [
+      { text: '情景交融', pageId: pageIds.cardSceneEmotion },
+      { text: '比喻与拟人', pageId: pageIds.cardFigures },
+    ]),
+    synced_block('lesson-autumn', 21, unitGoalGroupId, unitGoalInstanceIds.lessonAutumn, 'reference'),
+    synced_block('lesson-autumn', 22, reflectionGroupId, reflectionInstanceIds.lessonAutumn, 'reference'),
+  )
+  appendPageBlocks(
+    pageIds.lessonLotus,
+    mentionParagraph('lesson-lotus', 20, [
+      { text: '通感', pageId: pageIds.cardSynaesthesia },
+      { text: '比喻与拟人', pageId: pageIds.cardFigures },
+      { text: '散文的情感线索', pageId: pageIds.cardEmotionalThread },
+    ]),
+    synced_block('lesson-lotus', 21, unitGoalGroupId, unitGoalInstanceIds.lessonLotus, 'reference'),
+    synced_block('lesson-lotus', 22, reflectionGroupId, reflectionInstanceIds.lessonLotus, 'reference'),
+    whiteboard('lesson-lotus', 23, lotusBoardId),
+    mindmap('lesson-lotus', 24, lotusMindmapId),
+    {
+      id: blockId('lesson-lotus', 25),
+      type: 'image',
+      assetId: assets[0]!.id,
+      name: assets[0]!.name,
+      mimeType: assets[0]!.mimeType,
+      caption: '自制夜色荷塘意象示意图，用于讨论景物层次与心境关系。',
+      alt: '深蓝夜空、月亮、水面、荷叶与荷花组成的荷塘月色示意图',
+    },
+    {
+      id: blockId('lesson-lotus', 26),
+      type: 'file',
+      assetId: assets[1]!.id,
+      name: assets[1]!.name,
+      mimeType: assets[1]!.mimeType,
+      caption: '朗读停连、语调和轻读符号的自制文字示例。',
+    },
+  )
+  appendPageBlocks(
+    pageIds.lessonDitan,
+    mentionParagraph('lesson-ditan', 20, [
+      { text: '情景交融', pageId: pageIds.cardSceneEmotion },
+      { text: '散文的情感线索', pageId: pageIds.cardEmotionalThread },
+    ]),
+    synced_block('lesson-ditan', 21, unitGoalGroupId, unitGoalInstanceIds.lessonDitan, 'reference'),
+    synced_block('lesson-ditan', 22, reflectionGroupId, reflectionInstanceIds.lessonDitan, 'reference'),
+  )
+  appendPageBlocks(
+    pageIds.lessonChibi,
+    mentionParagraph('lesson-chibi', 20, [
+      { text: '文言虚词“而”', pageId: pageIds.cardEr },
+    ]),
+    synced_block('lesson-chibi', 21, unitGoalGroupId, unitGoalInstanceIds.lessonChibi, 'reference'),
+    synced_block('lesson-chibi', 22, reflectionGroupId, reflectionInstanceIds.lessonChibi, 'reference'),
+  )
+  appendPageBlocks(
+    pageIds.lessonTaishan,
+    mentionParagraph('lesson-taishan', 20, [
+      { text: '移步换景', pageId: pageIds.cardMovingView },
+      { text: '文言虚词“而”', pageId: pageIds.cardEr },
+    ]),
+    synced_block('lesson-taishan', 21, unitGoalGroupId, unitGoalInstanceIds.lessonTaishan, 'reference'),
+    synced_block('lesson-taishan', 22, reflectionGroupId, reflectionInstanceIds.lessonTaishan, 'reference'),
+  )
+  appendPageBlocks(pageIds.preparationTasks, data_table('preparation-tasks', 3, taskTableId))
+  appendPageBlocks(pageIds.calendar, data_table('calendar', 3, taskTableId, 'inline'))
+  appendPageBlocks(pageIds.classroomBoard, whiteboard('classroom-board', 5, unitBoardId))
+  appendPageBlocks(pageIds.resourceLibrary, data_table('resource-library', 5, resourceTableId))
+  appendPageBlocks(pageIds.unitMindmap, mindmap('unit-mindmap', 3, unitMindmapId))
+  appendPageBlocks(pageIds.commonIssues, data_table('common-issues', 3, observationTableId))
+  appendPageBlocks(pageIds.classObservation, data_table('class-observation', 5, observationTableId, 'inline'))
+  appendPageBlocks(
+    pageIds.afterClassReflection,
+    synced_block('after-class-reflection', 4, reflectionGroupId, reflectionInstanceIds.afterClass, 'sync'),
+  )
+
   return {
     rootPageId: pageIds.root,
     pages,
-    boards: [],
-    dataTables: [],
-    mindmaps: [],
-    syncedBlockGroups: [],
-    assets: [],
+    boards,
+    dataTables,
+    mindmaps,
+    syncedBlockGroups,
+    assets,
   }
 }
