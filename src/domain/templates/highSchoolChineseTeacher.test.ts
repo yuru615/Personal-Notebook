@@ -243,6 +243,16 @@ describe('validateHighSchoolChineseTeacherTemplate', () => {
       .toThrow(`invalid board snapshot: ${template.boards[0]!.id}`)
   })
 
+  it('rejects a whiteboard snapshot with camera missing', () => {
+    const template = structuredClone(createHighSchoolChineseTeacherTemplate())
+    const snapshot = template.boards[0]!.snapshot as WhiteboardSnapshot
+
+    delete (snapshot as Partial<WhiteboardSnapshot>).camera
+
+    expect(() => validateHighSchoolChineseTeacherTemplate(template))
+      .toThrow(`invalid board snapshot: ${template.boards[0]!.id}`)
+  })
+
   it('accepts whiteboard connections from notes and shapes to texts and images', () => {
     const template = structuredClone(createHighSchoolChineseTeacherTemplate())
     const snapshot = template.boards[0]!.snapshot as WhiteboardSnapshot
@@ -289,6 +299,29 @@ describe('validateHighSchoolChineseTeacherTemplate', () => {
 
     expect(() => validateHighSchoolChineseTeacherTemplate(template))
       .toThrow(`duplicate board element id: ${snapshot.notes[0]!.id}`)
+  })
+
+  it('rejects a whiteboard stroke id that duplicates a note id', () => {
+    const template = structuredClone(createHighSchoolChineseTeacherTemplate())
+    const snapshot = template.boards[0]!.snapshot as WhiteboardSnapshot
+    snapshot.strokes.push({
+      id: snapshot.notes[0]!.id,
+      color: '#17202a',
+      size: 2,
+      points: [{ x: 0, y: 0 }, { x: 10, y: 10 }],
+    })
+
+    expect(() => validateHighSchoolChineseTeacherTemplate(template))
+      .toThrow(`duplicate board element id: ${snapshot.notes[0]!.id}`)
+  })
+
+  it('rejects a whiteboard connection id that duplicates a shape id', () => {
+    const template = structuredClone(createHighSchoolChineseTeacherTemplate())
+    const snapshot = template.boards[0]!.snapshot as WhiteboardSnapshot
+    snapshot.connections[0]!.id = snapshot.shapes[0]!.id
+
+    expect(() => validateHighSchoolChineseTeacherTemplate(template))
+      .toThrow(`duplicate board element id: ${snapshot.shapes[0]!.id}`)
   })
 
   it('rejects a whiteboard stroke as a connection endpoint', () => {

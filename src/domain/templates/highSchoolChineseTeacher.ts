@@ -10,7 +10,7 @@ import type {
 import { createEmptyMindmapSnapshot } from '../../components/mindmap/mindmapModel'
 import {
   createEmptyBoardSnapshot,
-  type WhiteboardSnapshot,
+  isWhiteboardSnapshot,
 } from '../../components/whiteboard/whiteboardModel'
 import type {
   BlockRecord,
@@ -2066,16 +2066,8 @@ function validateViewGroupOptions(
 }
 
 function validateBoard(board: BoardRecord) {
-  const snapshot = board.snapshot as Partial<WhiteboardSnapshot> | null
-  if (
-    !snapshot ||
-    !Array.isArray(snapshot.notes) ||
-    !Array.isArray(snapshot.shapes) ||
-    !Array.isArray(snapshot.strokes) ||
-    !Array.isArray(snapshot.connections) ||
-    !Array.isArray(snapshot.texts) ||
-    !Array.isArray(snapshot.images)
-  ) {
+  const snapshot = board.snapshot
+  if (!isWhiteboardSnapshot(snapshot) || 'version' in snapshot) {
     throw new Error(`invalid board snapshot: ${board.id}`)
   }
 
@@ -2085,7 +2077,11 @@ function validateBoard(board: BoardRecord) {
     ...snapshot.texts.map((text) => text.id),
     ...snapshot.images.map((image) => image.id),
   ]
-  requireUnique(endpointIds, 'board element id')
+  requireUnique([
+    ...endpointIds,
+    ...snapshot.strokes.map((stroke) => stroke.id),
+    ...snapshot.connections.map((connection) => connection.id),
+  ], 'board element id')
   const endpointIdSet = new Set(endpointIds)
   for (const connection of snapshot.connections) {
     requireReference(endpointIdSet, connection.from, 'board connection endpoint')
