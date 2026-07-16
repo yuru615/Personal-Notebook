@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,10 +10,12 @@ const output = path.join(
   root,
   'public/templates/high-school-chinese-teacher-workbench.zhiqi',
 )
-const temporaryOutput = `${output}.tmp`
+const temporaryOutput = `${output}.tmp-${process.pid}-${randomUUID()}`
 const archiveDateText = '2026-07-16T00:00:00.000Z'
 const archiveDate = new Date(archiveDateText)
 let server
+let generationError
+let generatedByteLength = 0
 
 try {
   const packageJson = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'))
@@ -21,7 +23,11 @@ try {
     root,
     configFile: false,
     appType: 'custom',
-    server: { middlewareMode: true },
+    server: {
+      middlewareMode: true,
+      hmr: { port: 40_000 + (process.pid % 20_000) },
+      watch: null,
+    },
     logLevel: 'error',
   })
   const {
@@ -71,11 +77,22 @@ try {
   })
   await mkdir(path.dirname(output), { recursive: true })
   await writeFile(temporaryOutput, bytes)
-  await rm(output, { force: true })
   await rename(temporaryOutput, output)
-
-  console.log(`Generated ${path.relative(root, output)} (${bytes.byteLength} bytes)`)
-} finally {
-  await rm(temporaryOutput, { force: true })
-  await server?.close()
+  generatedByteLength = bytes.byteLength
+} catch (error) {
+  generationError = error
 }
+
+const cleanupResults = await Promise.allSettled([
+  Promise.resolve().then(() => rm(temporaryOutput, { force: true })),
+  Promise.resolve().then(() => server?.close()),
+])
+if (generationError) {
+  throw generationError
+}
+const cleanupFailure = cleanupResults.find((result) => result.status === 'rejected')
+if (cleanupFailure?.status === 'rejected') {
+  throw cleanupFailure.reason
+}
+
+console.log(`Generated ${path.relative(root, output)} (${generatedByteLength} bytes)`)

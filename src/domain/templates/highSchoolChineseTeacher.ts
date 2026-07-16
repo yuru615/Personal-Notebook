@@ -2071,18 +2071,25 @@ function validateBoard(board: BoardRecord) {
     !snapshot ||
     !Array.isArray(snapshot.notes) ||
     !Array.isArray(snapshot.shapes) ||
-    !Array.isArray(snapshot.connections)
+    !Array.isArray(snapshot.strokes) ||
+    !Array.isArray(snapshot.connections) ||
+    !Array.isArray(snapshot.texts) ||
+    !Array.isArray(snapshot.images)
   ) {
     throw new Error(`invalid board snapshot: ${board.id}`)
   }
 
-  const endpointIds = new Set([
+  const endpointIds = [
     ...snapshot.notes.map((note) => note.id),
     ...snapshot.shapes.map((shape) => shape.id),
-  ])
+    ...snapshot.texts.map((text) => text.id),
+    ...snapshot.images.map((image) => image.id),
+  ]
+  requireUnique(endpointIds, 'board element id')
+  const endpointIdSet = new Set(endpointIds)
   for (const connection of snapshot.connections) {
-    requireReference(endpointIds, connection.from, 'board connection endpoint')
-    requireReference(endpointIds, connection.to, 'board connection endpoint')
+    requireReference(endpointIdSet, connection.from, 'board connection endpoint')
+    requireReference(endpointIdSet, connection.to, 'board connection endpoint')
   }
 }
 

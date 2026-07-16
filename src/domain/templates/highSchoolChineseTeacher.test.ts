@@ -226,6 +226,86 @@ describe('validateHighSchoolChineseTeacherTemplate', () => {
     expect(() => validateHighSchoolChineseTeacherTemplate(template)).not.toThrow()
   })
 
+  it.each([
+    'notes',
+    'shapes',
+    'strokes',
+    'connections',
+    'texts',
+    'images',
+  ] as const)('rejects a whiteboard snapshot with %s missing', (collection) => {
+    const template = structuredClone(createHighSchoolChineseTeacherTemplate())
+    const snapshot = template.boards[0]!.snapshot as WhiteboardSnapshot
+
+    delete (snapshot as Partial<WhiteboardSnapshot>)[collection]
+
+    expect(() => validateHighSchoolChineseTeacherTemplate(template))
+      .toThrow(`invalid board snapshot: ${template.boards[0]!.id}`)
+  })
+
+  it('accepts whiteboard connections from notes and shapes to texts and images', () => {
+    const template = structuredClone(createHighSchoolChineseTeacherTemplate())
+    const snapshot = template.boards[0]!.snapshot as WhiteboardSnapshot
+    snapshot.images.push({
+      id: 'teacher-template-board-image-endpoint',
+      x: 0,
+      y: 0,
+      w: 100,
+      h: 100,
+      src: 'data:image/png;base64,',
+      name: 'endpoint.png',
+      z: 100,
+    })
+    snapshot.connections.push(
+      {
+        id: 'teacher-template-board-connection-note-text',
+        from: snapshot.notes[0]!.id,
+        to: snapshot.texts[0]!.id,
+        fromSide: 'e',
+        toSide: 'w',
+        mode: 'straight',
+        color: '#17202a',
+        size: 2,
+      },
+      {
+        id: 'teacher-template-board-connection-shape-image',
+        from: snapshot.shapes[0]!.id,
+        to: snapshot.images[0]!.id,
+        fromSide: 'e',
+        toSide: 'w',
+        mode: 'straight',
+        color: '#17202a',
+        size: 2,
+      },
+    )
+
+    expect(() => validateHighSchoolChineseTeacherTemplate(template)).not.toThrow()
+  })
+
+  it('rejects duplicate connectable whiteboard element ids', () => {
+    const template = structuredClone(createHighSchoolChineseTeacherTemplate())
+    const snapshot = template.boards[0]!.snapshot as WhiteboardSnapshot
+    snapshot.texts[0]!.id = snapshot.notes[0]!.id
+
+    expect(() => validateHighSchoolChineseTeacherTemplate(template))
+      .toThrow(`duplicate board element id: ${snapshot.notes[0]!.id}`)
+  })
+
+  it('rejects a whiteboard stroke as a connection endpoint', () => {
+    const template = structuredClone(createHighSchoolChineseTeacherTemplate())
+    const snapshot = template.boards[0]!.snapshot as WhiteboardSnapshot
+    snapshot.strokes.push({
+      id: 'teacher-template-board-stroke-endpoint',
+      color: '#17202a',
+      size: 2,
+      points: [{ x: 0, y: 0 }, { x: 10, y: 10 }],
+    })
+    snapshot.connections[0]!.from = snapshot.strokes[0]!.id
+
+    expect(() => validateHighSchoolChineseTeacherTemplate(template))
+      .toThrow(`missing board connection endpoint: ${snapshot.strokes[0]!.id}`)
+  })
+
   it.each(invalidTeacherTemplateCases)('rejects $name', ({ expectedError, mutate }) => {
     const template = structuredClone(createHighSchoolChineseTeacherTemplate())
 
