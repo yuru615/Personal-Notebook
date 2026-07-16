@@ -541,6 +541,83 @@ describe('createWorkspaceStore data tables', () => {
     expect(counted.getSnapshot()).toEqual(workspace)
   })
 
+  it('keeps active workspace saves and undo history intact when changing automatic backup settings', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const appSettings = createMemoryAppSettingsRepository({
+      closeAction: 'quit',
+      accentTheme: 'violet',
+      mcp: {
+        enabled: true,
+        port: 38472,
+        token: 'test-token',
+      },
+    })
+    const store = createWorkspaceStore(counted.repository, appSettings.repository)
+    await store.getState().bootstrap()
+
+    const initialPage = structuredClone(store.getState().pages.find((page) => page.id === 'page_1'))
+    await store.getState().setPageIcon('page_1', '📌')
+    await store.getState().setPageCover('page_1', 'cover://pending-save')
+    await store.getState().undo()
+
+    const pendingWorkspaceSave = createDeferred<void>()
+    const workspaceSaveStarted = createDeferred<void>()
+    const saveWorkspace = vi
+      .spyOn(counted.repository, 'save')
+      .mockImplementationOnce(() => {
+        workspaceSaveStarted.resolve()
+        return pendingWorkspaceSave.promise
+      })
+    const replaceWorkspace = vi.spyOn(counted.repository, 'replace')
+    const switchPage = store.getState().setCurrentPage('page_inbox')
+    await workspaceSaveStarted.promise
+    const workspaceBeforeSettingsChange = structuredClone(counted.getSnapshot())
+
+    expect(store.getState().saveStatus).toBe('saving')
+    expect(saveWorkspace).toHaveBeenCalledTimes(1)
+
+    await store.getState().setAutoBackupSettings({
+      enabled: false,
+      intervalMinutes: 30,
+      retentionCount: 7,
+    })
+
+    expect(store.getState().appSettings).toEqual({
+      closeAction: 'quit',
+      accentTheme: 'violet',
+      autoBackup: {
+        enabled: false,
+        intervalMinutes: 30,
+        retentionCount: 7,
+      },
+      mcp: {
+        enabled: true,
+        port: 38472,
+        token: 'test-token',
+      },
+    })
+    expect(appSettings.getSettings()).toEqual(store.getState().appSettings)
+    expect(appSettings.getSaveCalls()).toBe(1)
+    expect(store.getState().saveStatus).toBe('saving')
+    expect(counted.getSnapshot()).toEqual(workspaceBeforeSettingsChange)
+    expect(saveWorkspace).toHaveBeenCalledTimes(1)
+    expect(replaceWorkspace).not.toHaveBeenCalled()
+
+    pendingWorkspaceSave.resolve()
+    await switchPage
+
+    await store.getState().redo()
+    expect(store.getState().pages.find((page) => page.id === 'page_1')?.cover).toBe(
+      'cover://pending-save',
+    )
+
+    await store.getState().undo()
+    expect(store.getState().pages.find((page) => page.id === 'page_1')?.cover).toBeNull()
+
+    await store.getState().undo()
+    expect(store.getState().pages.find((page) => page.id === 'page_1')).toEqual(initialPage)
+  })
+
   it('keeps persisted local MCP settings after bootstrap', async () => {
     const counted = createCountingRepository(createWorkspace())
     const appSettings = createMemoryAppSettingsRepository({
