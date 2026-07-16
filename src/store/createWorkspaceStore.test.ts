@@ -606,7 +606,308 @@ describe('createWorkspaceStore data tables', () => {
     })
   })
 
-  it('rolls back failed automatic backup settings without losing close, theme, or MCP settings', async () => {
+  it('keeps close action, theme, and MCP settings when an earlier backup save finishes later', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const initialSettings: AppSettings = {
+      closeAction: 'hide_to_tray',
+      accentTheme: 'blue_gray',
+      autoBackup: { enabled: true, intervalMinutes: 15, retentionCount: 14 },
+    }
+    let persistedSettings = structuredClone(initialSettings)
+    const firstSave = createDeferred<void>()
+    const firstSaveStarted = createDeferred<void>()
+    const enableLocalMcp = vi.fn(async () => {
+      // Mirrors the desktop command: its own full-document write can have read an older value.
+      persistedSettings = { ...initialSettings, mcp: enabledMcp }
+      return enabledMcp
+    })
+    const save = vi.fn((next: AppSettings) => {
+      if (save.mock.calls.length === 1) {
+        firstSaveStarted.resolve()
+        return firstSave.promise.then(() => {
+          persistedSettings = structuredClone(next)
+        })
+      }
+      persistedSettings = structuredClone(next)
+      return Promise.resolve()
+    })
+    const enabledMcp = { enabled: true, port: 38472, token: 'new-token' }
+    const appSettingsRepository = {
+      async load() {
+        return structuredClone(persistedSettings)
+      },
+      save,
+      enableLocalMcp,
+      async disableLocalMcp() {
+        throw new Error('not used')
+      },
+      async regenerateLocalMcpToken() {
+        throw new Error('not used')
+      },
+    }
+    const store = createWorkspaceStore(counted.repository, appSettingsRepository)
+    await store.getState().bootstrap()
+
+    const backup = store.getState().setAutoBackupSettings({
+      enabled: false,
+      intervalMinutes: 30,
+      retentionCount: 7,
+    })
+    await firstSaveStarted.promise
+    const closeAction = store.getState().setAppCloseAction('quit')
+    const theme = store.getState().setAppAccentTheme('violet')
+    const mcp = store.getState().enableLocalMcp()
+    const finalBackup = store.getState().setAutoBackupSettings({
+      enabled: true,
+      intervalMinutes: 60,
+      retentionCount: 30,
+    })
+
+    expect(enableLocalMcp).not.toHaveBeenCalled()
+
+    firstSave.resolve()
+    await Promise.all([backup, closeAction, theme, mcp, finalBackup])
+
+    expect(store.getState().appSettings).toEqual({
+      closeAction: 'quit',
+      accentTheme: 'violet',
+      autoBackup: { enabled: true, intervalMinutes: 60, retentionCount: 30 },
+      mcp: enabledMcp,
+    })
+    expect(persistedSettings).toEqual(store.getState().appSettings)
+  })
+
+  it('merges a partial MCP response into the newest app settings intent before saving', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    let persistedSettings: AppSettings = {
+      closeAction: 'hide_to_tray',
+      accentTheme: 'blue_gray',
+      autoBackup: { enabled: true, intervalMinutes: 15, retentionCount: 14 },
+      mcp: { enabled: true, port: 38472, token: 'original-token' },
+    }
+    const appSettingsRepository = {
+      async load() {
+        return structuredClone(persistedSettings)
+      },
+      async save(next: AppSettings) {
+        persistedSettings = structuredClone(next)
+      },
+      async enableLocalMcp() {
+        return { enabled: true, token: 'rotated-token' } as never
+      },
+      async disableLocalMcp() {
+        throw new Error('not used')
+      },
+      async regenerateLocalMcpToken() {
+        throw new Error('not used')
+      },
+    }
+    const store = createWorkspaceStore(counted.repository, appSettingsRepository)
+    await store.getState().bootstrap()
+
+    await store.getState().setAppAccentTheme('violet')
+    await store.getState().enableLocalMcp()
+
+    expect(store.getState().appSettings).toEqual({
+      closeAction: 'hide_to_tray',
+      accentTheme: 'violet',
+      autoBackup: { enabled: true, intervalMinutes: 15, retentionCount: 14 },
+      mcp: { enabled: true, port: 38472, token: 'rotated-token' },
+    })
+    expect(persistedSettings).toEqual(store.getState().appSettings)
+  })
+
+  it('preserves settings changed while a local MCP command is in flight', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const initialSettings: AppSettings = {
+      closeAction: 'hide_to_tray',
+      accentTheme: 'blue_gray',
+      autoBackup: { enabled: true, intervalMinutes: 15, retentionCount: 14 },
+    }
+    const nativeCommand = createDeferred<{ enabled: boolean; port: number; token: string }>()
+    const enabledMcp = { enabled: true, port: 38472, token: 'new-token' }
+    let persistedSettings = structuredClone(initialSettings)
+    const save = vi.fn(async (next: AppSettings) => {
+      persistedSettings = structuredClone(next)
+    })
+    const enableLocalMcp = vi.fn(async () => {
+      const settings = await nativeCommand.promise
+      persistedSettings = { ...initialSettings, mcp: settings }
+      return settings
+    })
+    const appSettingsRepository = {
+      async load() {
+        return structuredClone(persistedSettings)
+      },
+      save,
+      enableLocalMcp,
+      async disableLocalMcp() {
+        throw new Error('not used')
+      },
+      async regenerateLocalMcpToken() {
+        throw new Error('not used')
+      },
+    }
+    const store = createWorkspaceStore(counted.repository, appSettingsRepository)
+    await store.getState().bootstrap()
+
+    const mcpTask = store.getState().enableLocalMcp()
+    await vi.waitFor(() => expect(enableLocalMcp).toHaveBeenCalledTimes(1))
+    const backupTask = store.getState().setAutoBackupSettings({
+      enabled: false,
+      intervalMinutes: 30,
+      retentionCount: 7,
+    })
+    const closeTask = store.getState().setAppCloseAction('quit')
+    const themeTask = store.getState().setAppAccentTheme('violet')
+
+    nativeCommand.resolve(enabledMcp)
+    await Promise.all([mcpTask, backupTask, closeTask, themeTask])
+
+    expect(store.getState().appSettings).toEqual({
+      closeAction: 'quit',
+      accentTheme: 'violet',
+      autoBackup: { enabled: false, intervalMinutes: 30, retentionCount: 7 },
+      mcp: enabledMcp,
+    })
+    expect(persistedSettings).toEqual(store.getState().appSettings)
+    expect(save).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not report a failed redundant app settings save after the latest intent is persisted', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    let persistedSettings: AppSettings | null = null
+    const save = vi.fn(async (next: AppSettings) => {
+      if (save.mock.calls.length > 1) {
+        throw new Error('redundant save should not run')
+      }
+      persistedSettings = structuredClone(next)
+    })
+    const appSettingsRepository = {
+      async load() {
+        return persistedSettings ? structuredClone(persistedSettings) : null
+      },
+      save,
+      async enableLocalMcp() {
+        throw new Error('not used')
+      },
+      async disableLocalMcp() {
+        throw new Error('not used')
+      },
+      async regenerateLocalMcpToken() {
+        throw new Error('not used')
+      },
+    }
+    const store = createWorkspaceStore(counted.repository, appSettingsRepository)
+    await store.getState().bootstrap()
+
+    const backupTask = store.getState().setAutoBackupSettings({
+      enabled: false,
+      intervalMinutes: 30,
+      retentionCount: 7,
+    })
+    const closeTask = store.getState().setAppCloseAction('quit')
+
+    await expect(Promise.all([backupTask, closeTask])).resolves.toEqual([undefined, undefined])
+    expect(save).toHaveBeenCalledTimes(1)
+    expect(store.getState().appSettingsSaveStatus).toBe('saved')
+    expect(store.getState().appSettingsSaveError).toBeNull()
+    expect(persistedSettings).toEqual(store.getState().appSettings)
+  })
+
+  it('rewrites the latest app settings after a native MCP command replaces its stale document', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const initialSettings: AppSettings = {
+      closeAction: 'hide_to_tray',
+      accentTheme: 'blue_gray',
+      autoBackup: { enabled: true, intervalMinutes: 15, retentionCount: 14 },
+      mcp: { enabled: true, port: 38472, token: 'token' },
+    }
+    let persistedSettings = structuredClone(initialSettings)
+    const save = vi.fn(async (next: AppSettings) => {
+      persistedSettings = structuredClone(next)
+    })
+    const appSettingsRepository = {
+      async load() {
+        return structuredClone(persistedSettings)
+      },
+      save,
+      async enableLocalMcp() {
+        throw new Error('not used')
+      },
+      async disableLocalMcp() {
+        throw new Error('not used')
+      },
+      async regenerateLocalMcpToken() {
+        persistedSettings = structuredClone(initialSettings)
+        return initialSettings.mcp!
+      },
+    }
+    const store = createWorkspaceStore(counted.repository, appSettingsRepository)
+    await store.getState().bootstrap()
+
+    await store.getState().setAppCloseAction('quit')
+    await store.getState().regenerateLocalMcpToken()
+
+    expect(save).toHaveBeenCalledTimes(2)
+    expect(persistedSettings).toEqual(store.getState().appSettings)
+    expect(persistedSettings.closeAction).toBe('quit')
+  })
+
+  it('does not roll back a newer app settings intent when an earlier save fails', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const initialSettings: AppSettings = {
+      closeAction: 'hide_to_tray',
+      accentTheme: 'blue_gray',
+      autoBackup: { enabled: true, intervalMinutes: 15, retentionCount: 14 },
+    }
+    let persistedSettings = structuredClone(initialSettings)
+    const save = vi.fn((next: AppSettings) => {
+      if (save.mock.calls.length === 1) {
+        return Promise.reject(new Error('first save failed'))
+      }
+      persistedSettings = structuredClone(next)
+      return Promise.resolve()
+    })
+    const appSettingsRepository = {
+      async load() {
+        return structuredClone(persistedSettings)
+      },
+      save,
+      async enableLocalMcp() {
+        throw new Error('not used')
+      },
+      async disableLocalMcp() {
+        throw new Error('not used')
+      },
+      async regenerateLocalMcpToken() {
+        throw new Error('not used')
+      },
+    }
+    const store = createWorkspaceStore(counted.repository, appSettingsRepository)
+    await store.getState().bootstrap()
+
+    const backup = store.getState().setAutoBackupSettings({
+      enabled: false,
+      intervalMinutes: 30,
+      retentionCount: 7,
+    })
+    const closeAction = store.getState().setAppCloseAction('quit')
+
+    await expect(backup).rejects.toThrow('Failed to save automatic backup settings')
+    await expect(closeAction).resolves.toBeUndefined()
+
+    expect(store.getState().appSettings).toEqual({
+      closeAction: 'quit',
+      accentTheme: 'blue_gray',
+      autoBackup: { enabled: false, intervalMinutes: 30, retentionCount: 7 },
+    })
+    expect(persistedSettings).toEqual(store.getState().appSettings)
+  })
+
+  it.each(['saving', 'saved'] as const)(
+    'keeps workspace save status %s and reports an isolated app-settings failure',
+    async (workspaceSaveStatus) => {
     const counted = createCountingRepository(createWorkspace())
     const persistedSettings: AppSettings = {
       closeAction: 'quit',
@@ -628,6 +929,10 @@ describe('createWorkspaceStore data tables', () => {
     )
     const store = createWorkspaceStore(counted.repository, appSettings.repository)
     await store.getState().bootstrap()
+    const originalPageIcon = store.getState().pages.find((page) => page.id === 'page_1')?.icon
+    await store.getState().setPageIcon('page_1', '\u{1F4CC}')
+    const workspaceBeforeSettingsFailure = structuredClone(counted.getSnapshot())
+    store.setState((state) => ({ ...state, saveStatus: workspaceSaveStatus }))
 
     await expect(
       store.getState().setAutoBackupSettings({
@@ -638,8 +943,14 @@ describe('createWorkspaceStore data tables', () => {
     ).rejects.toThrow('Failed to save automatic backup settings')
 
     expect(store.getState().appSettings).toEqual(appSettings.getSettings())
-    expect(store.getState().saveStatus).toBe('error')
-  })
+    expect(store.getState().saveStatus).toBe(workspaceSaveStatus)
+    expect(counted.getSnapshot()).toEqual(workspaceBeforeSettingsFailure)
+    expect(store.getState().appSettingsSaveStatus).toBe('error')
+    expect(store.getState().appSettingsSaveError).toContain('app settings are unavailable')
+    await store.getState().undo()
+    expect(store.getState().pages.find((page) => page.id === 'page_1')?.icon).toBe(originalPageIcon)
+    },
+  )
 
   it('keeps active workspace saves and undo history intact when changing automatic backup settings', async () => {
     const counted = createCountingRepository(createWorkspace())
@@ -751,7 +1062,7 @@ describe('createWorkspaceStore data tables', () => {
     const first = store.getState().enableLocalMcp()
     const second = store.getState().enableLocalMcp()
 
-    expect(enableLocalMcp).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(enableLocalMcp).toHaveBeenCalledTimes(1))
 
     const mcp = { enabled: true, port: 1750, token: 'test-token' }
     deferred.resolve(mcp)
@@ -775,7 +1086,7 @@ describe('createWorkspaceStore data tables', () => {
     const first = store.getState().disableLocalMcp()
     const second = store.getState().disableLocalMcp()
 
-    expect(disableLocalMcp).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(disableLocalMcp).toHaveBeenCalledTimes(1))
 
     deferred.resolve()
 
@@ -807,7 +1118,7 @@ describe('createWorkspaceStore data tables', () => {
     await pendingDisable
 
     await expect(store.getState().enableLocalMcp()).resolves.toMatchObject({ enabled: true })
-    expect(enableLocalMcp).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(enableLocalMcp).toHaveBeenCalledTimes(1))
   })
 
   it('rejects disable while enable is pending, then disables after enable settles', async () => {
@@ -832,7 +1143,7 @@ describe('createWorkspaceStore data tables', () => {
     await pendingEnable
 
     await expect(store.getState().disableLocalMcp()).resolves.toBeUndefined()
-    expect(disableLocalMcp).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(disableLocalMcp).toHaveBeenCalledTimes(1))
   })
 
   it('clears a rejected local MCP enable single-flight task so it can retry', async () => {
@@ -852,7 +1163,7 @@ describe('createWorkspaceStore data tables', () => {
     const failedRequests = Promise.all([first, second])
     const failure = new Error('enable failed')
 
-    expect(enableLocalMcp).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(enableLocalMcp).toHaveBeenCalledTimes(1))
     deferred.reject(failure)
     await expect(failedRequests).rejects.toBe(failure)
 
@@ -878,7 +1189,7 @@ describe('createWorkspaceStore data tables', () => {
     const failedRequests = Promise.all([first, second])
     const failure = new Error('disable failed')
 
-    expect(disableLocalMcp).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(disableLocalMcp).toHaveBeenCalledTimes(1))
     deferred.reject(failure)
     await expect(failedRequests).rejects.toBe(failure)
 
@@ -2246,6 +2557,52 @@ describe('createWorkspaceStore autosave', () => {
 
       await vi.advanceTimersByTimeAsync(600)
       expect(counted.getSaveCalls()).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('finishes a pending block save after application settings persistence fails', async () => {
+    vi.useFakeTimers()
+    try {
+      const counted = createCountingRepository(createWorkspaceWithParagraphBlock())
+      const appSettingsRepository = {
+        async load() {
+          return null
+        },
+        async save() {
+          throw new Error('app settings are unavailable')
+        },
+        async enableLocalMcp() {
+          throw new Error('not used')
+        },
+        async disableLocalMcp() {
+          throw new Error('not used')
+        },
+        async regenerateLocalMcpToken() {
+          throw new Error('not used')
+        },
+      }
+      const store = createWorkspaceStore(counted.repository, appSettingsRepository)
+
+      await store.getState().bootstrap()
+      const block = store.getState().pages[0].blocks[0] as BlockRecord
+      await store.getState().updateBlock('page_1', 'block_1', { ...block, text: 'Kept' })
+
+      await expect(
+        store.getState().setAutoBackupSettings({
+          enabled: false,
+          intervalMinutes: 30,
+          retentionCount: 7,
+        }),
+      ).rejects.toThrow('Failed to save automatic backup settings')
+      expect(store.getState().appSettingsSaveStatus).toBe('error')
+      expect(store.getState().saveStatus).toBe('saving')
+
+      await vi.advanceTimersByTimeAsync(600)
+
+      expect(counted.getSnapshot()?.pages[0]?.blocks[0]).toMatchObject({ text: 'Kept' })
+      expect(store.getState().saveStatus).toBe('saved')
     } finally {
       vi.useRealTimers()
     }

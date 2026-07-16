@@ -111,6 +111,8 @@ export interface WorkspaceState {
   appSettings: AppSettings
   currentPageId: PageId | null
   saveStatus: SaveStatus
+  appSettingsSaveStatus: SaveStatus
+  appSettingsSaveError: string | null
   bootstrap: () => Promise<void>
   ensureInboxPage: () => Promise<PageRecord>
   createPage: (parentId?: PageId, options?: CreatePageOptions) => Promise<PageRecord>
@@ -266,6 +268,8 @@ function createEmptyState(): WorkspaceState {
     },
     currentPageId: null,
     saveStatus: 'idle',
+    appSettingsSaveStatus: 'idle',
+    appSettingsSaveError: null,
     bootstrap: async () => undefined,
     ensureInboxPage: async () => {
       throw new Error('not implemented')
@@ -504,18 +508,36 @@ function normalizeAutoBackupSettings(settings: AppSettings['autoBackup']): AutoB
   }
 }
 
-function normalizeMcpSettings(settings: AppSettings['mcp']): McpSettings | undefined {
+function normalizeMcpSettings(settings: Partial<McpSettings> | undefined): McpSettings | undefined {
+  const enabled = settings?.enabled
+  const port = settings?.port
+  const token = settings?.token
+
   if (
-    !settings ||
-    !Number.isInteger(settings.port) ||
-    settings.port < 1024 ||
-    settings.port > 65535 ||
-    !settings.token
+    typeof enabled !== 'boolean' ||
+    typeof port !== 'number' ||
+    !Number.isInteger(port) ||
+    port < 1024 ||
+    port > 65535 ||
+    typeof token !== 'string' ||
+    !token
   ) {
     return undefined
   }
 
-  return settings
+  return { enabled, port, token }
+}
+
+function mergeMcpSettings(current: AppSettings, incoming: Partial<McpSettings>): AppSettings {
+  const mcp = normalizeMcpSettings({
+    ...current.mcp,
+    ...incoming,
+  })
+
+  return normalizeAppSettings({
+    ...current,
+    ...(mcp ? { mcp } : {}),
+  })
 }
 
 function normalizePageDefaults(defaults: Partial<PageDisplayDefaults> | undefined): PageDisplayDefaults {
@@ -1480,9 +1502,10 @@ export function createWorkspaceStore(
   let pagePropertyPersistVersion = 0
   let nonPageAssetsPersistQueue: Promise<void> = Promise.resolve()
   let nonPageAssetsPersistVersion = 0
-  let autoBackupSettingsPersistQueue: Promise<void> = Promise.resolve()
-  let autoBackupSettingsPersistVersion = 0
-  let latestPersistedAutoBackupSettings = normalizeAutoBackupSettings(undefined)
+  let appSettingsPersistQueue: Promise<void> = Promise.resolve()
+  let appSettingsRequestVersion = 0
+  let latestAppSettingsIntent = normalizeAppSettings(undefined)
+  let latestPersistedAppSettings = normalizeAppSettings(undefined)
   let pendingBlockSaveTimer: ReturnType<typeof setTimeout> | null = null
   let pendingBlockSaveTask: Promise<void> | null = null
   let pendingBlockSaveVersion = 0
@@ -1585,6 +1608,103 @@ export function createWorkspaceStore(
   }
 
   return createStore<WorkspaceState>()((set, get) => {
+    function sameAppSettings(left: AppSettings, right: AppSettings) {
+      return JSON.stringify(left) === JSON.stringify(right)
+    }
+
+    function startAppSettingsRequest() {
+      appSettingsRequestVersion += 1
+      set({
+        appSettingsSaveStatus: 'saving',
+        appSettingsSaveError: null,
+      })
+      return appSettingsRequestVersion
+    }
+
+    function updateAppSettingsIntent(nextAppSettings: AppSettings) {
+      latestAppSettingsIntent = normalizeAppSettings(nextAppSettings)
+      set({ appSettings: latestAppSettingsIntent })
+      return latestAppSettingsIntent
+    }
+
+    function enqueueAppSettingsTask<T>(task: () => Promise<T>) {
+      const queuedTask = appSettingsPersistQueue.then(task)
+      appSettingsPersistQueue = queuedTask.then(
+        () => undefined,
+        () => undefined,
+      )
+      return queuedTask
+    }
+
+    async function saveLatestAppSettingsIntent(force = false) {
+      const settingsToSave = latestAppSettingsIntent
+
+      if (!force && sameAppSettings(settingsToSave, latestPersistedAppSettings)) {
+        return
+      }
+
+      await appSettingsRepository.save(settingsToSave)
+      latestPersistedAppSettings = settingsToSave
+    }
+
+    async function finishAppSettingsTask<T>(
+      task: Promise<T>,
+      requestVersion: number,
+      errorMessage: string,
+      rethrowOriginalError = false,
+    ) {
+      try {
+        const result = await task
+        if (requestVersion === appSettingsRequestVersion) {
+          set({ appSettingsSaveStatus: 'saved', appSettingsSaveError: null })
+        }
+        return result
+      } catch (error) {
+        await appSettingsPersistQueue
+
+        if (requestVersion === appSettingsRequestVersion) {
+          if (!sameAppSettings(latestAppSettingsIntent, latestPersistedAppSettings)) {
+            latestAppSettingsIntent = latestPersistedAppSettings
+            set({ appSettings: latestPersistedAppSettings })
+          }
+          set({
+            appSettingsSaveStatus: 'error',
+            appSettingsSaveError:
+              error instanceof Error ? error.message : 'Failed to save application settings',
+          })
+        }
+
+        throw rethrowOriginalError ? error : new Error(errorMessage)
+      }
+    }
+
+    function persistAppSettings(nextAppSettings: AppSettings, errorMessage: string) {
+      const requestVersion = startAppSettingsRequest()
+      updateAppSettingsIntent(nextAppSettings)
+
+      return finishAppSettingsTask(
+        enqueueAppSettingsTask(saveLatestAppSettingsIntent),
+        requestVersion,
+        errorMessage,
+      )
+    }
+
+    function persistMcpSettings<T>(
+      runMcpCommand: () => Promise<T>,
+      merge: (settings: T) => AppSettings,
+      errorMessage: string,
+    ) {
+      const requestVersion = startAppSettingsRequest()
+      const task = enqueueAppSettingsTask(async () => {
+        const settings = await runMcpCommand()
+        updateAppSettingsIntent(merge(settings))
+        await saveLatestAppSettingsIntent(true)
+        return settings
+      })
+
+      return finishAppSettingsTask(task, requestVersion, errorMessage, true)
+    }
+
     function clearPendingBlockSaveTimer() {
       if (pendingBlockSaveTimer !== null) {
         clearTimeout(pendingBlockSaveTimer)
@@ -1808,7 +1928,8 @@ export function createWorkspaceStore(
         const snapshot = normalized.snapshot
         const currentPageId = resolveCurrentPageId(snapshot)
         const appSettings = normalizeAppSettings(persistedAppSettings)
-        latestPersistedAutoBackupSettings = normalizeAutoBackupSettings(appSettings.autoBackup)
+        latestAppSettingsIntent = appSettings
+        latestPersistedAppSettings = appSettings
         undoStack.length = 0
         redoStack.length = 0
 
@@ -1840,6 +1961,8 @@ export function createWorkspaceStore(
           appSettings,
           currentPageId,
           saveStatus: 'saved',
+          appSettingsSaveStatus: 'saved',
+          appSettingsSaveError: null,
         })
       })()
 
@@ -1952,50 +2075,23 @@ export function createWorkspaceStore(
     },
 
     setAppCloseAction: async (closeAction) => {
-      const nextAppSettings = normalizeAppSettings({ ...get().appSettings, closeAction })
-      set({
-        appSettings: nextAppSettings,
-      })
-      await appSettingsRepository.save(nextAppSettings)
+      const nextAppSettings = normalizeAppSettings({ ...latestAppSettingsIntent, closeAction })
+      await persistAppSettings(nextAppSettings, 'Failed to save application settings')
     },
 
     setAppAccentTheme: async (theme) => {
-      const state = get()
-      const nextAppSettings = normalizeAppSettings({ ...state.appSettings, accentTheme: theme })
+      const nextAppSettings = normalizeAppSettings({ ...latestAppSettingsIntent, accentTheme: theme })
 
-      if (nextAppSettings.accentTheme === state.appSettings.accentTheme) {
+      if (nextAppSettings.accentTheme === latestAppSettingsIntent.accentTheme) {
         return
       }
 
-      set({ appSettings: nextAppSettings })
-      await appSettingsRepository.save(nextAppSettings)
+      await persistAppSettings(nextAppSettings, 'Failed to save application settings')
     },
 
     setAutoBackupSettings: async (autoBackup) => {
-      const nextAppSettings = normalizeAppSettings({ ...get().appSettings, autoBackup })
-      const persistVersion = ++autoBackupSettingsPersistVersion
-      set({ appSettings: nextAppSettings })
-
-      const persistTask = autoBackupSettingsPersistQueue.then(async () => {
-        await appSettingsRepository.save(nextAppSettings)
-        latestPersistedAutoBackupSettings = normalizeAutoBackupSettings(nextAppSettings.autoBackup)
-      })
-      autoBackupSettingsPersistQueue = persistTask.catch(() => undefined)
-
-      try {
-        await persistTask
-      } catch {
-        if (persistVersion === autoBackupSettingsPersistVersion) {
-          set({
-            appSettings: normalizeAppSettings({
-              ...get().appSettings,
-              autoBackup: latestPersistedAutoBackupSettings,
-            }),
-            saveStatus: 'error',
-          })
-        }
-        throw new Error('Failed to save automatic backup settings')
-      }
+      const nextAppSettings = normalizeAppSettings({ ...latestAppSettingsIntent, autoBackup })
+      await persistAppSettings(nextAppSettings, 'Failed to save automatic backup settings')
     },
 
     enableLocalMcp: () => {
@@ -2008,11 +2104,17 @@ export function createWorkspaceStore(
         )
       }
 
-      const task = (async () => {
-        const mcp = await appSettingsRepository.enableLocalMcp()
-        set({ appSettings: normalizeAppSettings({ ...get().appSettings, mcp }) })
-        return mcp
-      })()
+      const task = persistMcpSettings(
+        () => appSettingsRepository.enableLocalMcp(),
+        (mcp) => mergeMcpSettings(latestAppSettingsIntent, mcp),
+        'Failed to save local MCP settings',
+      ).then(() => {
+        const nextMcpSettings = latestAppSettingsIntent.mcp
+        if (!nextMcpSettings) {
+          throw new Error('Local MCP returned incomplete settings')
+        }
+        return nextMcpSettings
+      })
       const operation = { kind: 'enable' as const, promise: task }
       const clearTask = () => {
         if (localMcpOperation === operation) {
@@ -2034,16 +2136,16 @@ export function createWorkspaceStore(
         )
       }
 
-      const task = (async () => {
-        await appSettingsRepository.disableLocalMcp()
-        const mcp = get().appSettings.mcp
-        set({
-          appSettings: normalizeAppSettings({
-            ...get().appSettings,
-            ...(mcp ? { mcp: { ...mcp, enabled: false } } : {}),
-          }),
-        })
-      })()
+      const task = persistMcpSettings(
+        () => appSettingsRepository.disableLocalMcp(),
+        () => normalizeAppSettings({
+          ...latestAppSettingsIntent,
+          ...(latestAppSettingsIntent.mcp
+            ? { mcp: { ...latestAppSettingsIntent.mcp, enabled: false } }
+            : {}),
+        }),
+        'Failed to save local MCP settings',
+      )
       const operation = { kind: 'disable' as const, promise: task }
       const clearTask = () => {
         if (localMcpOperation === operation) {
@@ -2063,11 +2165,17 @@ export function createWorkspaceStore(
         return Promise.reject(new Error('Local MCP operation is already in progress'))
       }
 
-      const task = (async () => {
-        const mcp = await appSettingsRepository.regenerateLocalMcpToken()
-        set({ appSettings: normalizeAppSettings({ ...get().appSettings, mcp }) })
-        return mcp
-      })()
+      const task = persistMcpSettings(
+        () => appSettingsRepository.regenerateLocalMcpToken(),
+        (mcp) => mergeMcpSettings(latestAppSettingsIntent, mcp),
+        'Failed to save local MCP settings',
+      ).then(() => {
+        const nextMcpSettings = latestAppSettingsIntent.mcp
+        if (!nextMcpSettings) {
+          throw new Error('Local MCP returned incomplete settings')
+        }
+        return nextMcpSettings
+      })
       const operation = { kind: 'regenerate' as const, promise: task }
       const clearTask = () => {
         if (localMcpOperation === operation) {
