@@ -755,6 +755,7 @@ describe('createHighSchoolChineseTeacherTemplate', () => {
   it('keeps template board visuals below the fixed toolbar top safe area', () => {
     const template = createHighSchoolChineseTeacherTemplate()
     const boardTopSafeY = 90
+    expect(template.boards).toHaveLength(2)
     const minimumVisualYs = template.boards.map((board) => {
       const snapshot = board.snapshot as WhiteboardSnapshot
       const visualYs = [
@@ -765,6 +766,7 @@ describe('createHighSchoolChineseTeacherTemplate', () => {
         ...snapshot.strokes.flatMap((stroke) => stroke.points.map((point) => point.y)),
       ]
 
+      expect(visualYs.length, `${board.title} visual y count`).toBeGreaterThan(0)
       return { title: board.title, y: Math.min(...visualYs) }
     })
 
