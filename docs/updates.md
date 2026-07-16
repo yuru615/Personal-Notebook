@@ -20,7 +20,7 @@
 
 验证情况：
 
-- 定向前端验证 3 个测试文件、49 项通过；完整前端验证 93 个测试文件、895 项通过。
+- 定向前端验证 3 个测试文件、51 项通过；完整前端验证 93 个测试文件、897 项通过。
 - `npm run lint` 为 0 error、5 条既有 React Hooks warning；生产构建通过，保留 1 类既有 Vite 大 chunk warning。
 - 完整 Rust 测试 213 项通过、0 失败；编译为 0 error、4 条既有 warning（lib test 汇总重复显示其中 1 条）。
 - 最终页面包大小为 34,570 bytes，SHA-256 为 `ACBC71FE07E869C630C850C3F537A3C43384F044776A2CB598C93419BD608F0F`。
