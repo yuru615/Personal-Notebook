@@ -1,21 +1,23 @@
 {
   "name": "zhiqi",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "npm run version:check && tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "tauri:build:mac": "tauri build --bundles app,dmg",
-    "tauri:build:windows": "tauri build --config src-tauri/tauri.windows.conf.json --bundles nsis,msi",
+    "tauri:build:mac": "npm run tauri:build:mac:aarch64",
+    "tauri:build:mac:aarch64": "tauri build --target aarch64-apple-darwin --bundles app,dmg",
+    "tauri:build:windows": "tauri build --config src-tauri/tauri.windows.conf.json --bundles nsis",
     "tauri:build:windows:cross": "tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "version:check": "node scripts/check-version.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -24,6 +26,8 @@
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-fs": "^2.5.1",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "clsx": "^2.1.1",
     "expr-eval": "^2.0.2",
     "jszip": "^3.10.1",

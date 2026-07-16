@@ -10,6 +10,7 @@ import type {
 } from '../../domain/types'
 import { appAccentThemeOptions, type AppAccentTheme } from '../../domain/theme'
 import { useOptionalAccount } from '../../app/accountContext'
+import { useOptionalUpdate } from '../../app/updateContextValue'
 
 export type SettingsSectionKey =
   | 'account'
@@ -20,6 +21,7 @@ export type SettingsSectionKey =
   | 'import_export'
   | 'desktop'
   | 'data_maintenance'
+  | 'about_updates'
   | 'experimental'
 
 export const DEFAULT_SETTINGS_SECTION: SettingsSectionKey = 'general'
@@ -38,6 +40,7 @@ const SETTINGS_SECTIONS: Array<{ key: SettingsSectionKey; label: string }> = [
   { key: 'import_export', label: '导入导出' },
   { key: 'desktop', label: '桌面端' },
   { key: 'data_maintenance', label: '数据与维护' },
+  { key: 'about_updates', label: '关于与更新' },
   { key: 'experimental', label: '实验功能' },
 ]
 
@@ -189,6 +192,7 @@ export function SettingsCenter({
   onBackToWorkspace,
 }: SettingsCenterProps) {
   const account = useOptionalAccount()
+  const updates = useOptionalUpdate()
   const [currentSection, setCurrentSection] = useState(activeSection)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [logoutError, setLogoutError] = useState('')
@@ -958,6 +962,44 @@ export function SettingsCenter({
                     </div>
                   </>
                 ) : null}
+              </div>
+            </section>
+          </div>
+        ) : null}
+
+        {currentSection === 'about_updates' ? (
+          <div className="settings-section-stack">
+            <section className="settings-section">
+              <h2 className="settings-section-title">关于与更新</h2>
+              <p className="settings-section-description">知栖桌面客户端版本状态。</p>
+              <div className="settings-card">
+                <div className="settings-card-row">
+                  <div>
+                    <div className="settings-card-label">当前版本</div>
+                    <div className="settings-card-help">v{updates?.currentVersion ?? '0.1.0'}</div>
+                  </div>
+                  <button
+                    type="button"
+                    className="settings-action-button"
+                    disabled={!updates || updates.phase === 'checking' || updates.phase === 'downloading' || updates.phase === 'installing'}
+                    onClick={() => void updates?.checkForUpdates()}
+                  >
+                    {updates?.phase === 'checking' ? '正在检查...' : '检查更新'}
+                  </button>
+                </div>
+                {updates?.info ? (
+                  <>
+                    <div className="settings-card-divider" />
+                    <div className="settings-card-row">
+                      <div>
+                        <div className="settings-card-label">可用版本 v{updates.info.version}</div>
+                        <div className="settings-card-help">{updates.info.mandatory ? '需要更新后继续使用。' : '可在合适的时候安装。'}</div>
+                      </div>
+                      <button type="button" className="settings-action-button" onClick={() => void updates.installUpdate()}>立即更新</button>
+                    </div>
+                  </>
+                ) : null}
+                {updates?.message ? <div className="settings-card-help" role="status">{updates.message}</div> : null}
               </div>
             </section>
           </div>

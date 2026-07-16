@@ -99,7 +99,7 @@ npm run test:watch
 - `npm run tauri:dev`：启动 Tauri 桌面开发模式，会自动拉起 Vite。
 - `npm run tauri:build`：按当前平台构建并打包桌面应用。
 - `npm run tauri:build:mac`：在 macOS 上打包 `.app` 和 `.dmg`。
-- `npm run tauri:build:windows`：在 Windows 上打包 NSIS `.exe` 和 MSI `.msi`。
+- `npm run tauri:build:windows`：在 Windows 上打包 NSIS `.exe` 和 updater 签名产物。
 - `npm run tauri:build:windows:cross`：通过 `cargo-xwin` 交叉构建 x64 Windows NSIS 安装包。
 
 运行单个测试示例：
@@ -119,7 +119,7 @@ npx vitest run -t "restores window"
 ## 桌面端边界
 
 - Tauri 配置集中在 `src-tauri/tauri.conf.json`。其中 `beforeDevCommand`/`beforeBuildCommand` 连接 Vite 构建，`devUrl` 是 `http://localhost:5173`，`frontendDist` 指向 `../dist`。
-- Windows 打包覆盖配置在 `src-tauri/tauri.windows.conf.json`，包含 NSIS/MSI、WebView2 bootstrapper、WiX upgrade code、安装语言和 currentUser 安装模式。
+- Windows 打包覆盖配置在 `src-tauri/tauri.windows.conf.json`，包含 NSIS、WebView2 bootstrapper、安装语言和 currentUser 安装模式。
 - Rust 入口在 `src-tauri/src/lib.rs`，注册 dialog/fs 插件和自定义 storage commands，声明 `open_external_url` 命令，创建系统托盘，并把主窗口关闭行为改为隐藏到托盘。
 - 远程账号请求集中在 `src-tauri/src/account.rs`；发布构建必须通过 `ZHIQI_API_BASE_URL` 注入 HTTPS origin。React 只通过 `src/lib/accountClient.ts` 的类型化命令访问账号状态。
 - Tauri 权限集中在 `src-tauri/capabilities/default.json`。新增或收紧前端可调用能力时，同步检查 capability、插件注册、前端调用和打包。

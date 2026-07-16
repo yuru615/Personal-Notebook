@@ -102,6 +102,7 @@ import { createId } from '../utils/id'
 import { deletePageBranch } from '../utils/pageTree'
 import type { ReorderPosition } from '../utils/reorder'
 import { useDesktopClipboardCapture } from './useDesktopClipboardCapture'
+import { useOptionalUpdate } from './updateContextValue'
 
 type WorkspaceStore = ReturnType<typeof createWorkspaceStore>
 type AppState = ReturnType<WorkspaceStore['getState']>
@@ -205,6 +206,7 @@ function createAppStore(repository?: WorkspaceRepository) {
 export function WorkspaceApp({ repository, store: injectedStore, initialEntries }: WorkspaceAppProps = {}) {
   const [store] = useState(() => injectedStore ?? createAppStore(repository))
   const account = useOptionalAccount()
+  const updates = useOptionalUpdate()
   const workspaceImportRepository = useMemo(
     () => repository ?? createStorageWorkspaceRepository(),
     [repository],
@@ -227,6 +229,12 @@ export function WorkspaceApp({ repository, store: injectedStore, initialEntries 
     account.registerBeforeLock(() => store.getState().flushPendingSaves())
     return () => account.registerBeforeLock(null)
   }, [account, store])
+
+  useEffect(() => {
+    if (!updates) return
+    updates.registerBeforeInstall(() => store.getState().flushPendingSaves())
+    return () => updates.registerBeforeInstall(null)
+  }, [store, updates])
 
   useEffect(() => {
     localMcpOperationVersionRef.current += 1

@@ -10,6 +10,7 @@ mod announcements;
 mod clipboard_capture;
 mod mcp;
 mod storage;
+mod updates;
 
 const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_SHOW_WINDOW_ID: &str = "show-window";
@@ -46,6 +47,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().pubkey(env!("TAURI_UPDATER_PUBLIC_KEY")).build())
         .invoke_handler(tauri::generate_handler![
             account::account_register,
             account::account_resend_verification,
@@ -58,6 +61,9 @@ pub fn run() {
             account::account_clear_session,
             announcements::list_announcements,
             announcements::get_announcement,
+            updates::check_client_update,
+            updates::download_client_update,
+            updates::install_client_update,
             open_external_url,
             open_asset_file,
             clipboard_capture::read_clipboard_candidate,
@@ -102,6 +108,7 @@ pub fn run() {
             app.manage(storage::StorageState::open(app_data_dir)?);
             app.manage(mcp::McpServerState::new(app.handle().clone()));
             app.manage(account::AccountState::new().map_err(|error| error.message)?);
+            app.manage(updates::ClientUpdateState::default());
             let clipboard_capture_state = clipboard_capture::ClipboardCaptureState::default();
             app.manage(clipboard_capture_state.clone());
             clipboard_capture::start_clipboard_capture_monitor(app.handle().clone(), clipboard_capture_state);

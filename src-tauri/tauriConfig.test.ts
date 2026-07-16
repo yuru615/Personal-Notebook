@@ -11,7 +11,9 @@ type TauriConfig = {
   }
   bundle?: {
     icon?: string[]
+    createUpdaterArtifacts?: boolean
   }
+  version?: string
 }
 
 const srcTauriDir = dirname(fileURLToPath(import.meta.url))
@@ -47,5 +49,12 @@ describe('Tauri config', () => {
     expect(sourceIcon).toContain('data-zhiqi-logo="perch-page"')
     expect(sourceIcon).toContain('#0E766E')
     expect(sourceIcon).toContain('#DDAE4E')
+  })
+
+  it('keeps the client version and signed updater artifacts enabled', () => {
+    const config = readConfig()
+
+    expect(config.version).toBe('0.1.0')
+    expect(config.bundle?.createUpdaterArtifacts).toBe(true)
   })
 })
