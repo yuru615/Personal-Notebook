@@ -315,6 +315,10 @@
     })
   }
 
+  function disableNativeContextMenu(event) {
+    event.preventDefault()
+  }
+
   function scanHostUi() {
     ensureTitleManaged()
     document.querySelectorAll('.toolbar-menu-panel').forEach((panel) => ensureRenameAction(panel))
@@ -337,6 +341,7 @@
   document.addEventListener('keydown', handleNodeDirectionalNavigation, true)
   document.addEventListener('keydown', handleNodeBackspaceDeletion, true)
   document.addEventListener('click', syncElbowLineStyleForStructuredLayouts)
+  document.addEventListener('contextmenu', disableNativeContextMenu, true)
 
   window.addEventListener('beforeunload', () => {
     closeRenamePopover()
@@ -344,6 +349,7 @@
     document.removeEventListener('keydown', handleNodeDirectionalNavigation, true)
     document.removeEventListener('keydown', handleNodeBackspaceDeletion, true)
     document.removeEventListener('click', syncElbowLineStyleForStructuredLayouts)
+    document.removeEventListener('contextmenu', disableNativeContextMenu, true)
     observer.disconnect()
   })
 })()
