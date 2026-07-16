@@ -752,6 +752,28 @@ describe('createHighSchoolChineseTeacherTemplate', () => {
     }
   })
 
+  it('keeps template board visuals below the fixed toolbar top safe area', () => {
+    const template = createHighSchoolChineseTeacherTemplate()
+    const boardTopSafeY = 90
+    const minimumVisualYs = template.boards.map((board) => {
+      const snapshot = board.snapshot as WhiteboardSnapshot
+      const visualYs = [
+        ...snapshot.shapes.map((shape) => shape.y),
+        ...snapshot.notes.map((note) => note.y),
+        ...snapshot.texts.map((text) => text.y),
+        ...snapshot.images.map((image) => image.y),
+        ...snapshot.strokes.flatMap((stroke) => stroke.points.map((point) => point.y)),
+      ]
+
+      return { title: board.title, y: Math.min(...visualYs) }
+    })
+
+    expect(
+      minimumVisualYs.every(({ y }) => y >= boardTopSafeY),
+      `template board minimum visual y: ${JSON.stringify(minimumVisualYs)}`,
+    ).toBe(true)
+  })
+
   it('attaches valid structured references, synced instances, mentions, and assets to planned pages', () => {
     const template = createHighSchoolChineseTeacherTemplate()
     const pagesByTitle = new Map(template.pages.map((page) => [page.title, page]))

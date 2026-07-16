@@ -41,6 +41,7 @@ export interface TeacherTemplateBundle {
 
 export const TEMPLATE_NOW = '2026-07-16T00:00:00.000Z'
 
+const BOARD_TOP_SAFE_Y = 90
 const id = (kind: string, name: string) => `teacher-template-${kind}-${name}`
 const blockId = (pageSlug: string, index: number) => id('block', `${pageSlug}-${index}`)
 
@@ -984,12 +985,13 @@ function createTeachingDataTables(): DataTableRecord[] {
 
 function createTeachingBoards(): BoardRecord[] {
   const unitSnapshot = createEmptyBoardSnapshot()
+  const unitBoardTopOffset = BOARD_TOP_SAFE_Y - 35
   unitSnapshot.camera = { x: 0, y: 0, scale: 0.88 }
   unitSnapshot.shapes = ['单元主题', '核心问题', '文本研读', '学习活动', '学习成果', '评价与复盘'].map((text, index) => ({
     id: id('board-shape', `unit-stage-${index + 1}`),
     type: 'rect',
     x: 40 + index * 205,
-    y: 120,
+    y: 120 + unitBoardTopOffset,
     w: 165,
     h: 86,
     color: '#2f6f62',
@@ -1007,7 +1009,7 @@ function createTeachingBoards(): BoardRecord[] {
   ].map(([text, x, color], index) => ({
     id: id('board-note', `unit-${index + 1}`),
     x: Number(x),
-    y: 300,
+    y: 300 + unitBoardTopOffset,
     w: 180,
     h: 110,
     text: String(text),
@@ -1017,7 +1019,7 @@ function createTeachingBoards(): BoardRecord[] {
   unitSnapshot.texts = [{
     id: id('board-text', 'unit-title'),
     x: 40,
-    y: 35,
+    y: 35 + unitBoardTopOffset,
     w: 560,
     h: 48,
     text: '第七单元｜自然情怀：从目标到评价的可移动设计',
@@ -1043,12 +1045,13 @@ function createTeachingBoards(): BoardRecord[] {
   }))
 
   const lotusSnapshot = createEmptyBoardSnapshot()
+  const lotusBoardTopOffset = BOARD_TOP_SAFE_Y - 70
   lotusSnapshot.camera = { x: 0, y: 0, scale: 0.85 }
   lotusSnapshot.shapes = [
-    ['第一课时', 40, 70, 560, 330, '#587c73'],
-    ['第二课时', 640, 70, 560, 330, '#6d5b8c'],
-    ['板书布局', 40, 440, 560, 230, '#456b7d'],
-    ['课堂生成', 640, 440, 560, 230, '#8a7045'],
+    ['第一课时', 40, 70 + lotusBoardTopOffset, 560, 330, '#587c73'],
+    ['第二课时', 640, 70 + lotusBoardTopOffset, 560, 330, '#6d5b8c'],
+    ['板书布局', 40, 440 + lotusBoardTopOffset, 560, 230, '#456b7d'],
+    ['课堂生成', 640, 440 + lotusBoardTopOffset, 560, 230, '#8a7045'],
   ].map(([text, x, y, w, h, color], index) => ({
     id: id('board-shape', `lotus-region-${index + 1}`),
     type: 'rect',
@@ -1062,14 +1065,14 @@ function createTeachingBoards(): BoardRecord[] {
     z: index + 1,
   }))
   lotusSnapshot.notes = [
-    ['情境导入｜5 分钟', 70, 130, '#e2f0ea'],
-    ['朗读设计｜12 分钟', 330, 130, '#e2f0ea'],
-    ['结构梳理｜10 分钟', 70, 255, '#e2f0ea'],
-    ['景物层次｜18 分钟', 330, 255, '#e2f0ea'],
-    ['语言赏析｜15 分钟', 670, 130, '#eee7f7'],
-    ['通感探究｜10 分钟', 930, 130, '#eee7f7'],
-    ['情感移动｜10 分钟', 670, 255, '#eee7f7'],
-    ['微写作｜10 分钟', 930, 255, '#eee7f7'],
+    ['情境导入｜5 分钟', 70, 130 + lotusBoardTopOffset, '#e2f0ea'],
+    ['朗读设计｜12 分钟', 330, 130 + lotusBoardTopOffset, '#e2f0ea'],
+    ['结构梳理｜10 分钟', 70, 255 + lotusBoardTopOffset, '#e2f0ea'],
+    ['景物层次｜18 分钟', 330, 255 + lotusBoardTopOffset, '#e2f0ea'],
+    ['语言赏析｜15 分钟', 670, 130 + lotusBoardTopOffset, '#eee7f7'],
+    ['通感探究｜10 分钟', 930, 130 + lotusBoardTopOffset, '#eee7f7'],
+    ['情感移动｜10 分钟', 670, 255 + lotusBoardTopOffset, '#eee7f7'],
+    ['微写作｜10 分钟', 930, 255 + lotusBoardTopOffset, '#eee7f7'],
   ].map(([text, x, y, color], index) => ({
     id: id('board-note', `lotus-activity-${index + 1}`),
     x: Number(x),
@@ -1084,7 +1087,7 @@ function createTeachingBoards(): BoardRecord[] {
     {
       id: id('board-text', 'lotus-board-layout'),
       x: 75,
-      y: 500,
+      y: 500 + lotusBoardTopOffset,
       w: 480,
       h: 105,
       text: '行踪线：出门 → 荷塘 → 回家\n景物层：荷叶荷花 → 月光 → 树影远景\n情感线：不宁静 → 暂得宁静 → 回到现实',
@@ -1099,7 +1102,7 @@ function createTeachingBoards(): BoardRecord[] {
     {
       id: id('board-text', 'lotus-classroom-generation'),
       x: 675,
-      y: 500,
+      y: 500 + lotusBoardTopOffset,
       w: 480,
       h: 105,
       text: '现场补充：新证据｜新问题｜时间偏差｜下次调整',
