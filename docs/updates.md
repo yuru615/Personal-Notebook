@@ -4,6 +4,21 @@
 
 ## 维护规则
 
+## 2026-07-16 客户端版本更新为 v0.1.1
+
+提交：未提交
+
+简要描述：
+
+将知栖桌面客户端版本号从 v0.1.0 提升至 v0.1.1，为后续发布做准备。
+
+详细描述：
+- 同步更新 `package.json`、`src-tauri/tauri.conf.json` 和 `src-tauri/Cargo.toml` 三处版本号，保持 `scripts/check-version.mjs` 校验的一致性。
+- 本次仅变更版本号，不涉及功能、数据、架构或用户可感知行为变化。
+
+验证情况：
+- `npm run version:check` 通过，三处版本号一致，输出 `Client version 0.1.1`。
+
 ## 2026-07-16 客户端原生右键菜单禁用
 
 提交：未提交
