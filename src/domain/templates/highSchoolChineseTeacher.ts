@@ -832,6 +832,8 @@ function createTeachingDataTables(): DataTableRecord[] {
     ['单元写作评价量规', '评价量规', '第七单元', ['作业', '评价'], '模板自制表格', ['评价', '写作'], '已包含', '用于初稿、自评与修改。'],
     ['单元复习与自测题', '练习', '第七单元', ['复习'], '教师自备', ['复习', '自测'], '待补充', '题目需结合教学进度自行补充，不随模板打包教材或商业附件。'],
   ]
+  const resourceTagLabels = [...new Set(resourceRows.flatMap(([, , , , , tags]) => tags))]
+  const resourceTagColors = ['green', 'blue', 'purple', 'orange', 'yellow', 'red']
   const resourceTable = createTemplateDataTable(
     'teaching-resources',
     '教学资源库',
@@ -868,7 +870,16 @@ function createTeachingDataTables(): DataTableRecord[] {
         })),
       },
       { key: 'source', name: '来源', type: 'text' },
-      { key: 'tags', name: '标签', type: 'multiSelect' },
+      {
+        key: 'tags',
+        name: '标签',
+        type: 'multiSelect',
+        options: resourceTagLabels.map((label, index) => ({
+          id: `resource-tag-${index + 1}`,
+          label,
+          color: resourceTagColors[index % resourceTagColors.length]!,
+        })),
+      },
       {
         key: 'readiness',
         name: '准备状态',

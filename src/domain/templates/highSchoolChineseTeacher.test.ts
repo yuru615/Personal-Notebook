@@ -392,6 +392,38 @@ describe('createHighSchoolChineseTeacherTemplate', () => {
     }
   })
 
+  it('configures unique options for every select and multi-select record value', () => {
+    const template = createHighSchoolChineseTeacherTemplate()
+
+    for (const dataTable of template.dataTables) {
+      const snapshot = dataTable.snapshot as AppState
+      for (const property of Object.values(snapshot.properties)) {
+        if (property.type !== 'select' && property.type !== 'multiSelect') {
+          continue
+        }
+
+        const options = property.config.options ?? []
+        const optionIds = options.map((option) => option.id)
+        const optionLabels = options.map((option) => option.label)
+        const configuredLabels = new Set(optionLabels)
+        const recordLabels = Object.values(snapshot.records).flatMap((record) => {
+          const value = record.values[property.id]
+          if (Array.isArray(value)) {
+            return value
+          }
+          return value === null || value === undefined || value === '' ? [] : [String(value)]
+        })
+
+        expect(new Set(optionIds).size, `${dataTable.title}.${property.key} option ids`).toBe(optionIds.length)
+        expect(new Set(optionLabels).size, `${dataTable.title}.${property.key} option labels`).toBe(optionLabels.length)
+        expect(
+          recordLabels.every((label) => configuredLabels.has(label)),
+          `${dataTable.title}.${property.key} record labels`,
+        ).toBe(true)
+      }
+    }
+  })
+
   it('creates editable boards and fully connected mindmaps', () => {
     const template = createHighSchoolChineseTeacherTemplate()
 
@@ -591,6 +623,10 @@ describe('createHighSchoolChineseTeacherTemplate', () => {
     }
   })
 
+  it('builds deeply equal deterministic template output', () => {
+    expect(createHighSchoolChineseTeacherTemplate()).toEqual(createHighSchoolChineseTeacherTemplate())
+  })
+
   it('keeps examples anonymous, copyright-safe, and independently mutable', () => {
     const firstTemplate = createHighSchoolChineseTeacherTemplate()
     const serialized = JSON.stringify(firstTemplate)
@@ -614,17 +650,50 @@ describe('createHighSchoolChineseTeacherTemplate', () => {
       return
     }
 
+    const pristineTemplate = createHighSchoolChineseTeacherTemplate()
     const firstTaskState = firstTemplate.dataTables[0]!.snapshot as AppState
     const firstBoard = firstTemplate.boards[0]!.snapshot as WhiteboardSnapshot
+    const firstMindmap = firstTemplate.mindmaps[0]!.snapshot as TemplateMindmapSnapshot
+    const optionProperty = Object.values(firstTaskState.properties).find((property) => property.config.options?.length)
+    const filteredView = Object.values(firstTaskState.database.views).find((view) => view.filters.length > 0)
+    const classProperty = Object.values(firstTaskState.properties).find((property) => property.key === 'className')
+    const classRecord = Object.values(firstTaskState.records).find((record) => (
+      classProperty && Array.isArray(record.values[classProperty.id]) && record.values[classProperty.id].length > 0
+    ))
+    const recordPage = classRecord ? firstTaskState.recordPages[classRecord.id] : undefined
+    const syncedContent = firstTemplate.syncedBlockGroups[0]?.blocks[0]
+    const richTextBlock = firstTemplate.pages
+      .flatMap((page) => page.blocks)
+      .find((block) => 'richText' in block && (block.richText?.length ?? 0) > 0)
+
+    if (
+      !optionProperty?.config.options?.[0] ||
+      !filteredView ||
+      !classProperty ||
+      !classRecord ||
+      !recordPage ||
+      syncedContent?.type !== 'numbered_list' ||
+      !syncedContent.items[0] ||
+      !richTextBlock ||
+      !('richText' in richTextBlock) ||
+      !richTextBlock.richText?.[0]
+    ) {
+      throw new Error('Expected nested structured template fixtures')
+    }
+
+    const classValues = classRecord.values[classProperty.id] as string[]
+
     firstTaskState.database.viewOrder.push('mutated-view')
+    optionProperty.config.options[0].label = 'mutated option'
+    filteredView.filters.push({ ...filteredView.filters[0]!, id: 'mutated-filter' })
+    classValues.push('mutated class')
+    recordPage.blockIds.push('mutated-block')
     firstBoard.notes[0]!.text = 'mutated note'
+    firstMindmap.nodes[firstMindmap.rootId]!.text = 'mutated mindmap'
+    syncedContent.items[0] = 'mutated synced text'
+    richTextBlock.richText[0].text = 'mutated rich text'
     firstTemplate.assets[0]!.bytes[0] = 0
 
-    const freshTemplate = createHighSchoolChineseTeacherTemplate()
-    const freshTaskState = freshTemplate.dataTables[0]!.snapshot as AppState
-    const freshBoard = freshTemplate.boards[0]!.snapshot as WhiteboardSnapshot
-    expect(freshTaskState.database.viewOrder).not.toContain('mutated-view')
-    expect(freshBoard.notes[0]?.text).not.toBe('mutated note')
-    expect(freshTemplate.assets[0]?.bytes[0]).not.toBe(0)
+    expect(createHighSchoolChineseTeacherTemplate()).toEqual(pristineTemplate)
   })
 })
