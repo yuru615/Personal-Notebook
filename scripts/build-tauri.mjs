@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 
 const projectRoot = resolve(import.meta.dirname, '..')
 const updaterKeyDir = join(homedir(), '.config', 'zhiqi', 'updater')
@@ -57,16 +57,17 @@ if (env.ZHIQI_API_BASE_URL.startsWith('http://')) {
   console.warn('Building with HTTP update transport for development use only.')
 }
 
-const tauriCli = join(projectRoot, 'node_modules', '.bin', process.platform === 'win32' ? 'tauri.cmd' : 'tauri')
-const result = spawnSync(tauriCli, args, {
-  cwd: projectRoot,
-  env,
-  stdio: 'inherit',
-})
+const tauriJs = join(projectRoot, 'node_modules', '@tauri-apps', 'cli', 'tauri.js')
 
-if (result.error) {
-  console.error(result.error.message)
+try {
+  execFileSync(process.execPath, [tauriJs, ...args], {
+    cwd: projectRoot,
+    env,
+    stdio: 'inherit',
+  })
+  process.exit(0)
+} catch (err) {
+  if (err.status != null) process.exit(err.status)
+  console.error(err.message)
   process.exit(1)
 }
-
-process.exit(result.status ?? 1)
