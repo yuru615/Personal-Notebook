@@ -541,6 +541,106 @@ describe('createWorkspaceStore data tables', () => {
     expect(counted.getSnapshot()).toEqual(workspace)
   })
 
+  it('persists the latest automatic backup choice when an earlier save finishes later', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const initialSettings: AppSettings = {
+      closeAction: 'quit',
+      accentTheme: 'violet',
+      autoBackup: {
+        enabled: true,
+        intervalMinutes: 15,
+        retentionCount: 14,
+      },
+      mcp: {
+        enabled: true,
+        port: 38472,
+        token: 'test-token',
+      },
+    }
+    let persistedSettings = structuredClone(initialSettings)
+    const firstSave = createDeferred<void>()
+    const secondSave = createDeferred<void>()
+    const save = vi.fn((next: AppSettings) => {
+      const task = next.autoBackup?.intervalMinutes === 30 ? firstSave : secondSave
+      return task.promise.then(() => {
+        persistedSettings = structuredClone(next)
+      })
+    })
+    const appSettingsRepository = {
+      async load() {
+        return structuredClone(persistedSettings)
+      },
+      save,
+      async enableLocalMcp() {
+        throw new Error('not used')
+      },
+      async disableLocalMcp() {
+        throw new Error('not used')
+      },
+      async regenerateLocalMcpToken() {
+        throw new Error('not used')
+      },
+    }
+    const store = createWorkspaceStore(counted.repository, appSettingsRepository)
+    await store.getState().bootstrap()
+
+    const first = store.getState().setAutoBackupSettings({
+      enabled: false,
+      intervalMinutes: 30,
+      retentionCount: 7,
+    })
+    const second = store.getState().setAutoBackupSettings({
+      enabled: true,
+      intervalMinutes: 60,
+      retentionCount: 30,
+    })
+
+    secondSave.resolve()
+    firstSave.resolve()
+    await Promise.all([first, second])
+
+    expect(persistedSettings.autoBackup).toEqual({
+      enabled: true,
+      intervalMinutes: 60,
+      retentionCount: 30,
+    })
+  })
+
+  it('rolls back failed automatic backup settings without losing close, theme, or MCP settings', async () => {
+    const counted = createCountingRepository(createWorkspace())
+    const persistedSettings: AppSettings = {
+      closeAction: 'quit',
+      accentTheme: 'violet',
+      autoBackup: {
+        enabled: true,
+        intervalMinutes: 15,
+        retentionCount: 14,
+      },
+      mcp: {
+        enabled: true,
+        port: 38472,
+        token: 'test-token',
+      },
+    }
+    const appSettings = createMemoryAppSettingsRepository(persistedSettings)
+    vi.spyOn(appSettings.repository, 'save').mockRejectedValue(
+      new Error('app settings are unavailable'),
+    )
+    const store = createWorkspaceStore(counted.repository, appSettings.repository)
+    await store.getState().bootstrap()
+
+    await expect(
+      store.getState().setAutoBackupSettings({
+        enabled: false,
+        intervalMinutes: 30,
+        retentionCount: 7,
+      }),
+    ).rejects.toThrow('Failed to save automatic backup settings')
+
+    expect(store.getState().appSettings).toEqual(appSettings.getSettings())
+    expect(store.getState().saveStatus).toBe('error')
+  })
+
   it('keeps active workspace saves and undo history intact when changing automatic backup settings', async () => {
     const counted = createCountingRepository(createWorkspace())
     const appSettings = createMemoryAppSettingsRepository({

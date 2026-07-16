@@ -1480,6 +1480,9 @@ export function createWorkspaceStore(
   let pagePropertyPersistVersion = 0
   let nonPageAssetsPersistQueue: Promise<void> = Promise.resolve()
   let nonPageAssetsPersistVersion = 0
+  let autoBackupSettingsPersistQueue: Promise<void> = Promise.resolve()
+  let autoBackupSettingsPersistVersion = 0
+  let latestPersistedAutoBackupSettings = normalizeAutoBackupSettings(undefined)
   let pendingBlockSaveTimer: ReturnType<typeof setTimeout> | null = null
   let pendingBlockSaveTask: Promise<void> | null = null
   let pendingBlockSaveVersion = 0
@@ -1805,6 +1808,7 @@ export function createWorkspaceStore(
         const snapshot = normalized.snapshot
         const currentPageId = resolveCurrentPageId(snapshot)
         const appSettings = normalizeAppSettings(persistedAppSettings)
+        latestPersistedAutoBackupSettings = normalizeAutoBackupSettings(appSettings.autoBackup)
         undoStack.length = 0
         redoStack.length = 0
 
@@ -1969,8 +1973,29 @@ export function createWorkspaceStore(
 
     setAutoBackupSettings: async (autoBackup) => {
       const nextAppSettings = normalizeAppSettings({ ...get().appSettings, autoBackup })
+      const persistVersion = ++autoBackupSettingsPersistVersion
       set({ appSettings: nextAppSettings })
-      await appSettingsRepository.save(nextAppSettings)
+
+      const persistTask = autoBackupSettingsPersistQueue.then(async () => {
+        await appSettingsRepository.save(nextAppSettings)
+        latestPersistedAutoBackupSettings = normalizeAutoBackupSettings(nextAppSettings.autoBackup)
+      })
+      autoBackupSettingsPersistQueue = persistTask.catch(() => undefined)
+
+      try {
+        await persistTask
+      } catch {
+        if (persistVersion === autoBackupSettingsPersistVersion) {
+          set({
+            appSettings: normalizeAppSettings({
+              ...get().appSettings,
+              autoBackup: latestPersistedAutoBackupSettings,
+            }),
+            saveStatus: 'error',
+          })
+        }
+        throw new Error('Failed to save automatic backup settings')
+      }
     },
 
     enableLocalMcp: () => {
