@@ -10,6 +10,19 @@ const lessonTitles = [
   '16-2《登泰山记》',
 ]
 
+const lessonSectionTitles = [
+  '教材定位',
+  '学情分析',
+  '学习目标',
+  '教学重点与难点',
+  '课前准备',
+  '教学流程',
+  '核心问题链',
+  '板书设计',
+  '作业设计',
+  '课后复盘',
+]
+
 function blockText(block: BlockRecord) {
   const text = 'text' in block ? block.text : ''
   const items = 'items' in block ? block.items : []
@@ -55,14 +68,13 @@ describe('createHighSchoolChineseTeacherTemplate', () => {
   it.each(lessonTitles)('%s contains a complete reusable lesson structure', (title) => {
     const template = createHighSchoolChineseTeacherTemplate()
     const lesson = template.pages.find((page) => page.title === title)
-    const text = lesson?.blocks.map(blockText).join('\n') ?? ''
+    const headingTexts = lesson?.blocks
+      .filter((block) => block.type === 'heading_2')
+      .map((block) => block.text)
 
-    expect(text).toContain('学习目标')
-    expect(text).toContain('教学重点与难点')
-    expect(text).toContain('教学流程')
-    expect(text).toContain('核心问题链')
-    expect(text).toContain('作业设计')
-    expect(text).toContain('课后复盘')
+    expect(headingTexts).toEqual(lessonSectionTitles)
+    expect(lesson?.blocks.some((block) => block.type === 'table')).toBe(true)
+    expect(lesson?.blocks.some((block) => block.type === 'code')).toBe(true)
   })
 
   it('makes 荷塘月色 the complete two-period demonstration lesson', () => {
