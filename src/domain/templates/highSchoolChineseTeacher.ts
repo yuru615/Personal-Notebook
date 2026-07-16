@@ -47,18 +47,18 @@ function todo(pageSlug: string, index: number, text: string): BlockRecord {
 }
 
 function bulleted_list(pageSlug: string, index: number, items: string[]): BlockRecord {
-  return { id: blockId(pageSlug, index), type: 'bulleted_list', items }
+  return { id: blockId(pageSlug, index), type: 'bulleted_list', items: [...items] }
 }
 
 function numbered_list(pageSlug: string, index: number, items: string[]): BlockRecord {
-  return { id: blockId(pageSlug, index), type: 'numbered_list', items }
+  return { id: blockId(pageSlug, index), type: 'numbered_list', items: [...items] }
 }
 
 function table(pageSlug: string, index: number, rows: string[][]): BlockRecord {
   return {
     id: blockId(pageSlug, index),
     type: 'table',
-    rows,
+    rows: rows.map((row) => [...row]),
     hasHeaderRow: true,
     fitToContent: true,
   }

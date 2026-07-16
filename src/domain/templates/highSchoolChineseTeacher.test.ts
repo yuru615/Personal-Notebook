@@ -65,6 +65,52 @@ describe('createHighSchoolChineseTeacherTemplate', () => {
     ]))
   })
 
+  it('keeps page and block ids unique and the full hierarchy connected', () => {
+    const template = createHighSchoolChineseTeacherTemplate()
+    const pageIds = template.pages.map((page) => page.id)
+    const blockIds = template.pages.flatMap((page) => page.blocks.map((block) => block.id))
+    const roots = template.pages.filter((page) => page.parentId === null)
+    const pagesById = new Map(template.pages.map((page) => [page.id, page]))
+
+    expect(new Set(pageIds).size).toBe(pageIds.length)
+    expect(new Set(blockIds).size).toBe(blockIds.length)
+    expect(roots.map((page) => page.id)).toEqual([template.rootPageId])
+
+    for (const page of template.pages.filter((page) => page.parentId !== null)) {
+      expect(pagesById.has(page.parentId!)).toBe(true)
+    }
+
+    const reachablePageIds = new Set([template.rootPageId])
+    const queue = [template.rootPageId]
+
+    while (queue.length > 0) {
+      const parentId = queue.shift()!
+      const directChildren = template.pages.filter((page) => page.parentId === parentId)
+
+      for (const child of directChildren) {
+        if (!reachablePageIds.has(child.id)) {
+          reachablePageIds.add(child.id)
+          queue.push(child.id)
+        }
+      }
+    }
+
+    expect(reachablePageIds.size).toBe(36)
+
+    for (const page of template.pages) {
+      const expectedChildIds = template.pages
+        .filter((child) => child.parentId === page.id)
+        .map((child) => child.id)
+        .sort()
+      const actualChildIds = page.blocks
+        .filter((block) => block.type === 'child_page')
+        .map((block) => block.pageId)
+        .sort()
+
+      expect(actualChildIds).toEqual(expectedChildIds)
+    }
+  })
+
   it.each(lessonTitles)('%s contains a complete reusable lesson structure', (title) => {
     const template = createHighSchoolChineseTeacherTemplate()
     const lesson = template.pages.find((page) => page.title === title)
@@ -87,6 +133,39 @@ describe('createHighSchoolChineseTeacherTemplate', () => {
     expect(text).toContain('朗读设计')
     expect(text).toContain('通感')
     expect(text).toContain('微写作')
+  })
+
+  it('isolates lesson list and table content between template builds', () => {
+    const firstTemplate = createHighSchoolChineseTeacherTemplate()
+    const firstLesson = firstTemplate.pages.find((page) => page.title === lessonTitles[0])
+    const firstObjectives = firstLesson?.blocks.find((block) => block.type === 'numbered_list')
+    const firstFlow = firstLesson?.blocks.find((block) => block.type === 'table')
+
+    if (firstObjectives?.type !== 'numbered_list' || firstFlow?.type !== 'table') {
+      throw new Error('Expected lesson objectives and teaching-flow table')
+    }
+
+    const originalObjective = firstObjectives.items[0]
+    const originalFlowCell = firstFlow.rows[1]?.[2]
+
+    if (!originalObjective || !originalFlowCell || !firstFlow.rows[1]) {
+      throw new Error('Expected populated lesson objectives and teaching-flow rows')
+    }
+
+    firstObjectives.items[0] = 'mutated objective'
+    firstFlow.rows[1][2] = 'mutated teaching-flow cell'
+
+    const freshTemplate = createHighSchoolChineseTeacherTemplate()
+    const freshLesson = freshTemplate.pages.find((page) => page.title === lessonTitles[0])
+    const freshObjectives = freshLesson?.blocks.find((block) => block.type === 'numbered_list')
+    const freshFlow = freshLesson?.blocks.find((block) => block.type === 'table')
+
+    if (freshObjectives?.type !== 'numbered_list' || freshFlow?.type !== 'table') {
+      throw new Error('Expected fresh lesson objectives and teaching-flow table')
+    }
+
+    expect(freshObjectives.items[0]).toBe(originalObjective)
+    expect(freshFlow.rows[1]?.[2]).toBe(originalFlowCell)
   })
 
   it('keeps teaching text free of encoding and implementation artifacts', () => {
