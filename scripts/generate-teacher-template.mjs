@@ -23,6 +23,7 @@ try {
     root,
     configFile: false,
     appType: 'custom',
+    optimizeDeps: { noDiscovery: true },
     server: {
       middlewareMode: true,
       hmr: { port: 40_000 + (process.pid % 20_000) },
