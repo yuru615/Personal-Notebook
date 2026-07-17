@@ -400,6 +400,10 @@ pub struct SyncedBlockGroupRecord {
 pub struct PageRecord {
     pub id: String,
     pub parent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_root_id: Option<String>,
     pub title: String,
     pub icon: Option<String>,
     pub cover: Option<String>,
@@ -425,6 +429,10 @@ pub struct PageRecord {
 pub struct PageMeta {
     pub id: String,
     pub parent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_root_id: Option<String>,
     pub title: String,
     pub icon: Option<String>,
     pub cover: Option<String>,
@@ -447,6 +455,10 @@ pub struct PageMeta {
 pub struct LoadedPage {
     pub id: String,
     pub parent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_root_id: Option<String>,
     pub title: String,
     pub icon: Option<String>,
     pub cover: Option<String>,
@@ -472,6 +484,8 @@ impl From<PageRecord> for LoadedPage {
         Self {
             id: page.id,
             parent_id: page.parent_id,
+            deleted_at: page.deleted_at,
+            deleted_root_id: page.deleted_root_id,
             title: page.title,
             icon: page.icon,
             cover: page.cover,
@@ -493,6 +507,8 @@ impl From<&PageRecord> for PageMeta {
         Self {
             id: page.id.clone(),
             parent_id: page.parent_id.clone(),
+            deleted_at: page.deleted_at.clone(),
+            deleted_root_id: page.deleted_root_id.clone(),
             title: page.title.clone(),
             icon: page.icon.clone(),
             cover: page.cover.clone(),

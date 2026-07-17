@@ -1,6 +1,6 @@
 import { type ReactNode, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Bell, ChevronRight, Download, MoreHorizontal, Plus, Search, Upload } from 'lucide-react'
+import { Bell, ChevronRight, MoreHorizontal, Plus, Search, Trash2, Upload } from 'lucide-react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useDismissableLayer } from '../editor/useDismissableLayer'
 import { DEFAULT_PAGE_ICON } from '../../domain/pageIcons'
@@ -24,7 +24,7 @@ const SIDEBAR_DUPLICATE_PAGE_LABEL = '复制页面'
 const SIDEBAR_DELETE_PAGE_LABEL = '删除页面'
 const SIDEBAR_RENAME_PAGE_PROMPT = '重命名页面'
 const SIDEBAR_EXPORT_PAGE_LABEL = '导出页面'
-const SIDEBAR_EXPORT_WORKSPACE_LABEL = '导出工作区'
+const SIDEBAR_RECYCLE_BIN_LABEL = '回收站'
 const SIDEBAR_PAGE_MENU_GAP = 8
 const SIDEBAR_PAGE_MENU_VIEWPORT_PADDING = 12
 
@@ -59,6 +59,7 @@ interface SidebarTreeProps {
   pinnedSidebarItems?: SidebarPinnedItem[]
   onCreatePage: () => void
   onSearch?: () => void
+  onOpenRecycleBin?: () => void
   onExportWorkspace?: () => void | Promise<void>
   onReorderPage?: (activePageId: PageId, overPageId: PageId) => void
   onTogglePinnedSidebarItem?: (item: SidebarPinnedItem) => void | Promise<void>
@@ -89,6 +90,7 @@ export function SidebarTree({
   pinnedSidebarItems = [],
   onCreatePage,
   onSearch,
+  onOpenRecycleBin,
   onExportWorkspace,
   onReorderPage,
   onTogglePinnedSidebarItem,
@@ -595,14 +597,11 @@ export function SidebarTree({
           <button
             type="button"
             className="sidebar-tool-button"
-            aria-label={SIDEBAR_EXPORT_WORKSPACE_LABEL}
-            data-tooltip={SIDEBAR_EXPORT_WORKSPACE_LABEL}
-            disabled={!onExportWorkspace}
-            onClick={() => {
-              void onExportWorkspace?.()
-            }}
+            aria-label={SIDEBAR_RECYCLE_BIN_LABEL}
+            data-tooltip={SIDEBAR_RECYCLE_BIN_LABEL}
+            onClick={onOpenRecycleBin}
           >
-            <Download size={15} strokeWidth={1.9} />
+            <Trash2 size={15} strokeWidth={1.9} />
           </button>
           <button
             type="button"

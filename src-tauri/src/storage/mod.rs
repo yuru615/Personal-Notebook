@@ -486,7 +486,7 @@ impl Storage {
     }
 
     pub fn load_page(&self, page_id: &str) -> StorageResult<LoadedPage> {
-        self.load_page_record(page_id).map(Into::into)
+        self.load_active_page_record(page_id).map(Into::into)
     }
 
     pub fn save_page(&self, mut page: PageRecord) -> StorageResult<SaveResult> {
@@ -524,7 +524,7 @@ impl Storage {
         }
 
         self.with_transaction(|| {
-            let mut page = self.load_page_record(page_id)?;
+            let mut page = self.load_active_page_record(page_id)?;
             page.blocks.extend(blocks);
             page.updated_at = updated_at.clone();
             let position = self
@@ -1586,11 +1586,13 @@ impl Storage {
         let synced_block_groups = self.load_synced_block_groups()?;
         self.connection.execute(
             "INSERT INTO zhiqi_pages
-              (id, parent_id, title, icon, cover, is_full_width, is_small_text, font_family,
+              (id, parent_id, deleted_at, deleted_root_id, title, icon, cover, is_full_width, is_small_text, font_family,
                 show_outline, show_properties, position, created_at, updated_at)
-              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
               ON CONFLICT(id) DO UPDATE SET
                 parent_id = excluded.parent_id,
+                deleted_at = excluded.deleted_at,
+                deleted_root_id = excluded.deleted_root_id,
                 title = excluded.title,
                 icon = excluded.icon,
                 cover = excluded.cover,
@@ -1605,6 +1607,8 @@ impl Storage {
             params![
                 page.id,
                 page.parent_id,
+                page.deleted_at,
+                page.deleted_root_id,
                 page.title,
                 page.icon,
                 page.cover,
@@ -2023,8 +2027,11 @@ impl Storage {
     fn page_id_for_ref(&self, ref_kind: &str, ref_id: &str) -> StorageResult<Option<String>> {
         self.connection
             .query_row(
-                "SELECT page_id FROM zhiqi_block_refs WHERE ref_kind = ?1 AND ref_id = ?2
-                  ORDER BY page_id ASC LIMIT 1",
+                "SELECT refs.page_id
+                  FROM zhiqi_block_refs refs
+                  JOIN zhiqi_pages pages ON pages.id = refs.page_id
+                  WHERE refs.ref_kind = ?1 AND refs.ref_id = ?2 AND pages.deleted_at IS NULL
+                  ORDER BY refs.page_id ASC LIMIT 1",
                 params![ref_kind, ref_id],
                 |row| row.get(0),
             )
@@ -2034,7 +2041,7 @@ impl Storage {
 
     fn load_pages(&self) -> StorageResult<Vec<PageRecord>> {
         let mut statement = self.connection.prepare(
-            "SELECT p.id, p.parent_id, p.title, p.icon, p.cover, p.is_full_width,
+            "SELECT p.id, p.parent_id, p.deleted_at, p.deleted_root_id, p.title, p.icon, p.cover, p.is_full_width,
               p.is_small_text, p.font_family, p.show_outline, p.show_properties,
               c.blocks_json, c.properties_json, p.created_at, p.updated_at
               FROM zhiqi_pages p
@@ -2045,18 +2052,20 @@ impl Storage {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<String>>(1)?,
-                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(2)?,
                 row.get::<_, Option<String>>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, Option<i64>>(5)?,
-                row.get::<_, Option<i64>>(6)?,
-                row.get::<_, Option<String>>(7)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<i64>>(7)?,
                 row.get::<_, Option<i64>>(8)?,
-                row.get::<_, Option<i64>>(9)?,
-                row.get::<_, String>(10)?,
-                row.get::<_, String>(11)?,
+                row.get::<_, Option<String>>(9)?,
+                row.get::<_, Option<i64>>(10)?,
+                row.get::<_, Option<i64>>(11)?,
                 row.get::<_, String>(12)?,
                 row.get::<_, String>(13)?,
+                row.get::<_, String>(14)?,
+                row.get::<_, String>(15)?,
             ))
         })?;
         let mut pages = Vec::new();
@@ -2065,6 +2074,8 @@ impl Storage {
             let (
                 id,
                 parent_id,
+                deleted_at,
+                deleted_root_id,
                 title,
                 icon,
                 cover,
@@ -2082,6 +2093,8 @@ impl Storage {
             pages.push(PageRecord {
                 id,
                 parent_id,
+                deleted_at,
+                deleted_root_id,
                 title,
                 icon,
                 cover,
@@ -2105,6 +2118,16 @@ impl Storage {
             .into_iter()
             .find(|page| page.id == page_id)
             .ok_or_else(|| StorageError::not_found(format!("page not found: {page_id}")))
+    }
+
+    pub(super) fn load_active_page_record(&self, page_id: &str) -> StorageResult<PageRecord> {
+        let page = self.load_page_record(page_id)?;
+        if page.deleted_at.is_some() {
+            return Err(StorageError::not_found(format!(
+                "page is in recycle bin: {page_id}"
+            )));
+        }
+        Ok(page)
     }
 
     fn load_boards(&self) -> StorageResult<Vec<BoardRecord>> {
@@ -2902,6 +2925,8 @@ fn collect_ref_ids_from_synced_groups(
         .map(|(index, group)| PageRecord {
             id: format!("group_page_{index}"),
             parent_id: None,
+            deleted_at: None,
+            deleted_root_id: None,
             title: String::new(),
             icon: None,
             cover: None,
@@ -2982,6 +3007,8 @@ fn collect_asset_ids_from_synced_groups(groups: &[SyncedBlockGroupRecord]) -> Ve
         .map(|(index, group)| PageRecord {
             id: format!("group_page_{index}"),
             parent_id: None,
+            deleted_at: None,
+            deleted_root_id: None,
             title: String::new(),
             icon: None,
             cover: None,
@@ -3251,6 +3278,8 @@ mod tests {
             pages: vec![PageRecord {
                 id: "page_1".to_string(),
                 parent_id: None,
+                deleted_at: None,
+                deleted_root_id: None,
                 title: "Home".to_string(),
                 icon: Some("N".to_string()),
                 cover: None,
@@ -3275,6 +3304,27 @@ mod tests {
                 ..WorkspaceSettings::default()
             },
         }
+    }
+
+    #[test]
+    fn preserves_page_recycle_bin_metadata_in_workspace_backups() {
+        let storage = Storage::open_in_memory_for_tests().expect("storage opens");
+        let mut snapshot = sample_snapshot();
+        snapshot.pages[0].deleted_at = Some("2026-07-16T00:00:00.000Z".to_string());
+        snapshot.pages[0].deleted_root_id = Some("page_1".to_string());
+
+        storage
+            .replace_workspace_backup(snapshot)
+            .expect("backup saves");
+
+        let restored = storage
+            .export_workspace_backup()
+            .expect("backup exports");
+        assert_eq!(
+            restored.pages[0].deleted_at.as_deref(),
+            Some("2026-07-16T00:00:00.000Z")
+        );
+        assert_eq!(restored.pages[0].deleted_root_id.as_deref(), Some("page_1"));
     }
 
     #[test]
@@ -3371,6 +3421,8 @@ mod tests {
                 PageRecord {
                     id: "page_mcp_child".to_string(),
                     parent_id: Some("page_1".to_string()),
+                    deleted_at: None,
+                    deleted_root_id: None,
                     title: "MCP child".to_string(),
                     icon: None,
                     cover: None,
@@ -4910,6 +4962,8 @@ mod tests {
         snapshot.pages = vec![PageRecord {
             id: "page_media".to_string(),
             parent_id: None,
+            deleted_at: None,
+            deleted_root_id: None,
             title: "Media Library".to_string(),
             icon: None,
             cover: None,
@@ -4978,6 +5032,8 @@ mod tests {
                 PageRecord {
                     id: "page_target".to_string(),
                     parent_id: None,
+                    deleted_at: None,
+                    deleted_root_id: None,
                     title: "Product Plan".to_string(),
                     icon: None,
                     cover: None,
@@ -4994,6 +5050,8 @@ mod tests {
                 PageRecord {
                     id: "page_source".to_string(),
                     parent_id: None,
+                    deleted_at: None,
+                    deleted_root_id: None,
                     title: "Meeting Notes".to_string(),
                     icon: None,
                     cover: None,
@@ -5059,6 +5117,8 @@ mod tests {
                 PageRecord {
                     id: "page_sync".to_string(),
                     parent_id: None,
+                    deleted_at: None,
+                    deleted_root_id: None,
                     title: "Sync Page".to_string(),
                     icon: None,
                     cover: None,
@@ -5081,6 +5141,8 @@ mod tests {
                 PageRecord {
                     id: "page_reference".to_string(),
                     parent_id: None,
+                    deleted_at: None,
+                    deleted_root_id: None,
                     title: "Reference Page".to_string(),
                     icon: None,
                     cover: None,
@@ -5151,6 +5213,8 @@ mod tests {
             pages: vec![PageRecord {
                 id: "page_multi".to_string(),
                 parent_id: None,
+                deleted_at: None,
+                deleted_root_id: None,
                 title: "Multi Instance Page".to_string(),
                 icon: None,
                 cover: None,
@@ -5214,6 +5278,8 @@ mod tests {
             PageRecord {
                 id: "page_1".to_string(),
                 parent_id: None,
+                deleted_at: None,
+                deleted_root_id: None,
                 title: "Alpha".to_string(),
                 icon: None,
                 cover: None,
@@ -5234,6 +5300,8 @@ mod tests {
             PageRecord {
                 id: "page_10".to_string(),
                 parent_id: None,
+                deleted_at: None,
+                deleted_root_id: None,
                 title: "Beta".to_string(),
                 icon: None,
                 cover: None,
@@ -5476,6 +5544,8 @@ mod tests {
         assert!(page_columns
             .iter()
             .any(|name| name == "show_properties"));
+        assert!(page_columns.iter().any(|name| name == "deleted_at"));
+        assert!(page_columns.iter().any(|name| name == "deleted_root_id"));
         assert!(search_document_columns
             .iter()
             .any(|name| name == "match_source"));
@@ -5500,6 +5570,8 @@ mod tests {
             .map(|index| PageRecord {
                 id: format!("page_{index}"),
                 parent_id: None,
+                deleted_at: None,
+                deleted_root_id: None,
                 title: format!("Page {index}"),
                 icon: None,
                 cover: None,
@@ -6462,6 +6534,8 @@ mod tests {
         snapshot.pages.push(PageRecord {
             id: "page_child".to_string(),
             parent_id: Some("page_1".to_string()),
+            deleted_at: None,
+            deleted_root_id: None,
             title: "Child".to_string(),
             icon: None,
             cover: None,
@@ -6486,6 +6560,8 @@ mod tests {
         snapshot.pages.push(PageRecord {
             id: "page_unrelated".to_string(),
             parent_id: None,
+            deleted_at: None,
+            deleted_root_id: None,
             title: "Unrelated".to_string(),
             icon: None,
             cover: None,
@@ -6544,6 +6620,8 @@ mod tests {
         snapshot.pages.push(PageRecord {
             id: "page_nested".to_string(),
             parent_id: Some("page_1".to_string()),
+            deleted_at: None,
+            deleted_root_id: None,
             title: "Nested".to_string(),
             icon: None,
             cover: None,
@@ -6560,6 +6638,8 @@ mod tests {
         snapshot.pages.push(PageRecord {
             id: "page_nested_child".to_string(),
             parent_id: Some("page_nested".to_string()),
+            deleted_at: None,
+            deleted_root_id: None,
             title: "Nested Child".to_string(),
             icon: None,
             cover: None,
@@ -6784,6 +6864,8 @@ mod tests {
         snapshot.pages.push(PageRecord {
             id: "page_child".to_string(),
             parent_id: Some("page_1".to_string()),
+            deleted_at: None,
+            deleted_root_id: None,
             title: "Child".to_string(),
             icon: None,
             cover: None,
@@ -6870,6 +6952,8 @@ mod tests {
                 PageRecord {
                     id: "page_root".to_string(),
                     parent_id: None,
+                    deleted_at: None,
+                    deleted_root_id: None,
                     title: "Root".to_string(),
                     icon: None,
                     cover: None,
@@ -6899,6 +6983,8 @@ mod tests {
                 PageRecord {
                     id: "page_child".to_string(),
                     parent_id: Some("page_root".to_string()),
+                    deleted_at: None,
+                    deleted_root_id: None,
                     title: "Child".to_string(),
                     icon: None,
                     cover: None,
@@ -6971,6 +7057,8 @@ mod tests {
         snapshot.pages.push(PageRecord {
             id: "page_child".to_string(),
             parent_id: Some("page_1".to_string()),
+            deleted_at: None,
+            deleted_root_id: None,
             title: "Child".to_string(),
             icon: None,
             cover: None,
@@ -6987,6 +7075,8 @@ mod tests {
         snapshot.pages.push(PageRecord {
             id: "page_grandchild".to_string(),
             parent_id: Some("page_child".to_string()),
+            deleted_at: None,
+            deleted_root_id: None,
             title: "Grandchild".to_string(),
             icon: None,
             cover: None,
@@ -7348,6 +7438,8 @@ mod tests {
         snapshot.pages.push(PageRecord {
             id: "page_child".to_string(),
             parent_id: Some("page_1".to_string()),
+            deleted_at: None,
+            deleted_root_id: None,
             title: "Child".to_string(),
             icon: None,
             cover: None,
@@ -7434,6 +7526,8 @@ mod tests {
             manifest.pages.push(PageRecord {
                 id: "page_extra_root".to_string(),
                 parent_id: None,
+                deleted_at: None,
+                deleted_root_id: None,
                 title: "Extra root".to_string(),
                 icon: None,
                 cover: None,
@@ -7472,6 +7566,8 @@ mod tests {
         snapshot.pages.push(PageRecord {
             id: "page_child".to_string(),
             parent_id: Some("page_1".to_string()),
+            deleted_at: None,
+            deleted_root_id: None,
             title: "Child".to_string(),
             icon: None,
             cover: None,
@@ -7529,6 +7625,8 @@ mod tests {
             manifest.pages.push(PageRecord {
                 id: "page_cycle_a".to_string(),
                 parent_id: Some("page_cycle_b".to_string()),
+                deleted_at: None,
+                deleted_root_id: None,
                 title: "Cycle A".to_string(),
                 icon: None,
                 cover: None,
@@ -7545,6 +7643,8 @@ mod tests {
             manifest.pages.push(PageRecord {
                 id: "page_cycle_b".to_string(),
                 parent_id: Some("page_cycle_a".to_string()),
+                deleted_at: None,
+                deleted_root_id: None,
                 title: "Cycle B".to_string(),
                 icon: None,
                 cover: None,

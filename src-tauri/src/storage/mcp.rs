@@ -52,6 +52,14 @@ impl Storage {
             .ok_or_else(|| StorageError::not_found(format!("board not found: {board_id}")))
     }
 
+    pub fn load_active_mcp_whiteboard(&self, board_id: &str) -> StorageResult<BoardRecord> {
+        let board = self.load_mcp_whiteboard(board_id)?;
+        self.page_id_for_ref("board", board_id)?.ok_or_else(|| {
+            StorageError::not_found(format!("whiteboard is not attached to an active page: {board_id}"))
+        })?;
+        Ok(board)
+    }
+
     pub fn create_mcp_page(
         &self,
         page: PageRecord,
@@ -79,7 +87,7 @@ impl Storage {
             })?;
 
         self.with_transaction(|| {
-            let mut parent = self.load_page_record(&parent_id)?;
+            let mut parent = self.load_active_page_record(&parent_id)?;
             if self.page_position(&page.id)?.is_some() {
                 return Err(StorageError::new(
                     "conflict",
@@ -131,7 +139,7 @@ impl Storage {
         } = batch;
 
         self.with_transaction(|| {
-            let mut page = self.load_page_record(&page_id)?;
+            let mut page = self.load_active_page_record(&page_id)?;
             self.ensure_new_resources(&boards, &data_tables, &mindmaps)?;
 
             let mut board_position = self.next_position("zhiqi_boards");
@@ -542,6 +550,8 @@ mod tests {
             .save_page(PageRecord {
                 id: "page_mcp_target".to_string(),
                 parent_id: None,
+                deleted_at: None,
+                deleted_root_id: None,
                 title: "Target".to_string(),
                 icon: None,
                 cover: None,
@@ -639,6 +649,80 @@ mod tests {
             audit,
             r#"["block_mcp_text","block_mcp_board","block_mcp_table","block_mcp_map","board_mcp","table_mcp","map_mcp"]"#
         );
+    }
+
+    #[test]
+    fn rejects_mcp_reads_writes_and_whiteboards_for_recycled_pages() {
+        let storage = seed_storage();
+        storage
+            .append_mcp_content(complete_batch())
+            .expect("seed resources");
+
+        let mut page = storage
+            .load_page_record("page_mcp_target")
+            .expect("load target page");
+        page.deleted_at = Some("2026-07-16T00:00:00.000Z".to_string());
+        page.deleted_root_id = Some("page_mcp_target".to_string());
+        storage.save_page(page).expect("move page to recycle bin");
+
+        assert!(storage.load_page("page_mcp_target").is_err());
+        assert!(storage.load_active_mcp_whiteboard("board_mcp").is_err());
+        assert!(storage
+            .append_mcp_content(McpWriteBatch {
+                page_id: "page_mcp_target".to_string(),
+                blocks: vec![json!({ "id": "block_hidden_write", "type": "paragraph", "text": "Hidden" })],
+                boards: Vec::new(),
+                data_tables: Vec::new(),
+                mindmaps: Vec::new(),
+                updated_at: NOW.to_string(),
+                client_name: "test-client".to_string(),
+                tool_name: "append_content".to_string(),
+            })
+            .is_err());
+        assert_eq!(
+            storage
+                .load_page_record("page_mcp_target")
+                .expect("recycled page remains stored")
+                .blocks
+                .len(),
+            4
+        );
+    }
+
+    #[test]
+    fn rejects_mcp_child_pages_for_recycled_parents() {
+        let storage = seed_storage();
+        let mut parent = storage
+            .load_page_record("page_mcp_target")
+            .expect("load parent page");
+        parent.deleted_at = Some("2026-07-16T00:00:00.000Z".to_string());
+        parent.deleted_root_id = Some("page_mcp_target".to_string());
+        storage.save_page(parent).expect("move parent to recycle bin");
+
+        assert!(storage
+            .create_mcp_page(
+                PageRecord {
+                    id: "page_mcp_hidden_child".to_string(),
+                    parent_id: Some("page_mcp_target".to_string()),
+                    deleted_at: None,
+                    deleted_root_id: None,
+                    title: "Hidden child".to_string(),
+                    icon: None,
+                    cover: None,
+                    properties: None,
+                    is_full_width: None,
+                    is_small_text: None,
+                    font_family: None,
+                    show_outline: None,
+                    show_properties: None,
+                    blocks: Vec::new(),
+                    created_at: NOW.to_string(),
+                    updated_at: NOW.to_string(),
+                },
+                Some("block_hidden_child".to_string()),
+            )
+            .is_err());
+        assert!(storage.load_page_record("page_mcp_hidden_child").is_err());
     }
 
     #[test]
@@ -848,6 +932,8 @@ mod tests {
         let child_page = PageRecord {
             id: "page_mcp_child".to_string(),
             parent_id: Some("page_mcp_target".to_string()),
+            deleted_at: None,
+            deleted_root_id: None,
             title: "Child".to_string(),
             icon: None,
             cover: None,
@@ -912,6 +998,8 @@ mod tests {
         let child_page = PageRecord {
             id: "page_mcp_child_rollback".to_string(),
             parent_id: Some("page_mcp_target".to_string()),
+            deleted_at: None,
+            deleted_root_id: None,
             title: "Child".to_string(),
             icon: None,
             cover: None,

@@ -2,7 +2,7 @@ use rusqlite::{Connection, OptionalExtension};
 
 use super::error::StorageResult;
 
-pub const SCHEMA_VERSION: i64 = 6;
+pub const SCHEMA_VERSION: i64 = 7;
 
 pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
     connection.pragma_update(None, "foreign_keys", "ON")?;
@@ -34,6 +34,8 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
         CREATE TABLE IF NOT EXISTS zhiqi_pages (
           id TEXT PRIMARY KEY NOT NULL,
           parent_id TEXT REFERENCES zhiqi_pages(id) ON DELETE CASCADE,
+          deleted_at TEXT,
+          deleted_root_id TEXT,
           title TEXT NOT NULL,
           icon TEXT,
           cover TEXT,
@@ -227,6 +229,10 @@ pub fn initialize_schema(connection: &Connection) -> StorageResult<()> {
         migrate_to_v6(connection)?;
     }
 
+    if current_version < 7 {
+        migrate_to_v7(connection)?;
+    }
+
     connection.execute(
         "INSERT INTO zhiqi_meta (key, value) VALUES ('schema_version', ?1)
           ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -338,6 +344,15 @@ fn migrate_to_v5(connection: &Connection) -> StorageResult<()> {
 
 fn migrate_to_v6(connection: &Connection) -> StorageResult<()> {
     ensure_column(connection, "zhiqi_pages", "show_properties", "INTEGER")
+}
+
+fn migrate_to_v7(connection: &Connection) -> StorageResult<()> {
+    ensure_column(connection, "zhiqi_pages", "deleted_at", "TEXT")?;
+    ensure_column(connection, "zhiqi_pages", "deleted_root_id", "TEXT")?;
+    connection.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_zhiqi_pages_deleted_root ON zhiqi_pages(deleted_root_id);",
+    )?;
+    Ok(())
 }
 
 fn ensure_column(

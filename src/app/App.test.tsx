@@ -1723,7 +1723,7 @@ describe('App', () => {
 
     const dialog = await screen.findByRole('dialog', { name: '删除当前页面' })
     expect(within(dialog).getByText(/Delete me/)).toBeInTheDocument()
-    expect(within(dialog).getByText(/未被其他页面或资源使用的关联文件/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/30 天内可恢复页面、子页面和关联资源/)).toBeInTheDocument()
     expect(deletePage).not.toHaveBeenCalled()
 
     await user.click(within(dialog).getByRole('button', { name: '取消' }))
@@ -1735,7 +1735,7 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: '删除当前页面' }))
     await user.click(
       within(await screen.findByRole('dialog', { name: '删除当前页面' })).getByRole('button', {
-        name: '确认删除',
+        name: '移入回收站',
       }),
     )
 

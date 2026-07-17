@@ -1,5 +1,7 @@
 import type { PageId, PageRecord } from '../domain/types'
 
+export const PAGE_RECYCLE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+
 export interface VisiblePageItem {
   page: PageRecord
   depth: number
@@ -22,6 +24,75 @@ export function deletePageBranch(pages: PageRecord[], targetId: PageId): PageRec
   }
 
   return pages.filter((page) => !idsToRemove.has(page.id))
+}
+
+function collectPageBranchIds(pages: PageRecord[], targetId: PageId): Set<PageId> {
+  const ids = new Set<PageId>([targetId])
+  let changed = true
+
+  while (changed) {
+    changed = false
+
+    for (const page of pages) {
+      if (page.parentId && ids.has(page.parentId) && !ids.has(page.id)) {
+        ids.add(page.id)
+        changed = true
+      }
+    }
+  }
+
+  return ids
+}
+
+export function softDeletePageBranch(
+  pages: PageRecord[],
+  targetId: PageId,
+  deletedAt: string,
+): PageRecord[] {
+  const ids = collectPageBranchIds(pages, targetId)
+
+  return pages.map((page) =>
+    ids.has(page.id) ? { ...page, deletedAt, deletedRootId: targetId } : page,
+  )
+}
+
+export function restorePageBranch(pages: PageRecord[], rootId: PageId): PageRecord[] {
+  return pages.map((page) => {
+    if (page.deletedRootId !== rootId) {
+      return page
+    }
+
+    const restoredPage = { ...page }
+    delete restoredPage.deletedAt
+    delete restoredPage.deletedRootId
+    return restoredPage
+  })
+}
+
+export function getRecycleBinRoots(pages: PageRecord[]): PageRecord[] {
+  return pages.filter((page) => page.deletedAt && page.deletedRootId === page.id)
+}
+
+export function purgeExpiredDeletedPageBranches(pages: PageRecord[], now: Date) {
+  const cutoffTime = now.getTime() - PAGE_RECYCLE_RETENTION_MS
+  const expiredRootIds = new Set(
+    getRecycleBinRoots(pages)
+      .filter((page) => {
+        const deletedAt = Date.parse(page.deletedAt as string)
+        return !Number.isFinite(deletedAt) || deletedAt <= cutoffTime
+      })
+      .map((page) => page.id),
+  )
+  const deletedPageIds = new Set(
+    pages
+      .filter((page) => page.deletedRootId && expiredRootIds.has(page.deletedRootId))
+      .map((page) => page.id),
+  )
+
+  return {
+    pages: pages.filter((page) => !deletedPageIds.has(page.id)),
+    deletedPageIds,
+  }
 }
 
 export function buildVisiblePageItems(

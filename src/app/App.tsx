@@ -27,6 +27,7 @@ import {
   type ArchiveTaskStatus,
 } from '../components/export/ExportImportPanel'
 import { AppShell, type FileDropTarget } from '../components/layout/AppShell'
+import { RecycleBinPage } from '../components/recycleBin/RecycleBinPage'
 import { SearchDialog } from '../components/search/SearchDialog'
 import {
   DEFAULT_SETTINGS_SECTION,
@@ -114,11 +115,11 @@ const DUPLICATE_BOARD_LABEL = '创建副本'
 const WHITEBOARD_MENU_LABEL = '白板菜单'
 const WHITEBOARD_RENAME_PROMPT = '重命名白板'
 const DELETE_CURRENT_PAGE_LABEL = '\u5220\u9664\u5f53\u524d\u9875\u9762'
-const DELETE_PAGE_CONFIRM_LABEL = '\u786e\u8ba4\u5220\u9664'
+const DELETE_PAGE_CONFIRM_LABEL = '\u79fb\u5165\u56de\u6536\u7ad9'
 const CANCEL_DELETE_PAGE_LABEL = '\u53d6\u6d88'
 const DELETE_PAGE_DESCRIPTION_PREFIX = '\u9875\u9762\u201c'
 const DELETE_PAGE_DESCRIPTION_SUFFIX =
-  '\u201d\u53ca\u5176\u6240\u6709\u5b50\u9875\u9762\u5c06\u88ab\u5220\u9664\u3002\u672a\u88ab\u5176\u4ed6\u9875\u9762\u6216\u8d44\u6e90\u4f7f\u7528\u7684\u5173\u8054\u6587\u4ef6\u3001\u767d\u677f\u3001\u6570\u636e\u8868\u683c\u548c\u601d\u7ef4\u5bfc\u56fe\u4e5f\u4f1a\u88ab\u6e05\u7406\u3002'
+  '\u201d\u53ca\u5176\u6240\u6709\u5b50\u9875\u9762\u5c06\u79fb\u5165\u56de\u6536\u7ad9\uff0c30 \u5929\u5185\u53ef\u6062\u590d\u9875\u9762\u3001\u5b50\u9875\u9762\u548c\u5173\u8054\u8d44\u6e90\u3002'
 const JSON_FILE_FILTER = [{ name: 'JSON', extensions: ['json'] }]
 const ZHIQI_ARCHIVE_FILE_FILTER = [{ name: '知栖归档', extensions: ['zhiqi'] }]
 const PAGE_IMPORT_FILE_FILTER = [{ name: '知栖页面包', extensions: ['zhiqi', 'zip'] }]
@@ -1097,6 +1098,7 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
       onRenamePage={(pageId, title) => store.getState().renamePage(pageId, title)}
       onDuplicatePage={(pageId) => store.getState().duplicatePage(pageId)}
       onDeletePage={(pageId) => store.getState().deletePage(pageId)}
+      onRestoreDeletedPage={(pageId) => store.getState().restoreDeletedPage(pageId)}
       onRenameBoard={(boardId, title) => store.getState().renameBoard(boardId, title)}
       onUpdateBoardSnapshot={(boardId, snapshot) =>
         store.getState().updateBoardSnapshot(boardId, snapshot)
@@ -1333,6 +1335,7 @@ interface AppRoutesProps {
   onRenamePage: (pageId: string, title: string) => Promise<void>
   onDuplicatePage: (pageId: string) => Promise<PageRecord | null>
   onDeletePage: (pageId: string) => Promise<void>
+  onRestoreDeletedPage: (pageId: string) => Promise<void>
   onRenameBoard: (boardId: string, title: string) => Promise<void>
   onUpdateBoardSnapshot: (boardId: string, snapshot: unknown) => Promise<void>
   onImportBoard: (
@@ -1491,6 +1494,7 @@ function AppRoutes({
   onRenamePage,
   onDuplicatePage,
   onDeletePage,
+  onRestoreDeletedPage,
   onRenameBoard,
   onUpdateBoardSnapshot,
   onImportBoard,
@@ -1543,6 +1547,7 @@ function AppRoutes({
   onCleanupOrphanAssets,
 }: AppRoutesProps) {
   const navigate = useNavigate()
+  const activePages = useMemo(() => pages.filter((page) => !page.deletedAt), [pages])
   const isWhiteboardRoute = useMatch('/pages/:pageId/boards/:boardId') !== null
   const isMindmapRoute = useMatch('/pages/:pageId/mindmaps/:mindmapId') !== null
   const isSettingsRoute = useMatch('/settings/:section?') !== null
@@ -1620,6 +1625,11 @@ function AppRoutes({
     }
   }
 
+  async function handleRestoreDeletedPage(pageId: string) {
+    await onRestoreDeletedPage(pageId)
+    navigate(`/pages/${pageId}`)
+  }
+
   useLayoutEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (
@@ -1667,7 +1677,7 @@ function AppRoutes({
       }}
       sidebar={
         <SidebarTree
-          pages={pages}
+          pages={activePages}
           dataTables={dataTables}
           currentPageId={currentPageId}
           inboxPageId={inboxPageId}
@@ -1677,6 +1687,7 @@ function AppRoutes({
             void handleCreatePage()
           }}
           onSearch={() => setIsSearchOpen(true)}
+          onOpenRecycleBin={() => navigate('/recycle-bin')}
           onImportContent={() => {
             void handleImportContentFromSidebar()
           }}
@@ -1727,7 +1738,7 @@ function AppRoutes({
     >
       <SearchDialog
         open={isSearchOpen}
-        pages={pages}
+        pages={activePages}
         pageProperties={pageProperties}
         boards={boards}
         dataTables={dataTables}
@@ -1750,6 +1761,10 @@ function AppRoutes({
       />
       <AppErrorBoundary resetKey={currentPageId}>
         <Routes>
+          <Route
+            path="/recycle-bin"
+            element={<RecycleBinPage pages={pages} onRestorePage={(pageId) => void handleRestoreDeletedPage(pageId)} />}
+          />
           <Route
             path="/"
             element={
@@ -1806,7 +1821,7 @@ function AppRoutes({
                 dataTables={dataTables}
                 mindmaps={mindmaps}
                 syncedBlockGroups={syncedBlockGroups}
-                pages={pages}
+                pages={activePages}
                 pageProperties={pageProperties}
                 currentPageId={currentPageId}
                 blockSelectionStartMode={workspaceSettings.blockSelectionStartMode}
@@ -1863,7 +1878,7 @@ function AppRoutes({
             path="/pages/:pageId/boards/:boardId"
             element={
               <BoardRoute
-                pages={pages}
+                pages={activePages}
                 boards={boards}
                 currentPageId={currentPageId}
                 onRoutePageChange={onRoutePageChange}
@@ -1879,7 +1894,7 @@ function AppRoutes({
             path="/pages/:pageId/data-tables/:databaseId"
             element={
               <DataTableRoute
-                pages={pages}
+                pages={activePages}
                 dataTables={dataTables}
                 currentPageId={currentPageId}
                 saveStatus={saveStatus}
@@ -1910,7 +1925,7 @@ function AppRoutes({
             path="/pages/:pageId/data-tables/:databaseId/records/:recordId"
             element={
               <DataTableRoute
-                pages={pages}
+                pages={activePages}
                 dataTables={dataTables}
                 currentPageId={currentPageId}
                 saveStatus={saveStatus}
@@ -1941,7 +1956,7 @@ function AppRoutes({
             path="/pages/:pageId/mindmaps/:mindmapId"
             element={
               <MindmapRoute
-                pages={pages}
+                pages={activePages}
                 mindmaps={mindmaps}
                 currentPageId={currentPageId}
                 onRoutePageChange={onRoutePageChange}
@@ -2653,7 +2668,10 @@ function resolvePageIdAfterDelete(
   pageId: string,
   currentPageId: string | null,
 ) {
-  const nextPages = deletePageBranch(pages, pageId)
+  const nextPages = deletePageBranch(
+    pages.filter((page) => !page.deletedAt),
+    pageId,
+  )
   const currentPageStillExists =
     currentPageId !== null && nextPages.some((page) => page.id === currentPageId)
 
