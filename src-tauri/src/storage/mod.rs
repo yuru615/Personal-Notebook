@@ -24,7 +24,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 
 pub use error::{StorageError, StorageResult};
-pub use mcp::{McpWhiteboardUpdate, McpWhiteboardUpdateResult, McpWriteBatch, McpWriteResult};
+pub use mcp::{McpWhiteboardUpdate, McpWhiteboardUpdateResult, McpWriteBatch};
 #[allow(unused_imports)]
 pub use auto_backup::{
     AutoBackupRecord, AutoBackupRecoveryStatus, AutoBackupRestoreResult, AutoBackupRunResult,

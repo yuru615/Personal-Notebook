@@ -1,5 +1,21 @@
 # 更新记录
 
+## 2026-07-17 Windows NSIS 1.2.3 打包
+
+简要描述：
+
+修复桌面端发布构建阻塞问题，并生成 Windows x64 NSIS 安装包。
+
+详细描述：
+
+- 移除内部 MCP 写入结果类型的错误公开重导出，恢复 Rust release 编译。
+- 同步更新 Windows capability schema，包含已接入的 process 与 updater 权限定义。
+- 本次仅生成 NSIS 安装包；因本机缺少现有 updater 私钥，未生成自动更新签名产物，也未创建新密钥。
+
+验证情况：
+
+- Windows NSIS 构建通过，安装包为 `知栖_1.2.3_x64-setup.exe`，文件/产品版本均为 `1.2.3`。
+
 ## 2026-07-17 客户端单设备登录
 
 简要描述：
