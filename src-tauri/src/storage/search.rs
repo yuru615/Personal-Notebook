@@ -20,6 +20,9 @@ pub fn replace_page_document(
     synced_block_groups: &[SyncedBlockGroupRecord],
 ) -> StorageResult<()> {
     delete_documents_for_owner(connection, "page", &page.id)?;
+    if page.deleted_at.is_some() {
+        return Ok(());
+    }
     let synced_group_map = synced_block_groups
         .iter()
         .map(|group| (group.id.as_str(), group))
@@ -59,12 +62,15 @@ pub fn replace_board_document(
     page_id: Option<String>,
 ) -> StorageResult<()> {
     delete_documents_for_owner(connection, "board", board_id)?;
+    let Some(page_id) = page_id else {
+        return Ok(());
+    };
     insert_document(
         connection,
         &SearchDocument {
             document_id: format!("board:{board_id}"),
             kind: "whiteboard".to_string(),
-            page_id: page_id.unwrap_or_default(),
+            page_id,
             block_id: None,
             board_id: Some(board_id.to_string()),
             database_id: None,
@@ -87,12 +93,15 @@ pub fn replace_mindmap_document(
     page_id: Option<String>,
 ) -> StorageResult<()> {
     delete_documents_for_owner(connection, "mindmap", mindmap_id)?;
+    let Some(page_id) = page_id else {
+        return Ok(());
+    };
     insert_document(
         connection,
         &SearchDocument {
             document_id: format!("mindmap:{mindmap_id}"),
             kind: "mindmap".to_string(),
-            page_id: page_id.unwrap_or_default(),
+            page_id,
             block_id: None,
             board_id: None,
             database_id: None,
@@ -114,7 +123,9 @@ pub fn replace_data_table_documents(
     page_id: Option<String>,
 ) -> StorageResult<()> {
     delete_documents_for_owner(connection, "database", &data_table.id)?;
-    let page_id = page_id.unwrap_or_default();
+    let Some(page_id) = page_id else {
+        return Ok(());
+    };
     insert_document(
         connection,
         &SearchDocument {

@@ -208,6 +208,8 @@ impl LocalMcpServer {
         let page = PageRecord {
             id: format!("page_mcp_{}", random_suffix()),
             parent_id: parent_id.clone(),
+            deleted_at: None,
+            deleted_root_id: None,
             title: title.to_string(),
             icon,
             cover: None,
@@ -268,7 +270,7 @@ impl LocalMcpServer {
     ) -> CallToolResult {
         match self
             .storage
-            .with_storage(|storage| storage.load_mcp_whiteboard(&board_id))
+            .with_storage(|storage| storage.load_active_mcp_whiteboard(&board_id))
         {
             Ok(board) => tool_success(serde_json::json!(board)),
             Err(error) => tool_error(error),

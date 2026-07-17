@@ -73,7 +73,11 @@ import {
   createWhiteboardBlock,
 } from '../utils/blockFactory'
 import { createId } from '../utils/id'
-import { deletePageBranch } from '../utils/pageTree'
+import {
+  purgeExpiredDeletedPageBranches,
+  restorePageBranch,
+  softDeletePageBranch,
+} from '../utils/pageTree'
 import { reorderItemGroup, reorderItems, type ReorderPosition } from '../utils/reorder'
 
 const UNTITLED_PAGE_TITLE = '未命名'
@@ -167,6 +171,7 @@ export interface WorkspaceState {
   renamePage: (pageId: PageId, title: string) => Promise<void>
   duplicatePage: (pageId: PageId) => Promise<PageRecord | null>
   deletePage: (pageId: PageId) => Promise<void>
+  restoreDeletedPage: (pageId: PageId) => Promise<void>
   createSyncedBlockFromRange: (
     pageId: PageId,
     startBlockId: string,
@@ -414,6 +419,9 @@ function createEmptyState(): WorkspaceState {
       throw new Error('not implemented')
     },
     deletePage: async () => {
+      throw new Error('not implemented')
+    },
+    restoreDeletedPage: async () => {
       throw new Error('not implemented')
     },
     createSyncedBlockFromRange: async () => {
@@ -693,7 +701,7 @@ function ensureInboxPageInSnapshot(snapshot: WorkspaceSnapshot): {
   const inboxPageId = snapshot.settings.inboxPageId
   const existingInbox =
     inboxPageId !== null && inboxPageId !== undefined
-      ? snapshot.pages.find((page) => page.id === inboxPageId)
+      ? snapshot.pages.find((page) => page.id === inboxPageId && !page.deletedAt)
       : null
 
   if (existingInbox) {
@@ -701,7 +709,11 @@ function ensureInboxPageInSnapshot(snapshot: WorkspaceSnapshot): {
   }
 
   const reusableInbox = snapshot.pages.find(
-    (page) => page.parentId === null && page.title === INBOX_PAGE_TITLE && page.icon === INBOX_PAGE_ICON,
+    (page) =>
+      !page.deletedAt &&
+      page.parentId === null &&
+      page.title === INBOX_PAGE_TITLE &&
+      page.icon === INBOX_PAGE_ICON,
   )
 
   if (reusableInbox) {
@@ -1182,12 +1194,13 @@ function normalizeWorkspaceSnapshot(snapshot: WorkspaceSnapshot) {
 
 function resolveCurrentPageId(snapshot: Pick<WorkspaceSnapshot, 'pages' | 'settings'>): PageId | null {
   const preferredPageId = snapshot.settings.lastOpenedPageId
+  const activePages = snapshot.pages.filter((page) => !page.deletedAt)
 
-  if (preferredPageId && snapshot.pages.some((page) => page.id === preferredPageId)) {
+  if (preferredPageId && activePages.some((page) => page.id === preferredPageId)) {
     return preferredPageId
   }
 
-  return snapshot.pages[0]?.id ?? null
+  return activePages[0]?.id ?? null
 }
 
 function getPlainTextFromBlock(block: BlockRecord): string {
@@ -1450,6 +1463,48 @@ function filterResourcesReferencedByPages(
     boards: state.boards.filter((board) => referencedBoardIds.has(board.id)),
     dataTables: state.dataTables.filter((dataTable) => referencedDataTableIds.has(dataTable.id)),
     mindmaps: state.mindmaps.filter((mindmap) => referencedMindmapIds.has(mindmap.id)),
+  }
+}
+
+function purgeExpiredRecycleBinPages(snapshot: WorkspaceSnapshot, now: Date) {
+  const purged = purgeExpiredDeletedPageBranches(snapshot.pages, now)
+
+  if (purged.deletedPageIds.size === 0) {
+    return { snapshot, didChange: false }
+  }
+
+  const affectedSyncedGroupIds = new Set(
+    snapshot.pages
+      .filter((page) => purged.deletedPageIds.has(page.id))
+      .flatMap((page) =>
+        page.blocks.flatMap((block) => (block.type === 'synced_block' ? [block.groupId] : [])),
+      ),
+  )
+  const pages = stripDeletedPageRelations(purged.pages, purged.deletedPageIds)
+  const syncedBlockGroups = reconcileSyncedBlockGroups(
+    pages,
+    snapshot.syncedBlockGroups ?? [],
+    affectedSyncedGroupIds,
+    now.toISOString(),
+  )
+  const resources = filterResourcesReferencedByPages(
+    {
+      boards: snapshot.boards,
+      dataTables: snapshot.dataTables ?? [],
+      mindmaps: snapshot.mindmaps ?? [],
+      syncedBlockGroups,
+    },
+    pages,
+  )
+
+  return {
+    snapshot: {
+      ...snapshot,
+      ...resources,
+      syncedBlockGroups,
+      pages,
+    },
+    didChange: true,
   }
 }
 
@@ -1924,7 +1979,11 @@ export function createWorkspaceStore(
         const persistedSnapshot = await repository.load()
         const persistedAppSettings = await appSettingsRepository.load()
         const rawSnapshot = persistedSnapshot ?? createSeedWorkspace()
-        const normalized = normalizeWorkspaceSnapshot(rawSnapshot)
+        const initialNormalized = normalizeWorkspaceSnapshot(rawSnapshot)
+        const purgedRecycleBin = purgeExpiredRecycleBinPages(initialNormalized.snapshot, new Date())
+        const normalized = purgedRecycleBin.didChange
+          ? normalizeWorkspaceSnapshot(purgedRecycleBin.snapshot)
+          : initialNormalized
         const snapshot = normalized.snapshot
         const currentPageId = resolveCurrentPageId(snapshot)
         const appSettings = normalizeAppSettings(persistedAppSettings)
@@ -1933,8 +1992,11 @@ export function createWorkspaceStore(
         undoStack.length = 0
         redoStack.length = 0
 
-        if (!persistedSnapshot || normalized.didChange) {
+        if (!persistedSnapshot || initialNormalized.didChange || purgedRecycleBin.didChange || normalized.didChange) {
           await repository.replace(snapshot)
+          if (purgedRecycleBin.didChange) {
+            await repository.cleanupOrphanAssets()
+          }
         }
 
         set({
@@ -1977,7 +2039,7 @@ export function createWorkspaceStore(
       const state = get()
       const existingInbox =
         state.settings.inboxPageId !== null && state.settings.inboxPageId !== undefined
-          ? state.pages.find((page) => page.id === state.settings.inboxPageId)
+          ? state.pages.find((page) => page.id === state.settings.inboxPageId && !page.deletedAt)
           : null
 
       if (existingInbox) {
@@ -3638,46 +3700,31 @@ export function createWorkspaceStore(
 
     deletePage: async (pageId: PageId) => {
       const state = get()
+      const targetPage = state.pages.find((page) => page.id === pageId)
       const deletedBranch = collectPageBranch(state.pages, pageId)
+
+      if (!targetPage || targetPage.deletedAt || deletedBranch.length === 0) {
+        return
+      }
+
       const deletedPageIds = new Set(deletedBranch.map((page) => page.id))
-      const affectedSyncedGroupIds = new Set(
-        deletedBranch.flatMap((page) =>
-          page.blocks.flatMap((block) =>
-            block.type === 'synced_block' ? [block.groupId] : [],
-          ),
-        ),
-      )
-      const updatedAt = new Date().toISOString()
-      const nextPages = touchPagesWithChangedBlocks(
-        state.pages,
-        stripDeletedPageRelations(deletePageBranch(state.pages, pageId), deletedPageIds),
-        updatedAt,
-      )
-      const nextSyncedBlockGroups = reconcileSyncedBlockGroups(
-        nextPages,
-        state.syncedBlockGroups,
-        affectedSyncedGroupIds,
-        updatedAt,
-      )
-      const nextResources = filterResourcesReferencedByPages(state, nextPages)
+      const nextPages = softDeletePageBranch(state.pages, pageId, new Date().toISOString())
       const currentPageDeleted =
-        state.currentPageId !== null && !nextPages.some((page) => page.id === state.currentPageId)
-      const nextCurrentPageId = currentPageDeleted ? (nextPages[0]?.id ?? null) : state.currentPageId
-      const nextPageIds = new Set(nextPages.map((page) => page.id))
-      const nextPinnedSidebarItems = (state.settings.pinnedSidebarItems ?? []).filter((item) =>
-        nextPageIds.has(item.pageId),
-      )
+        state.currentPageId !== null && deletedPageIds.has(state.currentPageId)
+      const nextCurrentPageId = currentPageDeleted
+        ? state.pages.find((page) => !page.deletedAt && !deletedPageIds.has(page.id))?.id ?? null
+        : state.currentPageId
       const nextInboxPageId =
         state.settings.inboxPageId !== null &&
         state.settings.inboxPageId !== undefined &&
-        nextPageIds.has(state.settings.inboxPageId)
+        !deletedPageIds.has(state.settings.inboxPageId)
           ? state.settings.inboxPageId
           : null
       const nextSettings = createSettings(
         nextCurrentPageId,
         state.settings.sidebarLayout ?? 'compact',
         state.settings.sidebarWidth ?? 272,
-        nextPinnedSidebarItems,
+        state.settings.pinnedSidebarItems ?? [],
         nextInboxPageId,
         state.settings.welcomePageId ?? null,
         getClipboardCaptureMode(state.settings),
@@ -3692,19 +3739,18 @@ export function createWorkspaceStore(
 
       try {
         await repository.save({
-          boards: nextResources.boards,
-          dataTables: nextResources.dataTables,
-          mindmaps: nextResources.mindmaps,
-          syncedBlockGroups: nextSyncedBlockGroups,
+          boards: state.boards,
+          dataTables: state.dataTables,
+          mindmaps: state.mindmaps,
+          syncedBlockGroups: state.syncedBlockGroups,
           pages: nextPages,
           settings: nextSettings,
         })
-        await repository.cleanupOrphanAssets()
         set({
-          boards: nextResources.boards,
-          dataTables: nextResources.dataTables,
-          mindmaps: nextResources.mindmaps,
-          syncedBlockGroups: nextSyncedBlockGroups,
+          boards: state.boards,
+          dataTables: state.dataTables,
+          mindmaps: state.mindmaps,
+          syncedBlockGroups: state.syncedBlockGroups,
           pages: nextPages,
           currentPageId: nextCurrentPageId,
           settings: nextSettings,
@@ -3713,6 +3759,31 @@ export function createWorkspaceStore(
       } catch {
         set({ saveStatus: 'error' })
         throw new Error('Failed to delete page')
+      }
+    },
+
+    restoreDeletedPage: async (pageId: PageId) => {
+      const state = get()
+      const deletedRoot = state.pages.find(
+        (page) => page.id === pageId && page.deletedAt && page.deletedRootId === pageId,
+      )
+
+      if (!deletedRoot) {
+        return
+      }
+
+      const nextPages = restorePageBranch(state.pages, pageId)
+      const nextSnapshot = createSnapshotFromState({ ...state, pages: nextPages })
+
+      pushUndoSnapshot(state)
+      set({ saveStatus: 'saving' })
+
+      try {
+        await repository.save(nextSnapshot)
+        set({ pages: nextPages, saveStatus: 'saved' })
+      } catch {
+        set({ saveStatus: 'error' })
+        throw new Error('Failed to restore page')
       }
     },
 

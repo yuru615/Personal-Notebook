@@ -1462,7 +1462,7 @@ describe('createWorkspaceStore data tables', () => {
       restartedStore
         .getState()
         .pages.find((page) => page.title === '\u6b22\u8fce\u4f7f\u7528\u77e5\u6816'),
-    ).toBeUndefined()
+    ).toMatchObject({ deletedAt: expect.any(String) })
   })
 
   it('keeps an edited welcome page and creates the complete guide separately', async () => {
@@ -1781,7 +1781,7 @@ describe('createWorkspaceStore data tables', () => {
     ])
   })
 
-  it('strips relation metadata when the target page is deleted', async () => {
+  it('keeps relation metadata when the target page is moved to the recycle bin', async () => {
     const workspace = createWorkspace()
     const [templatePage] = workspace.pages
     const counted = createCountingRepository({
@@ -1816,15 +1816,16 @@ describe('createWorkspaceStore data tables', () => {
 
     expect(sourcePage?.blocks[0]).toMatchObject({
       text: 'Product Plan',
-      richText: [{ text: 'Product Plan' }],
+      richText: [{ text: 'Product Plan', pageId: 'page_target', relationKind: 'link' }],
     })
-    expect((sourcePage?.blocks[0] as Extract<BlockRecord, { type: 'paragraph' }>).richText?.[0]).not.toHaveProperty(
+    expect((sourcePage?.blocks[0] as Extract<BlockRecord, { type: 'paragraph' }>).richText?.[0]).toHaveProperty(
       'pageId',
+      'page_target',
     )
-    expect(sourcePage?.updatedAt).not.toBe(templatePage.updatedAt)
+    expect(sourcePage?.updatedAt).toBe(templatePage.updatedAt)
   })
 
-  it('deletes a page branch and moves the current page to the next available page', async () => {
+  it('moves a page branch into the recycle bin and moves the current page to the next available page', async () => {
     const workspace = createWorkspace()
     workspace.pages = withInboxPages(workspace, [
       {
@@ -1851,24 +1852,123 @@ describe('createWorkspaceStore data tables', () => {
     await store.getState().bootstrap()
     await store.getState().deletePage('page_parent')
 
-    expect(
-      store
-        .getState()
-        .pages.filter(
-          (page) => page.id !== 'page_inbox' && page.title !== '\u6b22\u8fce\u4f7f\u7528\u77e5\u6816',
-        )
-        .map((page) => page.id),
-    ).toEqual(['page_next'])
+    expect(store.getState().pages.find((page) => page.id === 'page_parent')).toMatchObject({
+      deletedRootId: 'page_parent',
+    })
+    expect(store.getState().pages.find((page) => page.id === 'page_child')).toMatchObject({
+      parentId: 'page_parent',
+      deletedRootId: 'page_parent',
+    })
     expect(store.getState().currentPageId).toBe('page_next')
     expect(store.getState().settings.lastOpenedPageId).toBe('page_next')
-    expect(
-      counted
-        .getSnapshot()
-        ?.pages.filter(
-          (page) => page.id !== 'page_inbox' && page.title !== '\u6b22\u8fce\u4f7f\u7528\u77e5\u6816',
-        )
-        .map((page) => page.id),
-    ).toEqual(['page_next'])
+    expect(counted.getSnapshot()?.pages.find((page) => page.id === 'page_child')).toMatchObject({
+      deletedRootId: 'page_parent',
+    })
+  })
+
+  it('restores a deleted page branch with its original child pages and resources', async () => {
+    const workspace = createWorkspace()
+    workspace.boards = [
+      {
+        id: 'board_parent',
+        title: 'Parent board',
+        snapshot: {},
+        createdAt: '2026-07-16T00:00:00.000Z',
+        updatedAt: '2026-07-16T00:00:00.000Z',
+      },
+    ]
+    workspace.pages = withInboxPages(workspace, [
+      {
+        ...workspace.pages[0],
+        id: 'page_parent',
+        title: 'Parent',
+        blocks: [{ id: 'block_board', type: 'whiteboard', boardId: 'board_parent' }],
+      },
+      {
+        ...workspace.pages[0],
+        id: 'page_child',
+        parentId: 'page_parent',
+        title: 'Child',
+        blocks: [{ id: 'block_text', type: 'paragraph', text: 'Child content' }],
+      },
+    ])
+    workspace.settings = withInboxSettings(workspace, 'page_parent')
+    const counted = createCountingRepository(workspace)
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+    await store.getState().deletePage('page_parent')
+    await store.getState().restoreDeletedPage('page_parent')
+
+    expect(store.getState().pages.find((page) => page.id === 'page_parent')).toMatchObject({
+      parentId: null,
+      blocks: [{ id: 'block_board', type: 'whiteboard', boardId: 'board_parent' }],
+    })
+    expect(store.getState().pages.find((page) => page.id === 'page_child')).toMatchObject({
+      parentId: 'page_parent',
+      blocks: [{ id: 'block_text', type: 'paragraph', text: 'Child content' }],
+    })
+    expect(store.getState().boards.map((board) => board.id)).toEqual(['board_parent'])
+  })
+
+  it('moves an active parent into the recycle bin even when one child was already deleted', async () => {
+    const workspace = createWorkspace()
+    workspace.pages = withInboxPages(workspace, [
+      { ...workspace.pages[0], id: 'page_parent', title: 'Parent' },
+      { ...workspace.pages[0], id: 'page_child', parentId: 'page_parent', title: 'Child' },
+    ])
+    const store = createWorkspaceStore(createMemoryRepository(workspace))
+
+    await store.getState().bootstrap()
+    await store.getState().deletePage('page_child')
+    await store.getState().deletePage('page_parent')
+
+    expect(store.getState().pages.find((page) => page.id === 'page_parent')).toMatchObject({
+      deletedRootId: 'page_parent',
+    })
+    expect(store.getState().pages.find((page) => page.id === 'page_child')).toMatchObject({
+      deletedRootId: 'page_parent',
+    })
+  })
+
+  it('purges an expired recycle-bin branch and its now-unreferenced resources during startup', async () => {
+    const workspace = createWorkspace()
+    workspace.boards = [
+      {
+        id: 'expired_board',
+        title: 'Expired board',
+        snapshot: {},
+        createdAt: '2020-01-01T00:00:00.000Z',
+        updatedAt: '2020-01-01T00:00:00.000Z',
+      },
+    ]
+    workspace.pages = withInboxPages(workspace, [
+      {
+        ...workspace.pages[0],
+        id: 'expired_parent',
+        title: 'Expired parent',
+        deletedAt: '2020-01-01T00:00:00.000Z',
+        deletedRootId: 'expired_parent',
+        blocks: [{ id: 'expired_board_block', type: 'whiteboard', boardId: 'expired_board' }],
+      },
+      {
+        ...workspace.pages[0],
+        id: 'expired_child',
+        parentId: 'expired_parent',
+        title: 'Expired child',
+        deletedAt: '2020-01-01T00:00:00.000Z',
+        deletedRootId: 'expired_parent',
+      },
+    ])
+    const counted = createCountingRepository(workspace)
+    const store = createWorkspaceStore(counted.repository)
+
+    await store.getState().bootstrap()
+
+    expect(store.getState().pages.map((page) => page.id)).not.toContain('expired_parent')
+    expect(store.getState().pages.map((page) => page.id)).not.toContain('expired_child')
+    expect(store.getState().boards).toEqual([])
+    expect(counted.getCleanupCalls()).toBe(1)
   })
 
   it('preserves syncedBlockGroups when deleting a page branch', async () => {
@@ -2024,7 +2124,7 @@ describe('createWorkspaceStore data tables', () => {
     ).toHaveLength(4)
   })
 
-  it('removes orphan page resources on page deletion and keeps resources referenced elsewhere', async () => {
+  it('keeps page resources while a page is in the recycle bin', async () => {
     const workspace = createWorkspace()
     const now = '2026-06-22T00:00:00.000Z'
     workspace.boards = [
@@ -2090,19 +2190,26 @@ describe('createWorkspaceStore data tables', () => {
           (page) => page.id !== 'page_inbox' && page.title !== '\u6b22\u8fce\u4f7f\u7528\u77e5\u6816',
         )
         .map((page) => page.id),
-    ).toEqual(['page_keep'])
-    expect(store.getState().boards.map((board) => board.id)).toEqual(['board_shared'])
+    ).toEqual(['page_delete', 'page_keep'])
+    expect(store.getState().pages.find((page) => page.id === 'page_delete')).toMatchObject({
+      deletedRootId: 'page_delete',
+    })
+    expect(store.getState().boards.map((board) => board.id)).toEqual(['board_orphan', 'board_shared'])
     expect(store.getState().dataTables.map((dataTable) => dataTable.id)).toEqual([
+      'database_orphan',
       'database_shared',
     ])
-    expect(store.getState().mindmaps.map((mindmap) => mindmap.id)).toEqual(['mindmap_shared'])
+    expect(store.getState().mindmaps.map((mindmap) => mindmap.id)).toEqual([
+      'mindmap_orphan',
+      'mindmap_shared',
+    ])
     expect(counted.getSnapshot()).toMatchObject({
-      boards: [{ id: 'board_shared' }],
-      dataTables: [{ id: 'database_shared' }],
-      mindmaps: [{ id: 'mindmap_shared' }],
+      boards: [{ id: 'board_orphan' }, { id: 'board_shared' }],
+      dataTables: [{ id: 'database_orphan' }, { id: 'database_shared' }],
+      mindmaps: [{ id: 'mindmap_orphan' }, { id: 'mindmap_shared' }],
       pages: expect.arrayContaining([expect.objectContaining({ id: 'page_keep' })]),
     })
-    expect(counted.getCleanupCalls()).toBe(1)
+    expect(counted.getCleanupCalls()).toBe(0)
   })
 
   it('creates a data table asset when inserting a data table block', async () => {
@@ -3311,7 +3418,7 @@ describe('createWorkspaceStore synced blocks', () => {
     ])
   })
 
-  it('removes synced groups when deleting their last remaining page instance', async () => {
+  it('keeps synced groups when their last remaining page instance is moved to the recycle bin', async () => {
     const now = '2026-07-06T00:00:00.000Z'
     const baseWorkspace = createWorkspace()
     const counted = createCountingRepository({
@@ -3347,8 +3454,8 @@ describe('createWorkspaceStore synced blocks', () => {
     await store.getState().bootstrap()
     await store.getState().deletePage('page_1')
 
-    expect(store.getState().syncedBlockGroups).toEqual([])
-    expect(counted.getSnapshot()?.syncedBlockGroups).toEqual([])
+    expect(store.getState().syncedBlockGroups).toHaveLength(1)
+    expect(counted.getSnapshot()?.syncedBlockGroups).toHaveLength(1)
   })
 })
 

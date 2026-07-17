@@ -325,6 +325,8 @@ export interface MindmapRecord {
 export interface PageRecord {
   id: PageId
   parentId: PageId | null
+  deletedAt?: string
+  deletedRootId?: PageId
   title: string
   icon: string | null
   iconHidden?: boolean
