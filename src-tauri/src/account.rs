@@ -326,7 +326,7 @@ impl AccountState {
                 self.sessions.clear()?;
                 Ok(None)
             }
-            Err(error) if error.code == "account_suspended" => {
+            Err(error) if invalidates_stored_session(&error) => {
                 self.sessions.clear()?;
                 Err(error)
             }
@@ -370,6 +370,13 @@ fn session_is_expired(value: &str, now: OffsetDateTime) -> Result<bool, AccountE
 
 fn can_use_offline(error: &AccountError) -> bool {
     error.code == "network_unavailable" || error.status.is_some_and(|status| status >= 500)
+}
+
+fn invalidates_stored_session(error: &AccountError) -> bool {
+    matches!(
+        error.code.as_str(),
+        "account_suspended" | "session_replaced"
+    )
 }
 
 fn account_session(stored: &StoredSession, connectivity: AccountConnectivity) -> AccountSession {
@@ -587,6 +594,21 @@ mod tests {
             "bad response",
             Some(200)
         )));
+    }
+
+    #[test]
+    fn replaced_and_suspended_sessions_clear_stored_credentials() {
+        assert!(invalidates_stored_session(&AccountError::new(
+            "session_replaced",
+            "replaced",
+            Some(401)
+        )));
+        assert!(invalidates_stored_session(&AccountError::new(
+            "account_suspended",
+            "suspended",
+            Some(403)
+        )));
+        assert!(!invalidates_stored_session(&AccountError::session_expired()));
     }
 
     #[test]

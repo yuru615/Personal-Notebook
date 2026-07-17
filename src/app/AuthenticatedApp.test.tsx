@@ -1,6 +1,6 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AccountClient, AccountSession } from '../lib/accountClient'
 import type { WorkspaceRepository } from '../lib/workspaceRepository'
 import { AuthenticatedApp } from './AuthenticatedApp'
@@ -15,6 +15,10 @@ const onlineSession: AccountSession = {
   expiresAt: '2099-07-16T00:00:00Z',
   connectivity: 'online',
 }
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 function createAccountClient(overrides: Partial<AccountClient> = {}) {
   return {
@@ -116,6 +120,111 @@ describe('AuthenticatedApp', () => {
 
     expect(await screen.findByDisplayValue('受保护的知识库')).toBeInTheDocument()
     expect(screen.getAllByText('离线可用').length).toBeGreaterThan(0)
+  })
+
+  it('polls the session and locks when another device replaces it', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const client = createAccountClient({
+      restore: vi.fn(async () => onlineSession),
+      validate: vi.fn(async () => {
+        throw {
+          code: 'session_replaced',
+          message: '账号已在其他设备登录，请重新登录',
+          status: 401,
+        }
+      }),
+    })
+    const repository = createRepository()
+
+    render(
+      <AuthenticatedApp
+        accountClient={client}
+        workspaceProps={{ repository, initialEntries: ['/pages/page-home'] }}
+      />,
+    )
+
+    expect(await screen.findByDisplayValue('受保护的知识库')).toBeInTheDocument()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000)
+    })
+
+    expect(await screen.findByRole('heading', { name: '登录知栖' })).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('账号已在其他设备登录，请重新登录')
+    expect(client.validate).toHaveBeenCalledTimes(1)
+    expect(client.clearSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not overlap periodic session validation requests', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    let finishValidation: (session: AccountSession) => void = () => undefined
+    const validation = new Promise<AccountSession>((resolve) => {
+      finishValidation = resolve
+    })
+    const client = createAccountClient({
+      restore: vi.fn(async () => onlineSession),
+      validate: vi.fn(() => validation),
+    })
+
+    render(<AuthenticatedApp accountClient={client} workspaceProps={{ repository: createRepository() }} />)
+
+    await screen.findByDisplayValue('受保护的知识库')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000)
+    })
+    expect(client.validate).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      finishValidation(onlineSession)
+      await validation
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000)
+    })
+    expect(client.validate).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps the workspace unlocked while offline and returns online after recovery', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const offlineSession = { ...onlineSession, connectivity: 'offline' as const }
+    const client = createAccountClient({
+      restore: vi.fn(async () => onlineSession),
+      validate: vi
+        .fn<() => Promise<AccountSession>>()
+        .mockResolvedValueOnce(offlineSession)
+        .mockResolvedValue(onlineSession),
+    })
+
+    render(<AuthenticatedApp accountClient={client} workspaceProps={{ repository: createRepository() }} />)
+
+    await screen.findByDisplayValue('受保护的知识库')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000)
+    })
+    expect(screen.getAllByText('离线可用').length).toBeGreaterThan(0)
+    expect(client.clearSession).not.toHaveBeenCalled()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000)
+    })
+    await waitFor(() => expect(screen.queryAllByText('离线可用')).toHaveLength(0))
+    expect(client.validate).toHaveBeenCalledTimes(2)
+  })
+
+  it('stops periodic validation after logout', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    const client = createAccountClient({ restore: vi.fn(async () => onlineSession) })
+
+    render(<AuthenticatedApp accountClient={client} workspaceProps={{ repository: createRepository() }} />)
+
+    await screen.findByDisplayValue('受保护的知识库')
+    await user.click(screen.getByRole('button', { name: /123456@qq.com/ }))
+    await user.click(await screen.findByRole('button', { name: '退出登录' }))
+    await screen.findByRole('heading', { name: '登录知栖' })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000)
+    })
+    expect(client.validate).not.toHaveBeenCalled()
   })
 
   it('registers a QQ account and shows the verification step', async () => {
