@@ -14,6 +14,7 @@ import {
   useParams,
 } from 'react-router-dom'
 import { BlockEditor } from '../components/editor/BlockEditor'
+import { AnnouncementsPage } from '../components/announcements/AnnouncementsPage'
 import { PageHeader, PageHeaderToolbar } from '../components/editor/PageHeader'
 import { PagePropertiesPanel } from '../components/editor/PagePropertiesPanel'
 import { PageRelationsPanel } from '../components/editor/PageRelationsPanel'
@@ -102,11 +103,13 @@ import {
 } from '../lib/fileAccess'
 import { createWorkspaceStore, type McpWorkspaceUpdate } from '../store/createWorkspaceStore'
 import { uiCopy } from '../ui/copy'
+import { useOptionalAccount } from './accountContext'
 import { sanitizeFileNameSegment } from '../utils/fileName'
 import { createId } from '../utils/id'
 import { deletePageBranch } from '../utils/pageTree'
 import type { ReorderPosition } from '../utils/reorder'
 import { useDesktopClipboardCapture } from './useDesktopClipboardCapture'
+import { useOptionalUpdate } from './updateContextValue'
 
 type WorkspaceStore = ReturnType<typeof createWorkspaceStore>
 type AppState = ReturnType<WorkspaceStore['getState']>
@@ -244,7 +247,7 @@ function formatArchiveItemCount(progress: WorkspaceArchiveProgress) {
   return `${progress.current}/${progress.total}`
 }
 
-interface AppProps {
+export interface WorkspaceAppProps {
   repository?: WorkspaceRepository
   store?: WorkspaceStore
   initialEntries?: string[]
@@ -282,8 +285,10 @@ function createAppStore(repository?: WorkspaceRepository) {
   return defaultWorkspaceStore
 }
 
-export function App({ repository, store: injectedStore, initialEntries }: AppProps = {}) {
+export function WorkspaceApp({ repository, store: injectedStore, initialEntries }: WorkspaceAppProps = {}) {
   const [store] = useState(() => injectedStore ?? createAppStore(repository))
+  const account = useOptionalAccount()
+  const updates = useOptionalUpdate()
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState)
   const [isBootstrapped, setIsBootstrapped] = useState(false)
   const [bootstrapError, setBootstrapError] = useState<unknown>(null)
@@ -296,6 +301,18 @@ export function App({ repository, store: injectedStore, initialEntries }: AppPro
   const archiveTaskClearTimerRef = useRef<number | null>(null)
   const localMcpOperationVersionRef = useRef(0)
   const setCurrentPage = store.getState().setCurrentPage
+
+  useEffect(() => {
+    if (!account) return
+    account.registerBeforeLock(() => store.getState().flushPendingSaves())
+    return () => account.registerBeforeLock(null)
+  }, [account, store])
+
+  useEffect(() => {
+    if (!updates) return
+    updates.registerBeforeInstall(() => store.getState().flushPendingSaves())
+    return () => updates.registerBeforeInstall(null)
+  }, [store, updates])
 
   useEffect(() => {
     localMcpOperationVersionRef.current += 1
@@ -1813,6 +1830,7 @@ function AppRoutes({
               />
             }
           />
+          <Route path="/announcements" element={<AnnouncementsPage />} />
           <Route
             path="/pages/:pageId"
             element={
@@ -3202,7 +3220,8 @@ function MindmapRoute({
 
 
 
-export default App
+export { WorkspaceApp as App }
+export default WorkspaceApp
 
 function sanitizeFileName(value: string) {
   return sanitizeFileNameSegment(value, uiCopy.page.untitled)

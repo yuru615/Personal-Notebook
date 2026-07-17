@@ -17,7 +17,7 @@ pub struct McpWriteBatch {
     pub tool_name: String,
 }
 
-pub struct McpWriteResult {
+pub(crate) struct McpWriteResult {
     pub page_id: String,
     pub created_block_ids: Vec<String>,
     pub created_object_ids: Vec<String>,
@@ -113,7 +113,7 @@ impl Storage {
         })
     }
 
-    pub fn append_mcp_content(&self, batch: McpWriteBatch) -> StorageResult<McpWriteResult> {
+    pub(crate) fn append_mcp_content(&self, batch: McpWriteBatch) -> StorageResult<McpWriteResult> {
         if batch.blocks.is_empty() {
             return Err(StorageError::invalid_payload(
                 "MCP content batch requires at least one block",

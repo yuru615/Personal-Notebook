@@ -1,7 +1,8 @@
 import { type ReactNode, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Bell, ChevronRight, MoreHorizontal, Plus, Search, Trash2, Upload } from 'lucide-react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { useOptionalAccount } from '../../app/accountContext'
 import { useDismissableLayer } from '../editor/useDismissableLayer'
 import { DEFAULT_PAGE_ICON } from '../../domain/pageIcons'
 import type {
@@ -108,6 +109,8 @@ export function SidebarTree({
   onSetSidebarLayout,
 }: SidebarTreeProps) {
   const location = useLocation()
+  const navigate = useNavigate()
+  const account = useOptionalAccount()
   const [expandedPageIds, setExpandedPageIds] = useState<Record<string, boolean>>({})
   const [openMenuItem, setOpenMenuItem] = useState<SidebarMenuItem | null>(null)
   const [openMenuPosition, setOpenMenuPosition] = useState<SidebarPopoverPosition | null>(null)
@@ -554,15 +557,23 @@ export function SidebarTree({
   function renderCompactHeader() {
     return (
       <div className="sidebar-compact-header">
-        <div className="sidebar-account">
+        <button
+          type="button"
+          className="sidebar-account sidebar-account-button"
+          onClick={() => navigate('/settings/account')}
+        >
           <div className="sidebar-account-avatar" aria-hidden="true">
-            知
+            {account?.session.user.email.slice(0, 1) ?? '知'}
           </div>
           <div className="sidebar-account-copy">
-            <div className="sidebar-account-title">{uiCopy.sidebar.localWorkspace}</div>
-            <div className="sidebar-account-subtitle">{uiCopy.sidebar.desktopApp}</div>
+            <div className="sidebar-account-title">
+              {account?.session.user.email ?? uiCopy.sidebar.localWorkspace}
+            </div>
+            <div className="sidebar-account-subtitle">
+              {account?.session.connectivity === 'offline' ? '离线可用' : uiCopy.sidebar.desktopApp}
+            </div>
           </div>
-        </div>
+        </button>
         <div className="sidebar-toolstrip" aria-label={uiCopy.sidebar.tools}>
           <button
             type="button"
@@ -605,10 +616,15 @@ export function SidebarTree({
           </button>
           <button
             type="button"
-            className="sidebar-tool-button"
+            className={
+              location.pathname.startsWith('/announcements')
+                ? 'sidebar-tool-button sidebar-tool-button-active'
+                : 'sidebar-tool-button'
+            }
             aria-label={uiCopy.sidebar.notifications}
             data-tooltip={uiCopy.sidebar.notifications}
-            disabled
+            aria-pressed={location.pathname.startsWith('/announcements')}
+            onClick={() => navigate('/announcements')}
           >
             <Bell size={15} strokeWidth={1.9} />
           </button>
@@ -621,11 +637,40 @@ export function SidebarTree({
   function renderClassicHeader() {
     return (
       <div className="sidebar-group">
+        {account ? (
+          <button
+            type="button"
+            className="sidebar-account sidebar-account-button sidebar-account-classic"
+            onClick={() => navigate('/settings/account')}
+          >
+            <div className="sidebar-account-avatar" aria-hidden="true">
+              {account.session.user.email.slice(0, 1)}
+            </div>
+            <div className="sidebar-account-copy">
+              <div className="sidebar-account-title">{account.session.user.email}</div>
+              <div className="sidebar-account-subtitle">
+                {account.session.connectivity === 'offline' ? '离线可用' : '桌面端'}
+              </div>
+            </div>
+          </button>
+        ) : null}
         <button type="button" className="sidebar-link" onClick={onSearch}>
           {uiCopy.sidebar.search}
         </button>
         <button type="button" className="sidebar-link" onClick={onCreatePage}>
           {uiCopy.sidebar.newPage}
+        </button>
+        <button
+          type="button"
+          className={
+            location.pathname.startsWith('/announcements')
+              ? 'sidebar-link sidebar-link-active'
+              : 'sidebar-link'
+          }
+          onClick={() => navigate('/announcements')}
+        >
+          <Bell size={15} strokeWidth={1.9} aria-hidden="true" />
+          {uiCopy.sidebar.notifications}
         </button>
         {renderUtilityMenu('sidebar-link sidebar-link-icon-button')}
       </div>

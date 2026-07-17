@@ -6,6 +6,7 @@
   "permissions": [
     "core:default",
     "dialog:default",
+    "process:allow-restart",
     "fs:default",
     "fs:allow-read-text-file",
     "fs:allow-read-file",

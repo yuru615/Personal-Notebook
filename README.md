@@ -1,6 +1,6 @@
 # 🌿 知栖
 
-知栖是一个本地优先的个人知识库桌面应用，使用 Tauri 2、React 和 SQLite 构建。它提供类 Notion 的层级页面、块编辑器、白板、数据表格、思维导图、搜索以及导入导出能力；数据默认保存在本机，不依赖后端服务。
+知栖是一个本地优先的个人知识库桌面应用，使用 Tauri 2、React 和 SQLite 构建。它提供类 Notion 的层级页面、块编辑器、白板、数据表格、思维导图、搜索以及导入导出能力；知识库数据保存在本机，应用入口需要知栖账号登录。
 
 ## ✨ 功能总览
 
@@ -58,7 +58,7 @@
 - 🗄️ **SQLite 本地持久化**：核心数据保存在本机 `zhiqi.db`，无需后端服务。
 - 📁 **本地资源管理**：文件资产由应用管理在 `zhiqi-assets/`，减少外部路径失效风险。
 - 🪟 **Tauri 原生能力**：支持原生窗口、系统托盘、文件对话框、文件读写和外部链接安全打开。
-- 📦 **跨平台打包**：提供 macOS `.app`/`.dmg` 和 Windows NSIS `.exe` 打包命令。
+- 📦 **跨平台打包与更新**：提供 macOS `.app`/`.dmg`、Windows NSIS `.exe`，并通过签名更新包完成应用内升级。
 
 ## 🧰 技术栈
 
@@ -75,7 +75,7 @@
 
 ```bash
 npm install
-npm run tauri:dev
+ZHIQI_API_BASE_URL=http://117.72.91.46 npm run tauri:dev
 ```
 
 `npm run tauri:dev` 会启动 Vite 开发服务器并打开桌面窗口。只调试前端时可以运行：
@@ -85,6 +85,51 @@ npm run dev
 ```
 
 首次启动会创建默认工作区。桌面端数据保存在 Tauri 应用数据目录中的 `zhiqi.db`；应用管理的文件资产保存在同目录下的 `zhiqi-assets/`。
+
+## 🔐 账号登录
+
+- 仅支持纯数字 QQ 邮箱注册，注册后需要通过邮件页面完成验证。
+- 用户会话固定 24 小时。启动和窗口恢复时会在线校验；网络或服务临时不可用时，未过期的本机凭据可离线进入。
+- 会话 Token 由 Rust 保存到 macOS Keychain 或 Windows Credential Manager，不写入知识库数据库、localStorage 或 React 状态。
+- 未登录、账号停用或会话过期时不会初始化工作区，也不会启动本机 MCP；退出登录不会删除本地内容。
+
+账号服务和更新服务 origin 在编译时通过 `ZHIQI_API_BASE_URL` 注入。Debug 构建允许 HTTP 联调；`npm run tauri:build` 会优先读取环境变量，否则读取 `~/.config/zhiqi/updater/` 中的本机 updater 密钥。当前未设置 API 地址时默认使用 `http://117.72.91.46`，包装脚本会显式开启仅供开发联调的 HTTP transport：
+
+```bash
+npm run tauri:build
+```
+
+正式构建应设置 HTTPS 地址；此时包装脚本不会开启不安全 transport：
+
+```bash
+ZHIQI_API_BASE_URL=https://account.example.com \
+TAURI_SIGNING_PRIVATE_KEY='<private-key-content>' \
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD='<private-key-password>' \
+npm run tauri:build:mac
+```
+
+单独运行 `npm run dev` 只用于前端静态调试，不提供真实账号或工作区访问；完整联调使用 `npm run tauri:dev`。
+
+## 🔄 客户端更新与签名
+
+客户端启动时在登录和工作区初始化前检查一次更新，设置中心“关于与更新”也可手动检查。普通更新允许稍后处理；服务端明确返回最低支持版本时显示更新门禁。检查服务不可用或下载失败时仍可本次离线进入，避免锁住本地知识库。
+
+首次发布前生成并离线备份 Tauri updater 密钥：
+
+```bash
+npm run tauri -- signer generate -w ~/.config/zhiqi/updater.key
+```
+
+私钥内容和密码只通过 `TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 提供；本机构建包装脚本可从安全目录读取私钥内容后仅传给构建子进程。公钥固定在客户端 Tauri 配置中，并同时配置到服务端 `TAURI_UPDATER_PUBLIC_KEY`。私钥不得进入仓库、管理后台或服务器。首版发布后更换公钥会使旧客户端无法验证新更新包。
+
+本地正式产物按平台构建：
+
+```bash
+npm run tauri:build:windows
+npm run tauri:build:mac:aarch64
+```
+
+Windows 只发布 current-user NSIS `setup.exe` 及 `.sig`。macOS 只发布 Apple Silicon 的 `.app.tar.gz`、`.sig` 和 `.dmg`，不再构建或发布 Intel 版本。Apple 签名/公证和 Windows Authenticode 与 Tauri updater 签名相互独立，缺少系统签名的产物只用于开发联调。
 
 ## 🤖 本机 AI / MCP 接入
 
@@ -197,7 +242,7 @@ npm run test:watch
 - 🏗️ `npm run build`：执行 TypeScript 构建检查并生成前端产物。
 - 📦 `npm run tauri:build`：按当前平台打包桌面应用。
 - 🍎 `npm run tauri:build:mac`：在 macOS 上生成 `.app` 和 `.dmg`。
-- 🪟 `npm run tauri:build:windows`：在 Windows 上仅生成 NSIS `.exe` 安装包。
+- 🪟 `npm run tauri:build:windows`：在 Windows 上生成 NSIS `.exe` 和 updater 签名产物。
 - 🧳 `npm run tauri:build:windows:cross`：通过 `cargo-xwin` 交叉构建 x64 Windows NSIS 安装包。
 
 运行单个测试示例：

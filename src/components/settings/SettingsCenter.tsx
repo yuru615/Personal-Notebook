@@ -10,8 +10,11 @@ import type {
   WorkspaceSettings,
 } from '../../domain/types'
 import { appAccentThemeOptions, type AppAccentTheme } from '../../domain/theme'
+import { useOptionalAccount } from '../../app/accountContext'
+import { useOptionalUpdate } from '../../app/updateContextValue'
 
 export type SettingsSectionKey =
+  | 'account'
   | 'general'
   | 'appearance_sidebar'
   | 'editing_page_defaults'
@@ -19,6 +22,7 @@ export type SettingsSectionKey =
   | 'import_export'
   | 'desktop'
   | 'data_maintenance'
+  | 'about_updates'
   | 'experimental'
 
 export const DEFAULT_SETTINGS_SECTION: SettingsSectionKey = 'general'
@@ -29,6 +33,7 @@ export interface LocalMcpOperationFailure {
 }
 
 const SETTINGS_SECTIONS: Array<{ key: SettingsSectionKey; label: string }> = [
+  { key: 'account', label: '账号' },
   { key: 'general', label: '通用' },
   { key: 'appearance_sidebar', label: '外观与侧边栏' },
   { key: 'editing_page_defaults', label: '编辑与页面默认' },
@@ -36,6 +41,7 @@ const SETTINGS_SECTIONS: Array<{ key: SettingsSectionKey; label: string }> = [
   { key: 'import_export', label: '导入导出' },
   { key: 'desktop', label: '桌面端' },
   { key: 'data_maintenance', label: '数据与维护' },
+  { key: 'about_updates', label: '关于与更新' },
   { key: 'experimental', label: '实验功能' },
 ]
 
@@ -186,7 +192,11 @@ export function SettingsCenter({
   onOpenInbox,
   onBackToWorkspace,
 }: SettingsCenterProps) {
+  const account = useOptionalAccount()
+  const updates = useOptionalUpdate()
   const [currentSection, setCurrentSection] = useState(activeSection)
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
+  const [logoutError, setLogoutError] = useState('')
 
   useEffect(() => {
     setCurrentSection(activeSection)
@@ -361,6 +371,65 @@ export function SettingsCenter({
       </aside>
 
       <section className="settings-center-panel">
+        {currentSection === 'account' && account ? (
+          <div className="settings-section-stack">
+            <section className="settings-section">
+              <h2 className="settings-section-title">账号</h2>
+              <p className="settings-section-description">当前设备的知栖账号与会话状态。</p>
+              <div className="settings-card">
+                <div className="settings-card-row">
+                  <div>
+                    <div className="settings-card-label">QQ 邮箱</div>
+                    <div className="settings-card-help">{account.session.user.email}</div>
+                  </div>
+                  <span
+                    className={
+                      account.session.connectivity === 'offline'
+                        ? 'account-status-badge account-status-offline'
+                        : 'account-status-badge'
+                    }
+                  >
+                    {account.session.connectivity === 'offline' ? '离线可用' : '在线'}
+                  </span>
+                </div>
+                <div className="settings-card-divider" />
+                <div className="settings-card-row">
+                  <div>
+                    <div className="settings-card-label">登录有效期</div>
+                    <div className="settings-card-help">
+                      {formatAccountExpiry(account.session.expiresAt)}
+                    </div>
+                  </div>
+                </div>
+                <div className="settings-card-divider" />
+                <div className="settings-card-row">
+                  <div>
+                    <div className="settings-card-label">退出登录</div>
+                    <div className="settings-card-help">本地知识库不会被删除或上传。</div>
+                    {logoutError ? <div className="settings-inline-error">{logoutError}</div> : null}
+                  </div>
+                  <button
+                    type="button"
+                    className="settings-action-button settings-action-danger"
+                    disabled={isLoggingOut}
+                    onClick={() => {
+                      if (isLoggingOut) return
+                      setIsLoggingOut(true)
+                      setLogoutError('')
+                      void account.logout().catch(() => {
+                        setLogoutError('退出失败，请稍后重试。')
+                        setIsLoggingOut(false)
+                      })
+                    }}
+                  >
+                    {isLoggingOut ? '正在退出...' : '退出登录'}
+                  </button>
+                </div>
+              </div>
+            </section>
+          </div>
+        ) : null}
+
         {currentSection === 'general' ? (
           <div className="settings-section-stack">
             <section className="settings-section">
@@ -899,7 +968,57 @@ export function SettingsCenter({
             </section>
           </div>
         ) : null}
+
+        {currentSection === 'about_updates' ? (
+          <div className="settings-section-stack">
+            <section className="settings-section">
+              <h2 className="settings-section-title">关于与更新</h2>
+              <p className="settings-section-description">知栖桌面客户端版本状态。</p>
+              <div className="settings-card">
+                <div className="settings-card-row">
+                  <div>
+                    <div className="settings-card-label">当前版本</div>
+                    <div className="settings-card-help">v{updates?.currentVersion ?? '0.1.0'}</div>
+                  </div>
+                  <button
+                    type="button"
+                    className="settings-action-button"
+                    disabled={!updates || updates.phase === 'checking' || updates.phase === 'downloading' || updates.phase === 'installing'}
+                    onClick={() => void updates?.checkForUpdates()}
+                  >
+                    {updates?.phase === 'checking' ? '正在检查...' : '检查更新'}
+                  </button>
+                </div>
+                {updates?.info ? (
+                  <>
+                    <div className="settings-card-divider" />
+                    <div className="settings-card-row">
+                      <div>
+                        <div className="settings-card-label">可用版本 v{updates.info.version}</div>
+                        <div className="settings-card-help">{updates.info.mandatory ? '需要更新后继续使用。' : '可在合适的时候安装。'}</div>
+                      </div>
+                      <button type="button" className="settings-action-button" onClick={() => void updates.installUpdate()}>立即更新</button>
+                    </div>
+                  </>
+                ) : null}
+                {updates?.message ? <div className="settings-card-help" role="status">{updates.message}</div> : null}
+              </div>
+            </section>
+          </div>
+        ) : null}
       </section>
     </div>
   )
+}
+
+function formatAccountExpiry(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '未知'
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }

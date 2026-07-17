@@ -9,10 +9,6 @@
         "silent": true
       },
       "allowDowngrades": false,
-      "wix": {
-        "upgradeCode": "fb28a0ee-771a-5548-9ebb-b6a657501217",
-        "language": ["zh-CN"]
-      },
       "nsis": {
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico",

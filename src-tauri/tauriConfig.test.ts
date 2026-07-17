@@ -12,6 +12,13 @@ type TauriConfig = {
   bundle?: {
     icon?: string[]
     targets?: string[]
+    createUpdaterArtifacts?: boolean
+  }
+  version?: string
+  plugins?: {
+    updater?: {
+      pubkey?: string
+    }
   }
 }
 
@@ -54,5 +61,18 @@ describe('Tauri config', () => {
 
   it('builds only the NSIS installer on Windows', () => {
     expect(readWindowsConfig().bundle?.targets).toEqual(['nsis'])
+  })
+
+  it('keeps the client version and signed updater artifacts enabled', () => {
+    const config = readConfig()
+
+    expect(config.version).toBe('1.2.3')
+    expect(config.bundle?.createUpdaterArtifacts).toBe(true)
+    const updaterPublicKey = config.plugins?.updater?.pubkey ?? ''
+    const decodedPublicKey = Buffer.from(updaterPublicKey, 'base64').toString('utf8')
+
+    expect(updaterPublicKey.length % 4).toBe(0)
+    expect(Buffer.from(decodedPublicKey).toString('base64')).toBe(updaterPublicKey)
+    expect(decodedPublicKey).toMatch(/^untrusted comment: minisign public key:/)
   })
 })

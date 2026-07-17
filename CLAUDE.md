@@ -73,7 +73,7 @@ store 内维护 `undoStack` / `redoStack`，上限 100，存的是 `WorkspaceSna
 - 默认窗口：1280x800，最小 960x640，`dragDropEnabled: false`
 - bundle 图标：`src-tauri/icons/*`
 
-`src-tauri/tauri.windows.conf.json` 覆盖 Windows 打包，定义 NSIS/MSI、WebView2 download bootstrapper、WiX upgrade code、安装语言、currentUser 安装模式。修改 Windows 安装行为时必须读这个文件和 README 打包说明。
+`src-tauri/tauri.windows.conf.json` 覆盖 Windows 打包，定义 NSIS、WebView2 download bootstrapper、安装语言、currentUser 安装模式。修改 Windows 安装行为时必须读这个文件和 README 打包说明。
 
 ### Rust 入口
 

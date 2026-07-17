@@ -115,4 +115,11 @@ describe('mindmap static bundle', () => {
     expect(script).toContain("event.key !== 'Backspace'")
     expect(script).toContain("key: 'Delete'")
   })
+
+  it('disables the native browser context menu inside the hosted mindmap', () => {
+    const script = readFileSync(resolve(process.cwd(), 'public/mindmap-web/host-enhancements.js'), 'utf8')
+
+    expect(script).toContain("document.addEventListener('contextmenu', disableNativeContextMenu, true)")
+    expect(script).toContain('event.preventDefault()')
+  })
 })

@@ -505,6 +505,7 @@ impl Storage {
         })
     }
 
+    #[cfg(test)]
     pub fn append_mcp_page_blocks(
         &self,
         page_id: &str,

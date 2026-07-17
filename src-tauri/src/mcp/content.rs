@@ -2,6 +2,7 @@ use std::{fmt, fs, marker::PhantomData, path::Path};
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+#[cfg(test)]
 use rand::{distr::Alphanumeric, RngExt};
 use rmcp::schemars;
 use serde::{
@@ -540,6 +541,7 @@ impl<'de> DeserializeSeed<'de> for TableRowSeed {
     }
 }
 
+#[cfg(test)]
 pub(super) fn normalize_content(input: &AppendContentInput) -> StorageResult<Vec<Value>> {
     validate_input(input)?;
 
@@ -1309,6 +1311,7 @@ fn table_block(rows: Vec<Vec<String>>, has_header_row: bool) -> Value {
     Value::Object(block)
 }
 
+#[cfg(test)]
 fn random_suffix() -> String {
     rand::rng()
         .sample_iter(&Alphanumeric)
