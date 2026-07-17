@@ -30,6 +30,7 @@ interface AuthenticatedAppProps {
 
 const QQ_EMAIL_PATTERN = /^\d+@qq\.com$/i
 const PASSWORD_PATTERN = /^(?=.*[A-Za-z])(?=.*\d)[!-~]{8,16}$/
+const SESSION_VALIDATION_INTERVAL_MS = 30_000
 
 export function AuthenticatedApp({ accountClient, workspaceProps }: AuthenticatedAppProps = {}) {
   const client = useMemo(
@@ -37,32 +38,43 @@ export function AuthenticatedApp({ accountClient, workspaceProps }: Authenticate
     [accountClient],
   )
   const [session, setSession] = useState<AccountSession | null>(null)
+  const hasSession = session !== null
+  const sessionExpiresAt = session?.expiresAt
   const [isChecking, setIsChecking] = useState(client !== null)
   const [authError, setAuthError] = useState<AccountErrorShape | null>(null)
   const beforeLockRef = useRef<(() => Promise<void>) | null>(null)
   const restorePromiseRef = useRef<Promise<AccountSession | null> | null>(null)
   const validationPromiseRef = useRef<Promise<void> | null>(null)
+  const lockPromiseRef = useRef<Promise<void> | null>(null)
 
   const registerBeforeLock = useCallback((handler: (() => Promise<void>) | null) => {
     beforeLockRef.current = handler
   }, [])
 
   const clearAndLock = useCallback(
-    async (error?: AccountErrorShape) => {
-      try {
-        await beforeLockRef.current?.()
-      } catch {
-        // The workspace already exposes save failures; authentication still has to lock.
-      }
-      try {
-        await client?.clearSession()
-      } catch (clearError) {
-        setAuthError(normalizeAccountError(clearError))
-      }
-      setSession(null)
-      if (error) {
-        setAuthError(error)
-      }
+    (error?: AccountErrorShape) => {
+      if (lockPromiseRef.current) return lockPromiseRef.current
+      validationPromiseRef.current = null
+      const task = (async () => {
+        try {
+          await beforeLockRef.current?.()
+        } catch {
+          // The workspace already exposes save failures; authentication still has to lock.
+        }
+        try {
+          await client?.clearSession()
+        } catch (clearError) {
+          setAuthError(normalizeAccountError(clearError))
+        }
+        setSession(null)
+        if (error) {
+          setAuthError(error)
+        }
+      })().finally(() => {
+        if (lockPromiseRef.current === task) lockPromiseRef.current = null
+      })
+      lockPromiseRef.current = task
+      return task
     },
     [client],
   )
@@ -108,24 +120,37 @@ export function AuthenticatedApp({ accountClient, workspaceProps }: Authenticate
   }, [client])
 
   const validateSession = useCallback(() => {
-    if (!client || !session || validationPromiseRef.current) return
-    if (Date.parse(session.expiresAt) <= Date.now()) {
+    if (!client || !hasSession || validationPromiseRef.current || lockPromiseRef.current) return
+    const expiresAt = Date.parse(sessionExpiresAt ?? '')
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
       void clearAndLock()
       return
     }
     const task = client
       .validate()
-      .then(setSession)
-      .catch((error) => clearAndLock(normalizeAccountError(error)))
+      .then((nextSession) => {
+        if (validationPromiseRef.current === task) setSession(nextSession)
+      })
+      .catch((error) => {
+        if (validationPromiseRef.current === task) {
+          return clearAndLock(normalizeAccountError(error))
+        }
+      })
       .finally(() => {
         if (validationPromiseRef.current === task) validationPromiseRef.current = null
       })
     validationPromiseRef.current = task
-  }, [clearAndLock, client, session])
+  }, [clearAndLock, client, hasSession, sessionExpiresAt])
 
   useEffect(() => {
-    if (!session) return
-    const expiresAt = Date.parse(session.expiresAt)
+    if (!hasSession) return
+    const timer = window.setInterval(validateSession, SESSION_VALIDATION_INTERVAL_MS)
+    return () => window.clearInterval(timer)
+  }, [hasSession, validateSession])
+
+  useEffect(() => {
+    if (!hasSession) return
+    const expiresAt = Date.parse(sessionExpiresAt ?? '')
     if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
       void clearAndLock()
       return
@@ -134,10 +159,10 @@ export function AuthenticatedApp({ accountClient, workspaceProps }: Authenticate
       void clearAndLock()
     }, Math.min(expiresAt - Date.now(), 2_147_000_000))
     return () => window.clearTimeout(timer)
-  }, [clearAndLock, session])
+  }, [clearAndLock, hasSession, sessionExpiresAt])
 
   useEffect(() => {
-    if (!session) return
+    if (!hasSession) return
     let active = true
     let unlisten: (() => void) | null = null
     void registerDesktopWindowFocusChanged((focused) => {
@@ -152,18 +177,26 @@ export function AuthenticatedApp({ accountClient, workspaceProps }: Authenticate
       active = false
       unlisten?.()
     }
-  }, [session, validateSession])
+  }, [hasSession, validateSession])
 
-  const logout = useCallback(async () => {
-    if (!client) return
-    try {
-      await beforeLockRef.current?.()
-    } catch {
-      // Logout still removes the remote credential gate if a local save is already failing.
-    }
-    await client.logout()
-    setSession(null)
-    setAuthError(null)
+  const logout = useCallback(() => {
+    if (!client) return Promise.resolve()
+    if (lockPromiseRef.current) return lockPromiseRef.current
+    validationPromiseRef.current = null
+    const task = (async () => {
+      try {
+        await beforeLockRef.current?.()
+      } catch {
+        // Logout still removes the remote credential gate if a local save is already failing.
+      }
+      await client.logout()
+      setSession(null)
+      setAuthError(null)
+    })().finally(() => {
+      if (lockPromiseRef.current === task) lockPromiseRef.current = null
+    })
+    lockPromiseRef.current = task
+    return task
   }, [client])
 
   const accountContextValue = useMemo(
